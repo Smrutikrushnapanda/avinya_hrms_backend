@@ -8,6 +8,7 @@ import { join } from 'path';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { GlobalCacheModule } from './shared/cache.module';
 import { AuthCoreModule } from './modules/auth-core/auth-core.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AuthCoreModule } from './modules/auth-core/auth-core.module';
     }),
     GlobalCacheModule,
     AuthCoreModule,
+    AttendanceModule
   ],
   controllers: [AppController],
   providers: [
