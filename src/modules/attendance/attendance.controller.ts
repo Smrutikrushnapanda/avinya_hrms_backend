@@ -286,6 +286,50 @@ export class AttendanceController {
     return this.attendanceService.getDailyAttendance(userId, date);
   }
 
+  @Get('monthly')
+  @ApiOperation({ summary: 'Get attendance logs for a user by month' })
+  @ApiQuery({
+    name: 'userId',
+    type: 'string',
+    required: true,
+    example: '08936291-d8f4-4429-ac51-2879ea34df43',
+  })
+  @ApiQuery({ name: 'month', type: 'number', required: true, example: 7 }) // July
+  @ApiQuery({ name: 'year', type: 'number', required: true, example: 2025 })
+  @ApiOkResponse({
+    description: 'Attendance list for the given month',
+    schema: {
+      type: 'array',
+      items: { $ref: '#/components/schemas/Attendance' },
+    },
+  })
+  async getMonthlyAttendance(
+    @Query('userId') userId: string,
+    @Query('month') month: number,
+    @Query('year') year: number,
+  ) {
+    return this.attendanceService.getMonthlyAttendanceByUser(
+      userId,
+      month,
+      year,
+    );
+  }
+
+  @Post('process-daily-summary')
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: 'string',
+    example: '2025-07-13',
+  })
+  @ApiOperation({ summary: 'Generate attendance summary for a specific date' })
+  async processSummary(@Query('date') date?: string) {
+    await this.attendanceService.generateDailyAttendanceSummary(
+      date ? new Date(date) : undefined,
+    );
+    return { message: 'Summary generated' };
+  }
+
   // ⚠️ View today's anomaly logs
   @Get('anomalies/today')
   @ApiOperation({ summary: "Today's Anomalous Attendance Logs" })

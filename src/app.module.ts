@@ -9,6 +9,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { GlobalCacheModule } from './shared/cache.module';
 import { AuthCoreModule } from './modules/auth-core/auth-core.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { LeaveModule } from './modules/leave/leave.module';
 
 @Module({
   imports: [
@@ -20,7 +21,8 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
     }),
     GlobalCacheModule,
     AuthCoreModule,
-    AttendanceModule
+    AttendanceModule,
+    LeaveModule
   ],
   controllers: [AppController],
   providers: [

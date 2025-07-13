@@ -6,6 +6,7 @@ import { Attendance, AttendanceLog, BiometricDevice, WifiLocation } from './enti
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 import { Common } from '../common/common.service';
+import { LeaveRequest } from '../leave/entities';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Common } from '../common/common.service';
         Attendance,
         BiometricDevice,
         WifiLocation,
+        LeaveRequest
       ]),
   ],
   controllers: [AttendanceController],

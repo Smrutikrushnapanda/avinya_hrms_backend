@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, DeepPartial, Repository } from 'typeorm';
+import {
+  Between,
+  DeepPartial,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import {
   Attendance,
   AttendanceLog,
@@ -14,6 +20,8 @@ import {
 } from './dto';
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
+import { startOfDay, endOfDay } from 'date-fns';
+import { LeaveRequest } from '../leave/entities';
 
 @Injectable()
 export class AttendanceService {
@@ -29,6 +37,9 @@ export class AttendanceService {
 
     @InjectRepository(WifiLocation)
     private wifiRepo: Repository<WifiLocation>,
+
+    @InjectRepository(LeaveRequest)
+    private leaveRequestRepo: Repository<LeaveRequest>,
 
     private readonly common: Common,
   ) {}
@@ -208,7 +219,7 @@ export class AttendanceService {
         user: { id: userId },
         organization: { id: organizationId },
         timestamp: Between(from, to),
-        anomalyFlag: false
+        anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
     });
@@ -234,6 +245,25 @@ export class AttendanceService {
       },
       relations: ['user', 'organization'],
     });
+  }
+
+  async getMonthlyAttendanceByUser(
+    userId: string,
+    month: number,
+    year: number,
+  ): Promise<Attendance[]> {
+    const fromDate = new Date(year, month - 1, 1, 0, 0, 0);
+    const toDate = new Date(year, month, 0, 23, 59, 59);
+
+    return this.attendanceRepo
+      .createQueryBuilder('attendance')
+      .where('attendance.user_id = :userId', { userId })
+      .andWhere('attendance.attendance_date BETWEEN :from AND :to', {
+        from: fromDate.toISOString().split('T')[0],
+        to: toDate.toISOString().split('T')[0],
+      })
+      .orderBy('attendance.attendance_date', 'ASC')
+      .getMany();
   }
 
   async getTodayAnomalies(): Promise<AttendanceLog[]> {
@@ -282,5 +312,125 @@ export class AttendanceService {
       score: 0.92,
       verified: true,
     };
+  }
+
+  async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
+    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+    const dateStr = startOfDay.toISOString().split('T')[0];
+
+    // 1️⃣ Fetch attendance logs for the day (non-anomalous)
+    const logs = await this.attendanceLogRepo.find({
+      where: {
+        timestamp: Between(startOfDay, endOfDay),
+        anomalyFlag: false,
+      },
+      relations: ['user', 'organization'],
+      order: { timestamp: 'ASC' },
+    });
+
+    // 2️⃣ Fetch approved leave requests for the day
+    const leaveRequests = await this.leaveRequestRepo.find({
+      where: {
+        status: 'APPROVED',
+        startDate: LessThanOrEqual(dateStr),
+        endDate: MoreThanOrEqual(dateStr),
+      },
+      relations: ['user'],
+    });
+
+    // 3️⃣ Group logs and leaves
+    const logGroups = new Map<string, AttendanceLog[]>();
+    logs.forEach((log) => {
+      const key = `${log.user.id}|${log.organization.id}`;
+      if (!logGroups.has(key)) logGroups.set(key, []);
+      logGroups.get(key)!.push(log);
+    });
+
+    const leaveMap = new Map<string, LeaveRequest>();
+    leaveRequests.forEach((leave) => {
+      const key = `${leave.user.id}`;
+      leaveMap.set(key, leave);
+    });
+
+    const allUserOrgKeys = new Set([
+      ...Array.from(logGroups.keys()),
+      ...Array.from(leaveMap.keys()).map((userId) => {
+        const orgKey = Array.from(logGroups.keys()).find((k) =>
+          k.startsWith(`${userId}|`),
+        );
+        return orgKey ?? `${userId}|UNKNOWN`;
+      }),
+    ]);
+
+    for (const key of allUserOrgKeys) {
+      const [userId, organizationId] = key.split('|');
+
+      const logs = logGroups.get(key) ?? [];
+      const leave = leaveMap.get(userId);
+
+      const attendanceDate = dateStr;
+
+      const baseData: DeepPartial<Attendance> = {
+        user: { id: userId },
+        organization: {
+          id: organizationId !== 'UNKNOWN' ? organizationId : undefined,
+        },
+        attendanceDate,
+        processedAt: new Date(),
+      };
+
+      // 💼 If on leave
+      if (leave) {
+        baseData.status = 'on-leave';
+      }
+
+      // ✅ If attendance logs exist
+      else if (logs.length > 0) {
+        const inLog = logs.find((log) => log.type === 'check-in') ?? logs[0];
+        const outLog =
+          [...logs].reverse().find((log) => log.type === 'check-out') ?? inLog;
+
+        const workingMinutes = Math.floor(
+          (+outLog.timestamp - +inLog.timestamp) / 60000,
+        );
+
+        Object.assign(baseData, {
+          inTime: inLog.timestamp,
+          outTime: outLog.timestamp,
+          workingMinutes,
+          status: workingMinutes >= 240 ? 'present' : 'half-day',
+          inPhotoUrl: inLog.photoUrl,
+          inLatitude: inLog.latitude,
+          inLongitude: inLog.longitude,
+          inLocationAddress: inLog.locationAddress,
+          inWifiSsid: inLog.wifiSsid,
+          inWifiBssid: inLog.wifiBssid,
+          inDeviceInfo: inLog.deviceInfo,
+          outPhotoUrl: outLog.photoUrl,
+          outLatitude: outLog.latitude,
+          outLongitude: outLog.longitude,
+          outLocationAddress: outLog.locationAddress,
+          outWifiSsid: outLog.wifiSsid,
+          outWifiBssid: outLog.wifiBssid,
+          outDeviceInfo: outLog.deviceInfo,
+        });
+      }
+
+      // 🚫 No logs, no leave → mark as absent
+      else {
+        baseData.status = 'absent';
+      }
+
+      const existing = await this.attendanceRepo.findOne({
+        where: { user: { id: userId }, attendanceDate },
+      });
+
+      if (existing) {
+        await this.attendanceRepo.update(existing.id, baseData);
+      } else {
+        await this.attendanceRepo.save(this.attendanceRepo.create(baseData));
+      }
+    }
   }
 }
