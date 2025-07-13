@@ -38,7 +38,7 @@ export class AttendanceService {
 
     const wifi = this.wifiRepo.create({
       ...rest,
-      organization: { id: organizationId }, // ✅ assign relation object
+      organization: { id: organizationId },
     });
 
     return this.wifiRepo.save(wifi);
@@ -189,6 +189,38 @@ export class AttendanceService {
           status: 'success',
           data: saved,
         };
+  }
+
+  async getTodayLogsByUserOrg(
+    organizationId: string,
+    userId: string,
+  ): Promise<{
+    logs: AttendanceLog[];
+    punchInTime: Date | null;
+    lastPunch: Date | null;
+  }> {
+    const today = new Date();
+    const from = new Date(today.setHours(0, 0, 0, 0));
+    const to = new Date(today.setHours(23, 59, 59, 999));
+
+    const logs = await this.attendanceLogRepo.find({
+      where: {
+        user: { id: userId },
+        organization: { id: organizationId },
+        timestamp: Between(from, to),
+        anomalyFlag: false
+      },
+      order: { timestamp: 'ASC' },
+    });
+
+    const punchInTime = logs.length > 0 ? logs[0].timestamp : null;
+    const lastPunch = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+
+    return {
+      logs,
+      punchInTime,
+      lastPunch,
+    };
   }
 
   async getDailyAttendance(

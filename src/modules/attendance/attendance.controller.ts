@@ -30,6 +30,7 @@ import {
   ApiTags,
   ApiParam,
   ApiQuery,
+  ApiOkResponse,
 } from '@nestjs/swagger';
 
 @ApiTags('Attendance')
@@ -137,6 +138,130 @@ export class AttendanceController {
     reasons?: string[];
   }> {
     return this.attendanceService.logAttendance(dto, photo);
+  }
+
+  @Get('today-logs')
+  @ApiOperation({ summary: "Get today's logs by user and organization" })
+  @ApiQuery({
+    name: 'organizationId',
+    type: 'string',
+    required: true,
+    example: '24facd21-265a-4edd-8fd1-bc69a036f755',
+  })
+  @ApiQuery({
+    name: 'userId',
+    type: 'string',
+    required: true,
+    example: '08936291-d8f4-4429-ac51-2879ea34df43',
+  })
+  @ApiOkResponse({
+    description: "Today's attendance logs with punch-in and last punch info",
+    schema: {
+      type: 'object',
+      properties: {
+        logs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              timestamp: { type: 'string', format: 'date-time' },
+              type: {
+                type: 'string',
+                enum: ['check-in', 'check-out', 'break-start', 'break-end'],
+              },
+              source: {
+                type: 'string',
+                enum: ['mobile', 'web', 'biometric', 'wifi', 'manual'],
+              },
+              photoUrl: { type: 'string', format: 'uri' },
+              faceMatchScore: { type: 'number' },
+              faceVerified: { type: 'boolean' },
+              latitude: { type: 'string' },
+              longitude: { type: 'string' },
+              locationAddress: { type: 'string' },
+              wifiSsid: { type: 'string' },
+              wifiBssid: { type: 'string' },
+              deviceInfo: { type: 'string' },
+              anomalyFlag: { type: 'boolean' },
+              anomalyReason: { type: 'string', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+        punchInTime: { type: 'string', format: 'date-time' },
+        lastPunch: { type: 'string', format: 'date-time' },
+      },
+      example: {
+        logs: [
+          {
+            id: '5f44e190-da5f-48cb-89cf-8acb60d7c9c7',
+            timestamp: '2025-07-13T09:45:00.000Z',
+            type: 'check-in',
+            source: 'mobile',
+            photoUrl:
+              'https://storage.googleapis.com/hrms-global/images/attendance/08936291-d8f4-4429-ac51-2879ea34df43/1752383850351-a2e454fa-7222-404f-bb20-f5cd90be3cd1.jpg',
+            faceMatchScore: 0.92,
+            faceVerified: true,
+            latitude: '20.3494624',
+            longitude: '85.8078853',
+            locationAddress: 'DLF Cybercity, Bhubaneswar',
+            wifiSsid: 'Airtel_Pstech world',
+            wifiBssid: '106.215.147.214',
+            deviceInfo: 'Android v12, Samsung M12',
+            anomalyFlag: false,
+            anomalyReason: null,
+            createdAt: '2025-07-13T05:17:34.735Z',
+          },
+          {
+            id: '85fc08c0-8154-46c8-bce4-0b8041f15b61',
+            timestamp: '2025-07-13T09:45:00.000Z',
+            type: 'check-out',
+            source: 'mobile',
+            photoUrl:
+              'https://storage.googleapis.com/hrms-global/images/attendance/08936291-d8f4-4429-ac51-2879ea34df43/1752383913484-3c7d5e4b-f671-4157-9695-3b863c65cc51.jpg',
+            faceMatchScore: 0.92,
+            faceVerified: true,
+            latitude: '20.3494624',
+            longitude: '85.8078853',
+            locationAddress: 'DLF Cybercity, Bhubaneswar',
+            wifiSsid: 'Airtel_Pstech world',
+            wifiBssid: '106.215.147.214',
+            deviceInfo: 'Android v12, Samsung M12',
+            anomalyFlag: false,
+            anomalyReason: null,
+            createdAt: '2025-07-13T05:18:42.528Z',
+          },
+          {
+            id: '6946e858-9333-4970-a505-3af660e7e611',
+            timestamp: '2025-07-13T10:15:00.000Z',
+            type: 'check-out',
+            source: 'mobile',
+            photoUrl:
+              'https://storage.googleapis.com/hrms-global/images/attendance/08936291-d8f4-4429-ac51-2879ea34df43/1752383986552-e9f027c0-946d-4885-abf2-7370d8ea4f2c.jpg',
+            faceMatchScore: 0.92,
+            faceVerified: true,
+            latitude: '20.3494624',
+            longitude: '85.8078853',
+            locationAddress: 'DLF Cybercity, Bhubaneswar',
+            wifiSsid: 'Airtel_Pstech world',
+            wifiBssid: '106.215.147.214',
+            deviceInfo: 'Android v12, Samsung M12',
+            anomalyFlag: false,
+            anomalyReason: null,
+            createdAt: '2025-07-13T05:19:50.622Z',
+          },
+        ],
+        punchInTime: '2025-07-13T09:45:00.000Z',
+        lastPunch: '2025-07-13T10:15:00.000Z',
+      },
+    },
+  })
+  async getTodayLogsByUserOrg(
+    @Query('organizationId') organizationId: string,
+    @Query('userId') userId: string,
+  ) {
+    return this.attendanceService.getTodayLogsByUserOrg(organizationId, userId);
   }
 
   // 📅 Get daily attendance summary
