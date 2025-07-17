@@ -7,6 +7,7 @@ import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 import { Common } from '../common/common.service';
 import { LeaveRequest } from '../leave/entities';
+import { Holiday } from '../leave/entities';
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { LeaveRequest } from '../leave/entities';
         Attendance,
         BiometricDevice,
         WifiLocation,
-        LeaveRequest
+        LeaveRequest,
+        Holiday
       ]),
   ],
   controllers: [AttendanceController],

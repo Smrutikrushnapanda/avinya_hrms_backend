@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   UploadedFile,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import {
@@ -307,12 +308,30 @@ export class AttendanceController {
     @Query('userId') userId: string,
     @Query('month') month: number,
     @Query('year') year: number,
+    @Query('organizationId') organizationId: string,
   ) {
     return this.attendanceService.getMonthlyAttendanceByUser(
       userId,
       month,
       year,
+      organizationId
     );
+  }
+
+  @Get('holidays/financial-year')
+  @ApiOperation({ summary: 'Get holidays in a financial year' })
+  @ApiQuery({ name: 'organizationId', required: true, type: String })
+  @ApiQuery({ name: 'fromYear', required: true, type: String, description: 'Start year of financial year (e.g., 2025)' })
+  async getHolidaysForFinancialYear(
+    @Query('organizationId') organizationId: string,
+    @Query('fromYear') fromYear: string,
+  ) {
+    const year = parseInt(fromYear, 10);
+    if (!organizationId || isNaN(year)) {
+      throw new BadRequestException('Invalid organizationId or fromYear');
+    }
+
+    return this.attendanceService.getHolidaysForFinancialYear(organizationId, year);
   }
 
   @Post('process-daily-summary')

@@ -1,4 +1,4 @@
-export * from './holiday.entity';
+export * from '../../attendance/entities/holiday.entity';
 export * from './leave-approval-assignment.entity';
 export * from './leave-approval.entity';
 export * from './leave-balance.entity';

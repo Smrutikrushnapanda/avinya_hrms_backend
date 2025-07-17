@@ -21,7 +21,7 @@ import {
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
 import { startOfDay, endOfDay } from 'date-fns';
-import { LeaveRequest } from '../leave/entities';
+import { Holiday, LeaveRequest } from '../leave/entities';
 
 @Injectable()
 export class AttendanceService {
@@ -40,6 +40,9 @@ export class AttendanceService {
 
     @InjectRepository(LeaveRequest)
     private leaveRequestRepo: Repository<LeaveRequest>,
+
+    @InjectRepository(Holiday)
+    private holidayRepo: Repository<Holiday>,
 
     private readonly common: Common,
   ) {}
@@ -247,23 +250,122 @@ export class AttendanceService {
     });
   }
 
+  async getHolidaysForFinancialYear(
+    organizationId: string,
+    fromYear: number,
+  ): Promise<Holiday[]> {
+    const fromDate = new Date(fromYear, 3, 1); // April 1st (month is 0-indexed)
+    const toDate = new Date(fromYear + 1, 2, 31); // March 31st of next year
+
+    return this.holidayRepo.find({
+      where: {
+        organizationId,
+        date: Between(fromDate, toDate),
+      },
+      order: {
+        date: 'ASC',
+      },
+    });
+  }
+
   async getMonthlyAttendanceByUser(
     userId: string,
     month: number,
     year: number,
-  ): Promise<Attendance[]> {
-    const fromDate = new Date(year, month - 1, 1, 0, 0, 0);
-    const toDate = new Date(year, month, 0, 23, 59, 59);
+    organizationId: string,
+  ): Promise<
+    {
+      date: string;
+      status: Attendance['status'] | 'absent' | 'pending';
+      isSunday: boolean;
+      isHoliday: boolean;
+      holidayName?: string;
+      isOptional?: boolean;
+    }[]
+  > {
+    const formatDateLocal = (date: Date): string => {
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    };
 
-    return this.attendanceRepo
-      .createQueryBuilder('attendance')
-      .where('attendance.user_id = :userId', { userId })
-      .andWhere('attendance.attendance_date BETWEEN :from AND :to', {
-        from: fromDate.toISOString().split('T')[0],
-        to: toDate.toISOString().split('T')[0],
-      })
-      .orderBy('attendance.attendance_date', 'ASC')
-      .getMany();
+    const fromDate = new Date(year, month - 1, 1);
+    const toDate = new Date(year, month, 0);
+
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+
+    // Attendance records
+    const attendanceRecords = await this.attendanceRepo.find({
+      where: {
+        user: { id: userId },
+        attendanceDate: Between(
+          formatDateLocal(fromDate),
+          formatDateLocal(toDate),
+        ),
+      },
+      order: { attendanceDate: 'ASC' },
+    });
+
+    const attendanceMap = new Map<string, Attendance['status']>();
+    for (const entry of attendanceRecords) {
+      attendanceMap.set(entry.attendanceDate, entry.status);
+    }
+
+    // Holidays for the month
+    const holidays = await this.holidayRepo.find({
+      where: {
+        organizationId,
+        date: Between(fromDate, toDate),
+      },
+    });
+
+    const holidayMap = new Map<string, { name: string; isOptional: boolean }>();
+    for (const h of holidays) {
+      holidayMap.set(formatDateLocal(new Date(h.date)), {
+        name: h.name,
+        isOptional: h.isOptional,
+      });
+    }
+
+    const results: {
+      date: string;
+      status: Attendance['status'] | 'absent' | 'pending';
+      isSunday: boolean;
+      isHoliday: boolean;
+      holidayName?: string;
+      isOptional?: boolean;
+    }[] = [];
+
+    for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = formatDateLocal(d);
+      const isSunday = d.getDay() === 0;
+      const holidayInfo = holidayMap.get(dateStr);
+
+      let status: Attendance['status'] | 'absent' | 'pending';
+      const existingStatus = attendanceMap.get(dateStr);
+
+      if (existingStatus) {
+        status = existingStatus;
+      } else if (d > yesterday) {
+        status = 'pending';
+      } else {
+        status = 'absent';
+      }
+
+      results.push({
+        date: dateStr,
+        status,
+        isSunday,
+        isHoliday: !!holidayInfo,
+        holidayName: holidayInfo?.name,
+        isOptional: holidayInfo?.isOptional,
+      });
+    }
+
+    return results;
   }
 
   async getTodayAnomalies(): Promise<AttendanceLog[]> {
