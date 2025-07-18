@@ -20,7 +20,7 @@ import {
 } from './dto';
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
-import { startOfDay, endOfDay } from 'date-fns';
+import { startOfDay, endOfDay, format } from 'date-fns';
 import { Holiday, LeaveRequest } from '../leave/entities';
 
 @Injectable()
@@ -417,14 +417,14 @@ export class AttendanceService {
   }
 
   async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
-    const dateStr = startOfDay.toISOString().split('T')[0];
+    const start = startOfDay(date);
+    const end = endOfDay(date);
+    const dateStr = format(start, 'yyyy-MM-dd');
 
     // 1️⃣ Fetch attendance logs for the day (non-anomalous)
     const logs = await this.attendanceLogRepo.find({
       where: {
-        timestamp: Between(startOfDay, endOfDay),
+        timestamp: Between(start, end),
         anomalyFlag: false,
       },
       relations: ['user', 'organization'],
@@ -489,9 +489,15 @@ export class AttendanceService {
 
       // ✅ If attendance logs exist
       else if (logs.length > 0) {
-        const inLog = logs.find((log) => log.type === 'check-in') ?? logs[0];
+        /*const inLog = logs.find((log) => log.type === 'check-in') ?? logs[0];
         const outLog =
-          [...logs].reverse().find((log) => log.type === 'check-out') ?? inLog;
+          [...logs].reverse().find((log) => log.type === 'check-out') ?? inLog;*/
+        const sortedLogs = [...logs].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+        const inLog = sortedLogs[0];
+        const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
 
         const workingMinutes = Math.floor(
           (+outLog.timestamp - +inLog.timestamp) / 60000,
@@ -527,7 +533,6 @@ export class AttendanceService {
       const existing = await this.attendanceRepo.findOne({
         where: { user: { id: userId }, attendanceDate },
       });
-
       if (existing) {
         await this.attendanceRepo.update(existing.id, baseData);
       } else {

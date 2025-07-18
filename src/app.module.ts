@@ -10,6 +10,7 @@ import { GlobalCacheModule } from './shared/cache.module';
 import { AuthCoreModule } from './modules/auth-core/auth-core.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
+import { EmployeeModule } from './modules/employee/employee.module';
 
 @Module({
   imports: [
@@ -22,7 +23,8 @@ import { LeaveModule } from './modules/leave/leave.module';
     GlobalCacheModule,
     AuthCoreModule,
     AttendanceModule,
-    LeaveModule
+    LeaveModule,
+    EmployeeModule
   ],
   controllers: [AppController],
   providers: [
