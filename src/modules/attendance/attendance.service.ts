@@ -205,6 +205,90 @@ export class AttendanceService {
         };
   }
 
+  async getAttendanceByDateWithFilters(
+    organizationId: string,
+    date: string,
+    page = 1,
+    limit = 20,
+    search?: string,
+    status?: Attendance['status'],
+  ) {
+    const query = this.attendanceRepo
+      .createQueryBuilder('att')
+      .leftJoinAndSelect('att.user', 'user')
+      .where('att.organization_id = :organizationId', { organizationId })
+      .andWhere('att.attendanceDate = :date', { date });
+
+    if (status) {
+      query.andWhere('att.status = :status', { status });
+    }
+
+    if (search) {
+      query.andWhere(
+        `(user.firstName ILIKE :search OR user.middleName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search)`,
+        { search: `%${search}%` },
+      );
+    }
+
+    query
+      .orderBy('att.inTime', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [records, total] = await query.getManyAndCount();
+
+    const formatTime = (date?: Date): string | undefined => {
+      if (!date) return undefined;
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const suffix = +hours >= 12 ? 'PM' : 'AM';
+      const formattedHour = (+hours % 12 || 12).toString().padStart(2, '0');
+      return `${formattedHour}:${minutes} ${suffix}`;
+    };
+
+    const results = records.map((att) => ({
+      userId: att.user.id,
+      userName: [att.user.firstName, att.user.middleName, att.user.lastName]
+        .filter(Boolean)
+        .join(' '),
+      email: att.user.email,
+
+      status: att.status,
+      workingMinutes: att.workingMinutes ?? 0,
+
+      inTime: formatTime(att.inTime),
+      inPhotoUrl: att.inPhotoUrl,
+      inLatitude: att.inLatitude,
+      inLongitude: att.inLongitude,
+      inLocationAddress: att.inLocationAddress,
+      inWifiSsid: att.inWifiSsid,
+      inWifiBssid: att.inWifiBssid,
+      inDeviceInfo: att.inDeviceInfo,
+
+      outTime: formatTime(att.outTime),
+      outPhotoUrl: att.outPhotoUrl,
+      outLatitude: att.outLatitude,
+      outLongitude: att.outLongitude,
+      outLocationAddress: att.outLocationAddress,
+      outWifiSsid: att.outWifiSsid,
+      outWifiBssid: att.outWifiBssid,
+      outDeviceInfo: att.outDeviceInfo,
+
+      anomalyFlag: att.anomalyFlag,
+      anomalyReason: att.anomalyReason,
+    }));
+
+    return {
+      results,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   async getTodayLogsByUserOrg(
     organizationId: string,
     userId: string,
@@ -281,6 +365,8 @@ export class AttendanceService {
       isHoliday: boolean;
       holidayName?: string;
       isOptional?: boolean;
+      inTime?: string;
+      outTime?: string;
     }[]
   > {
     const formatDateLocal = (date: Date): string => {
@@ -290,6 +376,15 @@ export class AttendanceService {
       return `${yyyy}-${mm}-${dd}`;
     };
 
+    const formatTime = (date: Date | null): string | undefined => {
+      if (!date) return undefined;
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const suffix = +hours >= 12 ? 'PM' : 'AM';
+      const formattedHour = (+hours % 12 || 12).toString().padStart(2, '0');
+      return `${formattedHour}:${minutes} ${suffix}`;
+    };
+
     const fromDate = new Date(year, month - 1, 1);
     const toDate = new Date(year, month, 0);
 
@@ -297,7 +392,7 @@ export class AttendanceService {
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
 
-    // Attendance records
+    // 1. Attendance status map
     const attendanceRecords = await this.attendanceRepo.find({
       where: {
         user: { id: userId },
@@ -314,7 +409,31 @@ export class AttendanceService {
       attendanceMap.set(entry.attendanceDate, entry.status);
     }
 
-    // Holidays for the month
+    // 2. Attendance log map with inTime and outTime
+    const logRows = await this.attendanceLogRepo
+      .createQueryBuilder('log')
+      .select([
+        "TO_CHAR(log.timestamp, 'YYYY-MM-DD') AS date",
+        'MIN(log.timestamp) AS in_time',
+        'MAX(log.timestamp) AS out_time',
+      ])
+      .where('log.user_id = :userId', { userId })
+      .andWhere('log.timestamp BETWEEN :start AND :end', {
+        start: fromDate.toISOString(),
+        end: toDate.toISOString(),
+      })
+      .groupBy("TO_CHAR(log.timestamp, 'YYYY-MM-DD')")
+      .getRawMany();
+
+    const logMap = new Map<string, { inTime?: string; outTime?: string }>();
+    for (const log of logRows) {
+      const dateStr = log.date;
+      const inTime = formatTime(new Date(log.in_time));
+      const outTime = formatTime(new Date(log.out_time));
+      logMap.set(dateStr, { inTime, outTime });
+    }
+
+    // 3. Holiday map
     const holidays = await this.holidayRepo.find({
       where: {
         organizationId,
@@ -330,6 +449,7 @@ export class AttendanceService {
       });
     }
 
+    // 4. Build final result
     const results: {
       date: string;
       status: Attendance['status'] | 'absent' | 'pending';
@@ -337,6 +457,8 @@ export class AttendanceService {
       isHoliday: boolean;
       holidayName?: string;
       isOptional?: boolean;
+      inTime?: string;
+      outTime?: string;
     }[] = [];
 
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
@@ -344,16 +466,10 @@ export class AttendanceService {
       const isSunday = d.getDay() === 0;
       const holidayInfo = holidayMap.get(dateStr);
 
-      let status: Attendance['status'] | 'absent' | 'pending';
-      const existingStatus = attendanceMap.get(dateStr);
+      let status: Attendance['status'] | 'absent' | 'pending' =
+        attendanceMap.get(dateStr) ?? (d > yesterday ? 'pending' : 'absent');
 
-      if (existingStatus) {
-        status = existingStatus;
-      } else if (d > yesterday) {
-        status = 'pending';
-      } else {
-        status = 'absent';
-      }
+      const logInfo = logMap.get(dateStr);
 
       results.push({
         date: dateStr,
@@ -362,6 +478,8 @@ export class AttendanceService {
         isHoliday: !!holidayInfo,
         holidayName: holidayInfo?.name,
         isOptional: holidayInfo?.isOptional,
+        inTime: logInfo?.inTime,
+        outTime: logInfo?.outTime,
       });
     }
 
@@ -464,7 +582,7 @@ export class AttendanceService {
         return orgKey ?? `${userId}|UNKNOWN`;
       }),
     ]);
-
+    console.log(allUserOrgKeys);
     for (const key of allUserOrgKeys) {
       const [userId, organizationId] = key.split('|');
 

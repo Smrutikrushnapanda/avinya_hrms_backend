@@ -314,14 +314,19 @@ export class AttendanceController {
       userId,
       month,
       year,
-      organizationId
+      organizationId,
     );
   }
 
   @Get('holidays/financial-year')
   @ApiOperation({ summary: 'Get holidays in a financial year' })
   @ApiQuery({ name: 'organizationId', required: true, type: String })
-  @ApiQuery({ name: 'fromYear', required: true, type: String, description: 'Start year of financial year (e.g., 2025)' })
+  @ApiQuery({
+    name: 'fromYear',
+    required: true,
+    type: String,
+    description: 'Start year of financial year (e.g., 2025)',
+  })
   async getHolidaysForFinancialYear(
     @Query('organizationId') organizationId: string,
     @Query('fromYear') fromYear: string,
@@ -331,7 +336,54 @@ export class AttendanceController {
       throw new BadRequestException('Invalid organizationId or fromYear');
     }
 
-    return this.attendanceService.getHolidaysForFinancialYear(organizationId, year);
+    return this.attendanceService.getHolidaysForFinancialYear(
+      organizationId,
+      year,
+    );
+  }
+
+  @Get('by-date')
+  @ApiQuery({ name: 'organizationId', required: true })
+  @ApiQuery({ name: 'date', required: true, description: 'Format: YYYY-MM-DD' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Records per page',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Search by name or email',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['PRESENT', 'ABSENT', 'HALF_DAY'],
+    description: 'Filter by status',
+  })
+  async getAttendanceByDate(
+    @Query('organizationId') organizationId: string,
+    @Query('date') date: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query('search') search?: string,
+    @Query('status') status?: Attendance['status'],
+  ) {
+    return this.attendanceService.getAttendanceByDateWithFilters(
+      organizationId,
+      date,
+      page,
+      limit,
+      search,
+      status,
+    );
   }
 
   @Post('process-daily-summary')
