@@ -20,7 +20,8 @@ import {
 } from './dto';
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
-import { startOfDay, endOfDay, format } from 'date-fns';
+import { startOfDay, endOfDay, format as formatLocal } from 'date-fns';
+import { toZonedTime, format as formatTZ } from 'date-fns-tz';
 import { Holiday, LeaveRequest } from '../leave/entities';
 
 @Injectable()
@@ -211,7 +212,7 @@ export class AttendanceService {
     page = 1,
     limit = 20,
     search?: string,
-    status?: Attendance['status'],
+    status?: Attendance['status'] | 'all',
   ) {
     const query = this.attendanceRepo
       .createQueryBuilder('att')
@@ -219,7 +220,7 @@ export class AttendanceService {
       .where('att.organization_id = :organizationId', { organizationId })
       .andWhere('att.attendanceDate = :date', { date });
 
-    if (status) {
+    if (status && status !== 'all') {
       query.andWhere('att.status = :status', { status });
     }
 
@@ -376,13 +377,15 @@ export class AttendanceService {
       return `${yyyy}-${mm}-${dd}`;
     };
 
-    const formatTime = (date: Date | null): string | undefined => {
+    const formatTime = (
+      date: Date | string | null,
+      timeZone = 'Asia/Kolkata',
+    ): string | undefined => {
       if (!date) return undefined;
-      const hours = date.getHours().toString().padStart(2, '0');
-      const minutes = date.getMinutes().toString().padStart(2, '0');
-      const suffix = +hours >= 12 ? 'PM' : 'AM';
-      const formattedHour = (+hours % 12 || 12).toString().padStart(2, '0');
-      return `${formattedHour}:${minutes} ${suffix}`;
+
+      const parsedDate = typeof date === 'string' ? new Date(date) : date;
+      const zonedDate = toZonedTime(parsedDate, timeZone); // converts to IST
+      return formatTZ(zonedDate, 'hh:mm a'); // uses date-fns-tz formatter
     };
 
     const fromDate = new Date(year, month - 1, 1);
@@ -428,8 +431,8 @@ export class AttendanceService {
     const logMap = new Map<string, { inTime?: string; outTime?: string }>();
     for (const log of logRows) {
       const dateStr = log.date;
-      const inTime = formatTime(new Date(log.in_time));
-      const outTime = formatTime(new Date(log.out_time));
+      const inTime = formatTime(log.in_time);
+      const outTime = formatTime(log.out_time);
       logMap.set(dateStr, { inTime, outTime });
     }
 
@@ -537,7 +540,7 @@ export class AttendanceService {
   async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
     const start = startOfDay(date);
     const end = endOfDay(date);
-    const dateStr = format(start, 'yyyy-MM-dd');
+    const dateStr = formatLocal(start, 'yyyy-MM-dd');
 
     // 1️⃣ Fetch attendance logs for the day (non-anomalous)
     const logs = await this.attendanceLogRepo.find({
@@ -582,7 +585,7 @@ export class AttendanceService {
         return orgKey ?? `${userId}|UNKNOWN`;
       }),
     ]);
-    console.log(allUserOrgKeys);
+
     for (const key of allUserOrgKeys) {
       const [userId, organizationId] = key.split('|');
 
