@@ -10,10 +10,7 @@ async function bootstrap() {
   app.use(cookieParser());
 
   const allowedOrigins = [
-    'https://recruitment-frontend-346486007446.asia-south1.run.app',
-    'https://recruitment.panchsofttechnologies.com',
-    'https://ohc-aso.recruitmentedge.in',
-    'https://oreda.recruitmentedge.in',
+    'https://hrms-app-frontend.vercel.app'
   ];
 
   if (process.env.NODE_ENV !== 'production') {

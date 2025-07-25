@@ -217,6 +217,12 @@ export class AttendanceService {
     const query = this.attendanceRepo
       .createQueryBuilder('att')
       .leftJoinAndSelect('att.user', 'user')
+      .leftJoin(
+        'employees',
+        'emp',
+        'emp.user_id = user.id AND emp.organization_id = :organizationId',
+        { organizationId },
+      ) // join employees table
       .where('att.organization_id = :organizationId', { organizationId })
       .andWhere('att.attendanceDate = :date', { date });
 
@@ -226,17 +232,23 @@ export class AttendanceService {
 
     if (search) {
       query.andWhere(
-        `(user.firstName ILIKE :search OR user.middleName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search)`,
+        `(user.firstName ILIKE :search OR user.middleName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search OR emp.employee_code ILIKE :search)`,
         { search: `%${search}%` },
       );
     }
 
     query
+      .addSelect([
+        'emp.employee_code AS "employeeCode"',
+        'emp.photo_url AS "photoUrl"',
+      ])
       .orderBy('att.inTime', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
-    const [records, total] = await query.getManyAndCount();
+    const rawResults = await query.getRawAndEntities();
+    const records = rawResults.entities;
+    const raw = rawResults.raw;
 
     const formatTime = (date?: Date): string | undefined => {
       if (!date) return undefined;
@@ -247,12 +259,15 @@ export class AttendanceService {
       return `${formattedHour}:${minutes} ${suffix}`;
     };
 
-    const results = records.map((att) => ({
+    const results = records.map((att, i) => ({
       userId: att.user.id,
       userName: [att.user.firstName, att.user.middleName, att.user.lastName]
         .filter(Boolean)
         .join(' '),
       email: att.user.email,
+
+      employeeCode: raw[i].employeeCode,
+      profileImage: raw[i].photoUrl,
 
       status: att.status,
       workingMinutes: att.workingMinutes ?? 0,
@@ -282,10 +297,10 @@ export class AttendanceService {
     return {
       results,
       pagination: {
-        total,
+        total: rawResults.entities.length,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(rawResults.entities.length / limit),
       },
     };
   }
@@ -368,6 +383,8 @@ export class AttendanceService {
       isOptional?: boolean;
       inTime?: string;
       outTime?: string;
+      inPhotoUrl?: string;
+      outPhotoUrl?: string;
     }[]
   > {
     const formatDateLocal = (date: Date): string => {
@@ -382,10 +399,9 @@ export class AttendanceService {
       timeZone = 'Asia/Kolkata',
     ): string | undefined => {
       if (!date) return undefined;
-
       const parsedDate = typeof date === 'string' ? new Date(date) : date;
-      const zonedDate = toZonedTime(parsedDate, timeZone); // converts to IST
-      return formatTZ(zonedDate, 'hh:mm a'); // uses date-fns-tz formatter
+      const zonedDate = toZonedTime(parsedDate, timeZone);
+      return formatTZ(zonedDate, 'hh:mm a');
     };
 
     const fromDate = new Date(year, month - 1, 1);
@@ -395,7 +411,7 @@ export class AttendanceService {
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
 
-    // 1. Attendance status map
+    // 1. Attendance full record map
     const attendanceRecords = await this.attendanceRepo.find({
       where: {
         user: { id: userId },
@@ -407,12 +423,12 @@ export class AttendanceService {
       order: { attendanceDate: 'ASC' },
     });
 
-    const attendanceMap = new Map<string, Attendance['status']>();
+    const attendanceMap = new Map<string, Attendance>();
     for (const entry of attendanceRecords) {
-      attendanceMap.set(entry.attendanceDate, entry.status);
+      attendanceMap.set(entry.attendanceDate, entry);
     }
 
-    // 2. Attendance log map with inTime and outTime
+    // 2. Log map
     const logRows = await this.attendanceLogRepo
       .createQueryBuilder('log')
       .select([
@@ -452,7 +468,7 @@ export class AttendanceService {
       });
     }
 
-    // 4. Build final result
+    // 4. Final result
     const results: {
       date: string;
       status: Attendance['status'] | 'absent' | 'pending';
@@ -462,6 +478,8 @@ export class AttendanceService {
       isOptional?: boolean;
       inTime?: string;
       outTime?: string;
+      inPhotoUrl?: string;
+      outPhotoUrl?: string;
     }[] = [];
 
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
@@ -469,10 +487,11 @@ export class AttendanceService {
       const isSunday = d.getDay() === 0;
       const holidayInfo = holidayMap.get(dateStr);
 
-      let status: Attendance['status'] | 'absent' | 'pending' =
-        attendanceMap.get(dateStr) ?? (d > yesterday ? 'pending' : 'absent');
-
+      const attendanceEntry = attendanceMap.get(dateStr);
       const logInfo = logMap.get(dateStr);
+
+      let status: Attendance['status'] | 'absent' | 'pending' =
+        attendanceEntry?.status ?? (d > yesterday ? 'pending' : 'absent');
 
       results.push({
         date: dateStr,
@@ -483,6 +502,8 @@ export class AttendanceService {
         isOptional: holidayInfo?.isOptional,
         inTime: logInfo?.inTime,
         outTime: logInfo?.outTime,
+        inPhotoUrl: attendanceEntry?.inPhotoUrl,
+        outPhotoUrl: attendanceEntry?.outPhotoUrl,
       });
     }
 
@@ -628,7 +649,12 @@ export class AttendanceService {
           inTime: inLog.timestamp,
           outTime: outLog.timestamp,
           workingMinutes,
-          status: workingMinutes >= 240 ? 'present' : 'half-day',
+          status:
+            workingMinutes < 160
+              ? 'absent'
+              : workingMinutes >= 480
+                ? 'present'
+                : 'half-day',
           inPhotoUrl: inLog.photoUrl,
           inLatitude: inLog.latitude,
           inLongitude: inLog.longitude,

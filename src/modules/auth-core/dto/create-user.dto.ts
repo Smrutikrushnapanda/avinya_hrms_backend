@@ -41,8 +41,8 @@ export class CreateUserDto {
   dob?: string;
 
   @IsOptional()
-  @IsIn(['MALE', 'FEMALE', 'TRANSGENDER'], { message: 'Gender must be MALE, FEMALE or TRANSGENDER' })
-  gender?: 'MALE' | 'FEMALE' | 'TRANSGENDER';
+  @IsIn(['MALE', 'FEMALE', 'OTHER'], { message: 'Gender must be MALE, FEMALE or OTHER' })
+  gender?: 'MALE' | 'FEMALE' | 'OTHER';
 
   @IsUUID('4', { message: 'organizationId must be a valid UUID' })
   organizationId: string;

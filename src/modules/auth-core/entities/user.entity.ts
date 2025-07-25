@@ -47,6 +47,9 @@ export class User {
   @JoinColumn({ name: 'organization_id' })
   organization: Organization;
 
+  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
+  organizationId: string;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

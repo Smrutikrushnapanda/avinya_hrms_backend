@@ -13,9 +13,6 @@ export class CreateEmployeeDto {
   @IsUUID()
   organizationId: string;
 
-  @IsUUID()
-  userId: string;
-
   @IsOptional()
   @IsUUID()
   departmentId?: string;
@@ -38,7 +35,6 @@ export class CreateEmployeeDto {
   @IsOptional()
   middleName?: string;
 
-  @IsOptional()
   @IsString()
   @Length(1, 100)
   lastName?: string;
