@@ -318,6 +318,21 @@ export class AttendanceController {
     );
   }
 
+  @Get('daily-stats')
+  async getDailyStats(
+    @Query('organizationId') organizationId: string,
+    @Query('date') dateStr: string, // format: 'YYYY-MM-DD'
+  ) {
+    if (!organizationId || !dateStr) {
+      throw new Error('Missing organizationId or date');
+    }
+
+    return this.attendanceService.getDailyAttendanceStatsWithComparison(
+      organizationId,
+      dateStr,
+    );
+  }
+
   @Get('holidays/financial-year')
   @ApiOperation({ summary: 'Get holidays in a financial year' })
   @ApiQuery({ name: 'organizationId', required: true, type: String })

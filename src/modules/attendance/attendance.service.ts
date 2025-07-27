@@ -305,6 +305,113 @@ export class AttendanceService {
     };
   }
 
+  async getDailyAttendanceStatsWithComparison(
+    organizationId: string,
+    dateStr: string,
+  ) {
+    const getStats = async (date: string) => {
+      const attendance = await this.attendanceRepo.find({
+        where: {
+          organization: { id: organizationId },
+          attendanceDate: date,
+        },
+      });
+
+      const total_present = attendance.filter(
+        (a) => a.status === 'present' || a.status === 'half-day',
+      ).length;
+
+      const earlyClockIn = attendance.filter((a) => {
+        if (!a.inTime) return false;
+        const inTime = new Date(a.inTime);
+        const clockLimit = new Date(a.attendanceDate);
+        clockLimit.setHours(10, 0, 0, 0); // 10:00 AM on that date
+        return inTime <= clockLimit;
+      }).length;
+
+      const lateClockIn = attendance.filter((a) => {
+        if (!a.inTime) return false;
+        const inTime = new Date(a.inTime);
+        const clockLimit = new Date(a.attendanceDate);
+        clockLimit.setHours(10, 0, 0, 0); // 10:00 AM
+        return inTime > clockLimit;
+      }).length;
+
+      const notPresentSummary = {
+        absent: attendance.filter((a) => a.status === 'absent').length,
+        noClockIn: attendance.filter((a) => !a.inTime).length,
+        noClockOut: attendance.filter((a) => !a.outTime).length,
+        invalid: attendance.filter((a) => a.anomalyFlag).length,
+      };
+
+      return {
+        presentSummary: {
+          total_present,
+          earlyClockIn,
+          lateClockIn,
+        },
+        notPresentSummary,
+      };
+    };
+
+    const todayStats = await getStats(dateStr);
+
+    const yesterday = new Date(dateStr);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    const yesterdayStats = await getStats(yesterdayStr);
+
+    const diff = (today: number, yest: number) => today - yest;
+
+    return {
+      date: dateStr,
+      presentSummary: {
+        total_present: todayStats.presentSummary.total_present,
+        total_presentDiff: diff(
+          todayStats.presentSummary.total_present,
+          yesterdayStats.presentSummary.total_present,
+        ),
+
+        earlyClockIn: todayStats.presentSummary.earlyClockIn,
+        earlyClockInDiff: diff(
+          todayStats.presentSummary.earlyClockIn,
+          yesterdayStats.presentSummary.earlyClockIn,
+        ),
+
+        lateClockIn: todayStats.presentSummary.lateClockIn,
+        lateClockInDiff: diff(
+          todayStats.presentSummary.lateClockIn,
+          yesterdayStats.presentSummary.lateClockIn,
+        ),
+      },
+      notPresentSummary: {
+        absent: todayStats.notPresentSummary.absent,
+        absentDiff: diff(
+          todayStats.notPresentSummary.absent,
+          yesterdayStats.notPresentSummary.absent,
+        ),
+
+        noClockIn: todayStats.notPresentSummary.noClockIn,
+        noClockInDiff: diff(
+          todayStats.notPresentSummary.noClockIn,
+          yesterdayStats.notPresentSummary.noClockIn,
+        ),
+
+        noClockOut: todayStats.notPresentSummary.noClockOut,
+        noClockOutDiff: diff(
+          todayStats.notPresentSummary.noClockOut,
+          yesterdayStats.notPresentSummary.noClockOut,
+        ),
+
+        invalid: todayStats.notPresentSummary.invalid,
+        invalidDiff: diff(
+          todayStats.notPresentSummary.invalid,
+          yesterdayStats.notPresentSummary.invalid,
+        ),
+      },
+    };
+  }
+
   async getTodayLogsByUserOrg(
     organizationId: string,
     userId: string,
