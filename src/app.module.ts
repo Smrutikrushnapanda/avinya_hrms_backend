@@ -11,6 +11,7 @@ import { AuthCoreModule } from './modules/auth-core/auth-core.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { EmployeeModule } from './modules/employee/employee.module';
+import { PollsModule } from './modules/poll/polls.module';
 
 @Module({
   imports: [
@@ -24,7 +25,8 @@ import { EmployeeModule } from './modules/employee/employee.module';
     AuthCoreModule,
     AttendanceModule,
     LeaveModule,
-    EmployeeModule
+    EmployeeModule,
+    PollsModule
   ],
   controllers: [AppController],
   providers: [
