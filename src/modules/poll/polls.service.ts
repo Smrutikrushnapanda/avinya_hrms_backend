@@ -65,6 +65,7 @@ export class PollsService {
 
   async getActivePoll(): Promise<Poll | null> {
     const now = new Date();
+
     return this.pollRepo.findOne({
       where: [
         {
@@ -76,7 +77,7 @@ export class PollsService {
           end_time: IsNull(),
         },
       ],
-      relations: ['questions'],
+      relations: ['questions', 'questions.options'], // Include nested options
       order: { start_time: 'DESC' },
     });
   }
