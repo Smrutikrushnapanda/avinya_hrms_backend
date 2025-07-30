@@ -7,6 +7,16 @@ import { PollQuestion } from './entities/poll-question.entity';
 import { CreateQuestionDto, QuestionType } from './dto/create-question.dto';
 import { PollOption } from './entities/poll-option.entity';
 import { DateTime } from 'luxon';
+import { PollResponse } from './entities/poll-response.entity';
+
+interface CreatePollResponseDto {
+  poll_id: string;
+  question_id: string;
+  user_id?: string;
+  option_ids: string[];
+  response_text?: string;
+  response_rating?: number;
+}
 
 @Injectable()
 export class PollsService {
@@ -17,6 +27,8 @@ export class PollsService {
     private questionRepo: Repository<PollQuestion>,
     @InjectRepository(PollOption)
     private optionRepo: Repository<PollOption>,
+    @InjectRepository(PollResponse)
+    private readonly pollResponseRepo: Repository<PollResponse>,
   ) {}
 
   async createPoll(dto: CreatePollDto) {
@@ -63,10 +75,13 @@ export class PollsService {
     return { message: 'Poll created successfully', pollId: poll.id };
   }
 
-  async getActivePoll(): Promise<Poll | null> {
+  async getActivePoll(userId?: string): Promise<{
+    poll: Poll;
+    responses: PollResponse[];
+  } | null> {
     const now = new Date();
 
-    return this.pollRepo.findOne({
+    const poll = await this.pollRepo.findOne({
       where: [
         {
           start_time: LessThanOrEqual(now),
@@ -77,9 +92,28 @@ export class PollsService {
           end_time: IsNull(),
         },
       ],
-      relations: ['questions', 'questions.options'], // Include nested options
+      relations: ['questions', 'questions.options'],
       order: { start_time: 'DESC' },
     });
+
+    if (!poll) return null;
+
+    let userResponses: PollResponse[] = [];
+
+    if (userId) {
+      userResponses = await this.pollResponseRepo.find({
+        where: {
+          poll_id: poll.id,
+          user_id: userId,
+        },
+        relations: ['question'],
+      });
+    }
+
+    return {
+      poll,
+      responses: userResponses,
+    };
   }
 
   async findAll(): Promise<Poll[]> {
@@ -108,5 +142,10 @@ export class PollsService {
       where: { id: pollId },
       order: { question_order: 'ASC' },
     });
+  }
+
+  async submitResponse(data: CreatePollResponseDto): Promise<PollResponse> {
+    const response = this.pollResponseRepo.create(data);
+    return this.pollResponseRepo.save(response);
   }
 }
