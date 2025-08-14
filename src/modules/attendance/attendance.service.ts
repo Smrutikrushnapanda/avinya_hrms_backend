@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { startOfDay, endOfDay, format as formatLocal } from 'date-fns';
 import { toZonedTime, format as formatTZ } from 'date-fns-tz';
 import { Holiday, LeaveRequest } from '../leave/entities';
+import { DateTime } from 'luxon';
 
 @Injectable()
 export class AttendanceService {
@@ -254,10 +255,17 @@ export class AttendanceService {
 
     const formatTime = (date?: Date): string | undefined => {
       if (!date) return undefined;
-      const hours = date.getHours().toString().padStart(2, '0');
-      const minutes = date.getMinutes().toString().padStart(2, '0');
-      const suffix = +hours >= 12 ? 'PM' : 'AM';
-      const formattedHour = (+hours % 12 || 12).toString().padStart(2, '0');
+
+      // Convert from UTC to Asia/Kolkata
+      const local = DateTime.fromJSDate(date, { zone: 'utc' }).setZone(
+        'Asia/Kolkata',
+      );
+
+      const hours = local.hour.toString().padStart(2, '0');
+      const minutes = local.minute.toString().padStart(2, '0');
+      const suffix = local.hour >= 12 ? 'PM' : 'AM';
+      const formattedHour = (local.hour % 12 || 12).toString().padStart(2, '0');
+
       return `${formattedHour}:${minutes} ${suffix}`;
     };
 
