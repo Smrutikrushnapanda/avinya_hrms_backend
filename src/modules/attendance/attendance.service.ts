@@ -126,31 +126,33 @@ export class AttendanceService {
 
     // 3a. Wi-Fi + GPS
     if (enableWifiValidation && wifiBssid) {
-      const knownWifi = await this.wifiRepo.findOne({
+      const knownWifis = await this.wifiRepo.find({
         where: {
           organization: { id: organizationId },
-          bssid: wifiBssid,
           isActive: true,
         },
+        select: ['bssid', 'latitude', 'longitude', 'allowedRadiusMeters'],
       });
 
-      if (!knownWifi) {
+      const matchedWifi = knownWifis.find((wifi) => wifi.bssid === wifiBssid);
+
+      if (!matchedWifi) {
         anomalyFlag = true;
         anomalyReasons.push('Unrecognized Wi-Fi');
       } else if (
         enableGPSValidation &&
         latitude != null &&
         longitude != null &&
-        knownWifi.latitude != null &&
-        knownWifi.longitude != null
+        matchedWifi.latitude != null &&
+        matchedWifi.longitude != null
       ) {
         const distance = this.calculateDistance(
           latitude,
           longitude,
-          knownWifi.latitude,
-          knownWifi.longitude,
+          matchedWifi.latitude,
+          matchedWifi.longitude,
         );
-        if (distance > (knownWifi.allowedRadiusMeters ?? 50)) {
+        if (distance > (matchedWifi.allowedRadiusMeters ?? 50)) {
           anomalyFlag = true;
           anomalyReasons.push('GPS location mismatch for Wi-Fi');
         }

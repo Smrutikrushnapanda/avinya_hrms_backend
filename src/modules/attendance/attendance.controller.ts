@@ -33,6 +33,7 @@ import {
   ApiQuery,
   ApiOkResponse,
 } from '@nestjs/swagger';
+import { DateTime } from 'luxon';
 
 @ApiTags('Attendance')
 @Controller('attendance')
@@ -410,9 +411,13 @@ export class AttendanceController {
   })
   @ApiOperation({ summary: 'Generate attendance summary for a specific date' })
   async processSummary(@Query('date') date?: string) {
-    await this.attendanceService.generateDailyAttendanceSummary(
-      date ? new Date(date) : undefined,
-    );
+    // If no date passed, use today's date in Asia/Kolkata
+    const finalDate = date
+      ? new Date(date)
+      : new Date(DateTime.now().setZone('Asia/Kolkata').toISODate());
+  
+    await this.attendanceService.generateDailyAttendanceSummary(finalDate);
+    console.log(`Attendance summary generated for date ${finalDate}`);
     return { message: 'Summary generated' };
   }
 
