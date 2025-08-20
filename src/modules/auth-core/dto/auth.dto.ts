@@ -24,5 +24,6 @@ export interface JwtPayload {
   mobileNumber: string;
   organizationId: string;
   roles: { id: string; roleName: string }[];
+  permissions: { id: string; permissionName: string }[];
   mustChangePassword: boolean;
 }

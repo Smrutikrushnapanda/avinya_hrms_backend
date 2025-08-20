@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 
 export interface UserWithRoles extends User {
   roles: { id: string; roleName: string }[];
+  permissions: { id: string; permissionName: string }[];
 }
 @Injectable()
 export class AuthService {
@@ -34,6 +35,7 @@ export class AuthService {
       mobileNumber: user.mobileNumber,
       organizationId: user.organization.id,
       roles: user.roles,
+      permissions: user.permissions,
       mustChangePassword: user.mustChangePassword,
     };
     return {

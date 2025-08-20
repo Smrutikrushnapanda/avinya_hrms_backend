@@ -162,19 +162,6 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiCookieAuth()
   getProfile(@GetUser() user: any) {
-    return {
-      userId: user.userId,
-      userName: user.userName,
-      firstName: user.firstName,
-      middleName: user.middleName,
-      lastName: user.lastName,
-      gender: user.gender,
-      dob: user.dob,
-      email: user.email,
-      mobileNumber: user.mobileNumber,
-      organizationId: user.organizationId,
-      roles: user.roles,
-      mustChangePassword: user.mustChangePassword,
-    };
+    return user;
   }
 }
