@@ -7,16 +7,31 @@ import {
   Put,
   Delete,
   Query,
+  UseGuards, // <-- 1. Import UseGuards
 } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard'; // <-- 2. Import JwtAuthGuard
+import { GetUser } from '../auth-core/decorators/get-user.decorator'; // <-- 3. Import GetUser decorator
+import { User } from '../auth-core/entities/user.entity'; // <-- 4. Import User entity
 
 @ApiTags('Employees')
 @Controller('employees')
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
+
+  // --- NEW DASHBOARD ENDPOINT ---
+  @Get('dashboard-stats')
+  @UseGuards(JwtAuthGuard) // Protect this endpoint
+  @ApiOperation({ summary: 'Get dashboard stats for the organization' })
+  @ApiResponse({ status: 200, description: 'Return dashboard stats.' })
+  getDashboardStats(@GetUser() user: User) {
+    // Get the organizationId from the authenticated user
+    return this.employeeService.getDashboardStats(user.organizationId);
+  }
+  // -----------------------------
 
   @Post()
   @ApiOperation({ summary: 'Create a new employee' })
