@@ -18,6 +18,7 @@ async function bootstrap() {
     allowedOrigins.push('http://192.168.1.62:3000');
   }
 
+  
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
