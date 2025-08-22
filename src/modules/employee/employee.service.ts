@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -8,6 +8,8 @@ import { UserRole } from '../auth-core/entities/user-role.entity';
 import { CreateUserDto } from '../auth-core/dto/create-user.dto';
 import { Role } from '../auth-core/entities/role.entity';
 import { UsersService } from '../auth-core/services/users.service';
+import { Attendance } from '../attendance/entities/attendance.entity';
+import { LeaveRequest } from '../leave/entities/leave-request.entity';
 
 @Injectable()
 export class EmployeeService {
@@ -22,10 +24,10 @@ export class EmployeeService {
     private readonly roleRepository: Repository<Role>,
 
     private readonly userService: UsersService,
+    private readonly entityManager: EntityManager,
   ) {}
 
   async create(dto: CreateEmployeeDto) {
-    // 1. Create the user from employee fields
     const userDto: CreateUserDto = {
       userName: dto.employeeCode,
       password: 'Ab@2025',
@@ -41,7 +43,6 @@ export class EmployeeService {
 
     const createdUser = await this.userService.create(userDto);
 
-    // 2. Assign "employee" role (fetch by slug or name)
     const role = await this.roleRepository.findOne({
       where: { roleName: 'EMPLOYEE' },
     });
@@ -55,7 +56,6 @@ export class EmployeeService {
 
     await this.userRoleRepository.save(userRole);
 
-    // 3. Create the employee using created user ID
     const employee = this.employeeRepository.create({
       ...dto,
       userId: createdUser.id,
@@ -74,7 +74,7 @@ export class EmployeeService {
   findAll(organizationId: string) {
     return this.employeeRepository.find({
       where: { organizationId },
-      relations: ['department', 'designation', 'reportingTo'],
+      relations: ['department', 'designation', 'manager'],
       order: { firstName: 'ASC' },
     });
   }
@@ -82,7 +82,7 @@ export class EmployeeService {
   findOne(id: string) {
     return this.employeeRepository.findOne({
       where: { id },
-      relations: ['department', 'designation', 'reportingTo'],
+      relations: ['department', 'designation', 'manager'],
     });
   }
 
@@ -99,5 +99,82 @@ export class EmployeeService {
     }
 
     return this.employeeRepository.remove(employee);
+  }
+
+  // --- CORRECTED DASHBOARD STATS ---
+  async getDashboardStats(organizationId: string) {
+    try {
+      console.log('🚀 Getting dashboard stats for organization:', organizationId);
+
+      // Get today's date as string (YYYY-MM-DD format for attendanceDate comparison)
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0]; // Format: "2025-08-20"
+
+      const totalEmployees = await this.employeeRepository.count({
+        where: { organizationId: organizationId },
+      });
+
+      console.log('👥 Total employees:', totalEmployees);
+
+      // ✅ FIXED: Query attendance using attendanceDate (string) and organization_id
+      const todaysAttendances = await this.entityManager
+        .createQueryBuilder(Attendance, 'attendance')
+        .where('attendance.organization_id = :organizationId', { organizationId })
+        .andWhere('attendance.attendanceDate = :todayStr', { todayStr })
+        .getMany();
+
+      console.log('📊 Today\'s attendances found:', todaysAttendances.length);
+
+      const presentToday = todaysAttendances.filter(
+        (a) => a.status === 'present',
+      ).length;
+
+      const halfDay = todaysAttendances.filter(
+        (a) => a.status === 'half-day',
+      ).length;
+
+      console.log('✅ Present today:', presentToday, 'Half day:', halfDay);
+
+      // ✅ FIXED: Query leave requests using proper field names
+      // Note: You'll need to verify the exact field structure for LeaveRequest
+      const onLeaveToday = await this.entityManager
+        .createQueryBuilder(LeaveRequest, 'leave')
+        .leftJoin('leave.user', 'user')
+        .where('user.organizationId = :organizationId', { organizationId })
+        .andWhere('leave.status = :status', { status: 'approved' })
+        .andWhere('leave.startDate <= :todayStr', { todayStr })
+        .andWhere('leave.endDate >= :todayStr', { todayStr })
+        .getCount();
+
+      const pendingLeaveRequests = await this.entityManager
+        .createQueryBuilder(LeaveRequest, 'leave')
+        .leftJoin('leave.user', 'user')
+        .where('user.organizationId = :organizationId', { organizationId })
+        .andWhere('leave.status = :status', { status: 'pending' })
+        .getCount();
+
+      console.log('🏖️ On leave today:', onLeaveToday, 'Pending requests:', pendingLeaveRequests);
+
+      const absent = Math.max(0, totalEmployees - presentToday - halfDay - onLeaveToday);
+
+      const result = {
+        totalEmployees: { value: totalEmployees, change: 0 },
+        presentToday: { value: presentToday, change: 0 },
+        onLeaveToday: { value: onLeaveToday, change: 0 },
+        pendingLeaveRequests: { value: pendingLeaveRequests, change: 0 },
+        attendanceBreakdown: {
+          present: presentToday,
+          halfDay: halfDay,
+          absent: absent,
+        },
+      };
+
+      console.log('📈 Final dashboard stats:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error in getDashboardStats:', error);
+      throw error;
+    }
   }
 }
