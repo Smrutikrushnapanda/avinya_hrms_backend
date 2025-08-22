@@ -22,7 +22,6 @@ export class AuthService {
 
   // Generate JWT after successful login
   async login(user: UserWithRoles) {
-    console.log(user);
     const payload: JwtPayload = {
       userId: user.id,
       userName: user.userName,
