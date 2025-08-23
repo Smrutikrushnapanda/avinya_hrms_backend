@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard'; // <-- 2. Imp
 import { GetUser } from '../auth-core/decorators/get-user.decorator'; // <-- 3. Import GetUser decorator
 import { User } from '../auth-core/entities/user.entity'; // <-- 4. Import User entity
 
+
 @ApiTags('Employees')
 @Controller('employees')
 export class EmployeeController {
@@ -32,7 +33,42 @@ export class EmployeeController {
     return this.employeeService.getDashboardStats(user.organizationId);
   }
   // -----------------------------
-
+@Get('birthdays/upcoming')
+@ApiOperation({ summary: 'Get upcoming employee birthdays' })
+@ApiQuery({ name: 'organizationId', type: 'string', required: true })
+@ApiQuery({ name: 'days', type: 'number', required: false, description: 'Days ahead to look (default: 30)' })
+@ApiResponse({
+  status: 200,
+  description: 'Return upcoming birthdays',
+  schema: {
+    type: 'object',
+    properties: {
+      data: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            firstName: { type: 'string' },
+            lastName: { type: 'string' },
+            dateOfBirth: { type: 'string' },
+            department: { type: 'object' },
+            photoUrl: { type: 'string' },
+            workEmail: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+})
+async getUpcomingBirthdays(
+  @Query('organizationId') organizationId: string,
+  @Query('days') days: number = 30,
+) {
+  const birthdays = await this.employeeService.getUpcomingBirthdays(organizationId, days);
+  return { data: birthdays };
+}
+//------------------------------------------------- old code
   @Post()
   @ApiOperation({ summary: 'Create a new employee' })
   create(@Body() dto: CreateEmployeeDto) {

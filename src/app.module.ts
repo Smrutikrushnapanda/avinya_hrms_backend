@@ -14,6 +14,7 @@ import { EmployeeModule } from './modules/employee/employee.module';
 import { PollsModule } from './modules/poll/polls.module';
 import { NoticeModule } from './modules/notice/notice.module';
 import { CommonModule } from './modules/common/common.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -30,7 +31,8 @@ import { CommonModule } from './modules/common/common.module';
     EmployeeModule,
     PollsModule,
     NoticeModule,
-    CommonModule
+    CommonModule,
+    DashboardModule
   ],
   controllers: [AppController],
   providers: [
