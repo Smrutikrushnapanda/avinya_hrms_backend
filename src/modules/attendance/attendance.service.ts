@@ -111,6 +111,7 @@ export class AttendanceService {
           new Date(`${dateStr}T23:59:59.999Z`),
         ),
       },
+      relations: ['user'],
       order: { timestamp: 'ASC' },
     });
 
@@ -627,18 +628,49 @@ export class AttendanceService {
     return results;
   }
 
-  async getTodayAnomalies(): Promise<AttendanceLog[]> {
+  // ✅ UPDATED METHOD: Include user information in today's anomalies
+  async getTodayAnomalies(): Promise<any[]> {
     const today = new Date();
     const from = new Date(today.setHours(0, 0, 0, 0));
     const to = new Date(today.setHours(23, 59, 59, 999));
 
-    return this.attendanceLogRepo.find({
-      where: {
-        anomalyFlag: true,
-        timestamp: Between(from, to),
-      },
-      order: { timestamp: 'DESC' },
-    });
+    const queryBuilder = this.attendanceLogRepo
+      .createQueryBuilder('log')
+      .leftJoinAndSelect('log.user', 'user')
+      .where('log.anomalyFlag = :anomalyFlag', { anomalyFlag: true })
+      .andWhere('log.timestamp BETWEEN :from AND :to', { from, to })
+      .orderBy('log.timestamp', 'DESC');
+
+    const results = await queryBuilder.getMany();
+
+    // Transform the results to include userId at the root level and structured user info
+    return results.map(log => ({
+      id: log.id,
+      userId: log.user?.id, // Add userId to root level
+      timestamp: log.timestamp,
+      type: log.type,
+      source: log.source,
+      photoUrl: log.photoUrl,
+      faceMatchScore: log.faceMatchScore,
+      faceVerified: log.faceVerified,
+      latitude: log.latitude,
+      longitude: log.longitude,
+      locationAddress: log.locationAddress,
+      wifiSsid: log.wifiSsid,
+      wifiBssid: log.wifiBssid,
+      deviceInfo: log.deviceInfo,
+      anomalyFlag: log.anomalyFlag,
+      anomalyReason: log.anomalyReason,
+      createdAt: log.createdAt,
+      user: {
+        id: log.user?.id,
+        firstName: log.user?.firstName,
+        lastName: log.user?.lastName,
+        email: log.user?.email,
+        userName: log.user?.userName,
+        // Add any other user fields you need from the User entity
+      }
+    }));
   }
 
   private calculateDistance(
@@ -748,9 +780,6 @@ export class AttendanceService {
 
       // ✅ If attendance logs exist
       else if (logs.length > 0) {
-        /*const inLog = logs.find((log) => log.type === 'check-in') ?? logs[0];
-        const outLog =
-          [...logs].reverse().find((log) => log.type === 'check-out') ?? inLog;*/
         const sortedLogs = [...logs].sort(
           (a, b) =>
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
