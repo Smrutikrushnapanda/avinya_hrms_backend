@@ -432,4 +432,99 @@ export class AttendanceController {
   async getTodayAnomalies(): Promise<AttendanceLog[]> {
     return this.attendanceService.getTodayAnomalies();
   }
+
+  //New api @Nihar
+  @Get('report')
+@ApiOperation({ summary: 'Get attendance report with user filters' })
+@ApiQuery({
+  name: 'organizationId',
+  type: 'string',
+  required: true,
+  example: '24facd21-265a-4edd-8fd1-bc69a036f755',
+})
+@ApiQuery({
+  name: 'year',
+  type: 'number',
+  required: true,
+  example: 2025,
+})
+@ApiQuery({
+  name: 'month',
+  type: 'number',
+  required: true,
+  example: 8,
+})
+@ApiQuery({
+  name: 'userIds',
+  type: 'string',
+  required: false,
+  description: 'Comma-separated user IDs or "ALL" for all users',
+  example: 'ALL or user1,user2,user3',
+})
+@ApiOkResponse({
+  description: 'Attendance report data with user filtering',
+  schema: {
+    type: 'object',
+    properties: {
+      reportData: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            userId: { type: 'string' },
+            userName: { type: 'string' },
+            email: { type: 'string' },
+            employeeCode: { type: 'string' },
+            totalWorkingDays: { type: 'number' },
+            presentDays: { type: 'number' },
+            absentDays: { type: 'number' },
+            halfDays: { type: 'number' },
+            onLeaveDays: { type: 'number' },
+            attendancePercentage: { type: 'number' },
+            totalWorkingHours: { type: 'number' },
+            averageWorkingHours: { type: 'number' },
+            dailyRecords: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  date: { type: 'string' },
+                  status: { type: 'string' },
+                  inTime: { type: 'string' },
+                  outTime: { type: 'string' },
+                  workingHours: { type: 'number' },
+                  isHoliday: { type: 'boolean' },
+                  isSunday: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+      },
+      summary: {
+        type: 'object',
+        properties: {
+          totalEmployees: { type: 'number' },
+          period: { type: 'string' },
+          workingDays: { type: 'number' },
+          holidays: { type: 'number' },
+        },
+      },
+    },
+  },
+})
+async getAttendanceReport(
+  @Query('organizationId') organizationId: string,
+  @Query('year') year: number,
+  @Query('month') month: number,
+  @Query('userIds') userIds: string = 'ALL',
+) {
+  return this.attendanceService.getAttendanceReport(
+    organizationId,
+    year,
+    month,
+    userIds,
+  );
+}
+
 }
