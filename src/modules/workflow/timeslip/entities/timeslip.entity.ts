@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn, JoinColumn } from 'typeorm';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { TimeslipApproval } from './timeslip-approval.entity';
 
@@ -8,6 +8,7 @@ export class Timeslip {
   id: string;
 
   @ManyToOne(() => Employee, { nullable: false })
+  @JoinColumn({ name: 'employee_id' }) // ✅ Fix here
   employee: Employee;
 
   @Column({ type: 'date' })
