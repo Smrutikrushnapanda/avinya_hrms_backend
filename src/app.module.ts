@@ -14,7 +14,11 @@ import { EmployeeModule } from './modules/employee/employee.module';
 import { PollsModule } from './modules/poll/polls.module';
 import { NoticeModule } from './modules/notice/notice.module';
 import { CommonModule } from './modules/common/common.module';
+<<<<<<< HEAD
 import { WorkflowModule } from './modules/workflow/workflow.module';
+=======
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+>>>>>>> 2214a3791be0042a1109436c6184765c049b5dff
 
 @Module({
   imports: [
@@ -32,7 +36,11 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
     PollsModule,
     NoticeModule,
     CommonModule,
+<<<<<<< HEAD
     WorkflowModule
+=======
+    DashboardModule
+>>>>>>> 2214a3791be0042a1109436c6184765c049b5dff
   ],
   controllers: [AppController],
   providers: [
