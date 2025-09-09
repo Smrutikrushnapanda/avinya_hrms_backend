@@ -101,6 +101,83 @@ export class TimeslipService {
       order: { created_at: 'DESC' as any },
     });
   }
+  
+  async findByEmployee(employeeId: string, page = 1, limit = 10) {
+    const qb = this.timeslipRepo
+      .createQueryBuilder('t')
+      // join employee only to filter by employee id (don't select its columns)
+      .leftJoin('t.employee', 'emp')
+      // join approvals and approver to select required fields
+      .leftJoin('t.approvals', 'a')
+      .leftJoin('a.approver', 'ap')
+      // select only necessary timeslip columns
+      .select([
+        't.id',
+        't.date',
+        't.missing_type',
+        't.corrected_in',
+        't.corrected_out',
+        't.reason',
+        't.status',
+        't.created_at',
+        't.updated_at',
+        // approvals
+        'a.id',
+        'a.action',
+        'a.remarks',
+        'a.acted_at',
+        // approver minimal fields
+        'ap.id',
+        'ap.firstName',
+        'ap.lastName',
+        'ap.employeeCode',
+      ])
+      .where('emp.id = :employeeId', { employeeId })
+      .orderBy('t.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    // Map / flatten approvals into a clean shape
+    const data = items.map((t: any) => {
+      const approvals = (t.approvals || []).map((a: any) => ({
+        id: a.id,
+        action: a.action,
+        remarks: a.remarks,
+        acted_at: a.acted_at,
+        approver: a.approver
+          ? {
+              id: a.approver.id,
+              firstName: a.approver.firstName,
+              lastName: a.approver.lastName,
+              employeeCode: a.approver.employeeCode,
+            }
+          : null,
+      }));
+
+      return {
+        id: t.id,
+        date: t.date,
+        missing_type: t.missing_type,
+        corrected_in: t.corrected_in,
+        corrected_out: t.corrected_out,
+        reason: t.reason,
+        status: t.status,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        approvals,
+      };
+    });
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 
   /** ---- GET ONE ---- */
   async findOne(id: string) {
@@ -173,7 +250,8 @@ export class TimeslipService {
       });
 
       const timeslipToUpdate = { id } as Timeslip;
-      (timeslipToUpdate as any).status = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
+      (timeslipToUpdate as any).status =
+        anyRejected > 0 ? 'REJECTED' : 'APPROVED';
       await this.timeslipRepo.save(timeslipToUpdate);
     }
 
