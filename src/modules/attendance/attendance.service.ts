@@ -833,4 +833,334 @@ export class AttendanceService {
       }
     }
   }
+
+  //New api @Nihar
+async getAttendanceReport(
+  organizationId: string,
+  year: number,
+  month: number,
+  userIdsString: string = 'ALL',
+) {
+  // Parse userIds from string
+  const userIds = userIdsString === 'ALL' ? [] : userIdsString.split(',').map(id => id.trim()).filter(Boolean);
+
+  // Get date range for the month
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+
+  const formatDateLocal = (date: Date): string => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  // Build attendance query with CORRECTED joins
+  let attendanceQuery = this.attendanceRepo
+    .createQueryBuilder('att')
+    .leftJoinAndSelect('att.user', 'user')
+    .leftJoin(
+      'employees',
+      'emp',
+      'emp.user_id = user.user_id AND emp.organization_id = :organizationId',
+      { organizationId },
+    )
+    .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
+    .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
+    // FIXED: Two-step join for manager
+    // 1. Join to get the manager employee record
+    .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to') 
+    // 2. Join to get the manager's user details  
+    .leftJoin('users', 'managerUser', 'managerUser.user_id = managerEmp.user_id')
+    .where('att.organization_id = :organizationId', { organizationId })
+    .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
+      startDate: formatDateLocal(startDate),
+      endDate: formatDateLocal(endDate),
+    });
+
+  // Apply user filter if specific users are selected
+  if (userIds.length > 0) {
+    attendanceQuery = attendanceQuery.andWhere('user.user_id IN (:...userIds)', {
+      userIds,
+    });
+  }
+
+  attendanceQuery = attendanceQuery
+    .addSelect([
+      'emp.employee_code AS "employeeCode"',
+      'dept.name AS "departmentName"',
+      'desg.name AS "designationName"',
+      // FIXED: Use managerUser fields for concatenation
+      'CONCAT_WS(\' \', NULLIF(managerUser.first_name, \'\'), NULLIF(managerUser.middle_name, \'\'), NULLIF(managerUser.last_name, \'\')) AS "managerFullName"'
+    ])
+    .orderBy('user.first_name', 'ASC')
+    .addOrderBy('att.attendanceDate', 'ASC');
+
+  const rawResults = await attendanceQuery.getRawAndEntities();
+
+  // Get holidays for the organization and period
+  const holidays = await this.holidayRepo.find({
+    where: {
+      organizationId,
+      date: Between(startDate, endDate),
+    },
+  });
+
+  const holidaySet = new Set(
+    holidays.map((h) => formatDateLocal(new Date(h.date))),
+  );
+
+  // Generate all dates for the month
+  const allDates: string[] = [];
+  for (
+    let d = new Date(startDate);
+    d <= endDate;
+    d.setDate(d.getDate() + 1)
+  ) {
+    allDates.push(formatDateLocal(new Date(d)));
+  }
+
+  // Calculate working days (excluding Sundays and holidays)
+  const workingDays = allDates.filter((date) => {
+    const dayOfWeek = new Date(date).getDay();
+    return dayOfWeek !== 0 && !holidaySet.has(date);
+  }).length;
+
+  // Group attendance records by user
+  const userAttendanceMap = new Map();
+
+  // Process raw results to build user map
+  rawResults.entities.forEach((entry, index) => {
+    const userId = entry.user.id;
+    const rawData = rawResults.raw[index];
+    const empCode = rawData?.employeeCode || 'N/A';
+    const departmentName = rawData?.departmentName || '';
+    const designationName = rawData?.designationName || '';
+    
+    // Get the concatenated manager name from SQL and clean up spaces
+    let managerName = rawData?.managerFullName || '';
+    managerName = managerName.replace(/\s+/g, ' ').trim();
+
+    if (!userAttendanceMap.has(userId)) {
+      userAttendanceMap.set(userId, {
+        userId: userId,
+        userName: [
+          entry.user.firstName,
+          entry.user.middleName,
+          entry.user.lastName,
+        ]
+          .filter(Boolean)
+          .join(' '),
+        email: entry.user.email,
+        employeeCode: empCode,
+        department: departmentName,
+        designation: designationName,
+        reportingTo: managerName,
+        dailyRecords: [],
+        presentDays: 0,
+        absentDays: 0,
+        halfDays: 0,
+        onLeaveDays: 0,
+        totalWorkingMinutes: 0,
+      });
+    }
+
+    const userData = userAttendanceMap.get(userId);
+
+    // Format times using existing formatTime function
+    const formatTime = (date?: Date): string | null => {
+      if (!date) return null;
+      const local = DateTime.fromJSDate(date, { zone: 'utc' }).setZone(
+        'Asia/Kolkata',
+      );
+      const hours = local.hour.toString().padStart(2, '0');
+      const minutes = local.minute.toString().padStart(2, '0');
+      const formattedHour = (local.hour % 12 || 12)
+        .toString()
+        .padStart(2, '0');
+      const suffix = local.hour >= 12 ? 'PM' : 'AM';
+      return `${formattedHour}:${minutes} ${suffix}`;
+    };
+
+    const workingHours = entry.workingMinutes ? entry.workingMinutes / 60 : 0;
+
+    userData.dailyRecords.push({
+      date: entry.attendanceDate,
+      status: entry.status,
+      inTime: formatTime(entry.inTime),
+      outTime: formatTime(entry.outTime),
+      workingHours: Math.round(workingHours * 100) / 100,
+      isHoliday: holidaySet.has(entry.attendanceDate),
+      isSunday: new Date(entry.attendanceDate).getDay() === 0,
+    });
+
+    // Count status types
+    switch (entry.status) {
+      case 'present':
+        userData.presentDays++;
+        break;
+      case 'absent':
+        userData.absentDays++;
+        break;
+      case 'half-day':
+        userData.halfDays++;
+        break;
+      case 'on-leave':
+        userData.onLeaveDays++;
+        break;
+    }
+
+    if (entry.workingMinutes) {
+      userData.totalWorkingMinutes += entry.workingMinutes;
+    }
+  });
+
+  // If ALL users selected, get all unique users using GROUP BY
+  if (userIdsString === 'ALL') {
+    const allOrgUsers = await this.attendanceRepo
+      .createQueryBuilder('att')
+      .select('user.user_id', 'userId')
+      .addSelect('user.first_name', 'firstName')
+      .addSelect('user.middle_name', 'middleName')
+      .addSelect('user.last_name', 'lastName')
+      .addSelect('user.email', 'email')
+      .addSelect('emp.employee_code', 'employeeCode')
+      .addSelect('dept.name', 'departmentName')
+      .addSelect('desg.name', 'designationName')
+      .addSelect('CONCAT_WS(\' \', NULLIF(managerUser.first_name, \'\'), NULLIF(managerUser.middle_name, \'\'), NULLIF(managerUser.last_name, \'\')) AS "managerFullName"')
+      .leftJoin('att.user', 'user')
+      .leftJoin(
+        'employees',
+        'emp',
+        'emp.user_id = user.user_id AND emp.organization_id = :organizationId',
+        { organizationId },
+      )
+      .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
+      .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
+      // FIXED: Two-step join for manager
+      .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to')
+      .leftJoin('users', 'managerUser', 'managerUser.user_id = managerEmp.user_id')
+      .where('att.organization_id = :organizationId', { organizationId })
+      .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
+        startDate: formatDateLocal(startDate),
+        endDate: formatDateLocal(endDate),
+      })
+      .groupBy('user.user_id')
+      .addGroupBy('user.first_name')
+      .addGroupBy('user.middle_name')
+      .addGroupBy('user.last_name')
+      .addGroupBy('user.email')
+      .addGroupBy('emp.employee_code')
+      .addGroupBy('dept.name')
+      .addGroupBy('desg.name')
+      .addGroupBy('managerUser.first_name')
+      .addGroupBy('managerUser.middle_name')
+      .addGroupBy('managerUser.last_name')
+      .getRawMany();
+
+    allOrgUsers.forEach((user) => {
+      if (!userAttendanceMap.has(user.userId)) {
+        let managerName = user.managerFullName || '';
+        managerName = managerName.replace(/\s+/g, ' ').trim();
+
+        userAttendanceMap.set(user.userId, {
+          userId: user.userId,
+          userName: [user.firstName, user.middleName, user.lastName]
+            .filter(Boolean)
+            .join(' '),
+          email: user.email,
+          employeeCode: user.employeeCode || 'N/A',
+          department: user.departmentName || '',
+          designation: user.designationName || '',
+          reportingTo: managerName,
+          dailyRecords: [],
+          presentDays: 0,
+          absentDays: 0,
+          halfDays: 0,
+          onLeaveDays: 0,
+          totalWorkingMinutes: 0,
+        });
+      }
+    });
+  }
+
+  // Fill in missing dates for all users (rest of the method remains the same)
+  userAttendanceMap.forEach((userData) => {
+    const existingDates = new Set(userData.dailyRecords.map((r) => r.date));
+
+    allDates.forEach((date) => {
+      if (!existingDates.has(date)) {
+        const isHoliday = holidaySet.has(date);
+        const isSunday = new Date(date).getDay() === 0;
+        const isPending = new Date(date) > new Date();
+
+        let status = 'absent';
+        if (isPending) status = 'pending';
+        else if (isHoliday) status = 'holiday';
+        else if (isSunday) status = 'weekend';
+
+        userData.dailyRecords.push({
+          date: date,
+          status: status,
+          inTime: null,
+          outTime: null,
+          workingHours: 0,
+          isHoliday: isHoliday,
+          isSunday: isSunday,
+        });
+
+        if (!isHoliday && !isSunday && !isPending) {
+          userData.absentDays++;
+        }
+      }
+    });
+
+    userData.dailyRecords.sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    );
+  });
+
+  // Format final report data
+  const reportData = Array.from(userAttendanceMap.values()).map((userData) => {
+    const totalWorkingHours = userData.totalWorkingMinutes / 60;
+    const attendedDays = userData.presentDays + userData.halfDays;
+    const attendancePercentage =
+      workingDays > 0 ? (attendedDays / workingDays) * 100 : 0;
+
+    return {
+      userId: userData.userId,
+      userName: userData.userName,
+      email: userData.email,
+      employeeCode: userData.employeeCode,
+      department: userData.department,
+      designation: userData.designation,
+      reportingTo: userData.reportingTo,
+      totalWorkingDays: workingDays,
+      presentDays: userData.presentDays,
+      absentDays: userData.absentDays,
+      halfDays: userData.halfDays,
+      onLeaveDays: userData.onLeaveDays,
+      attendancePercentage: Math.round(attendancePercentage * 100) / 100,
+      totalWorkingHours: Math.round(totalWorkingHours * 100) / 100,
+      averageWorkingHours:
+        attendedDays > 0
+          ? Math.round((totalWorkingHours / attendedDays) * 100) / 100
+          : 0,
+      dailyRecords: userData.dailyRecords,
+    };
+  });
+
+  return {
+    reportData,
+    summary: {
+      totalEmployees: reportData.length,
+      period: `${new Date(year, month - 1).toLocaleString('default', {
+        month: 'long',
+      })} ${year}`,
+      workingDays,
+      holidays: holidays.length,
+    },
+  };
+}
+
 }

@@ -10,6 +10,8 @@ import { Workflow } from 'src/modules/workflow/entities/workflow.entity';
 import { WorkflowStep } from 'src/modules/workflow/entities/workflow-step.entity';
 import { WorkflowAssignment } from 'src/modules/workflow/entities/workflow-assignment.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
+import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
+
 
 @Injectable()
 export class TimeslipService {
@@ -257,4 +259,34 @@ export class TimeslipService {
 
     return this.findOne(id);
   }
+
+  //New Api
+  async batchUpdateStatuses(dto: BatchUpdateTimeslipStatusDto): Promise<{ updatedCount: number; message: string }> {
+  const { timeslipIds, status } = dto;
+
+  // Check if any of the timeslips exist
+  const existingTimeslips = await this.timeslipRepo
+    .createQueryBuilder('timeslip')
+    .where('timeslip.id IN (:...ids)', { ids: timeslipIds })
+    .getCount();
+
+  if (existingTimeslips === 0) {
+    throw new NotFoundException('No timeslips found with the provided IDs');
+  }
+
+  // Update the timeslips
+  const updateResult = await this.timeslipRepo
+    .createQueryBuilder()
+    .update(Timeslip)
+    .set({ status })
+    .where('id IN (:...ids)', { ids: timeslipIds })
+    .execute();
+
+  const updatedCount = updateResult.affected || 0;
+
+  return {
+    updatedCount,
+    message: `Successfully updated ${updatedCount} timeslip(s) to ${status} status`
+  };
+}
 }
