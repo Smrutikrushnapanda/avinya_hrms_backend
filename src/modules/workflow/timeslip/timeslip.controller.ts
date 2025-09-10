@@ -15,12 +15,14 @@ import { TimeslipService } from './timeslip.service';
 import { CreateTimeslipDto } from './dto/create-timeslip.dto';
 import { UpdateTimeslipDto } from './dto/update-timeslip.dto';
 import { ApproveTimeslipDto } from './dto/approve-timeslip.dto';
+import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
+
 
 @ApiTags('Timeslips')
 @ApiBearerAuth() // remove if you don't use bearer auth
 @Controller('timeslips')
 export class TimeslipController {
-  constructor(private readonly timeslipService: TimeslipService) {}
+  constructor(private readonly timeslipService: TimeslipService) { }
 
   /** ---- Create a new timeslip ---- */
   @Post()
@@ -98,5 +100,27 @@ export class TimeslipController {
   @ApiBadRequestResponse({ description: 'Invalid approval payload.' })
   approve(@Param('id') id: string, @Body() dto: ApproveTimeslipDto) {
     return this.timeslipService.approve(id, dto);
+  }
+
+  //New Api
+  @Post('batch-update-status')
+  @ApiOperation({
+    summary: 'Batch update statuses of multiple timeslips',
+    description: 'Update the status of multiple timeslips in a single request'
+  })
+  @ApiCreatedResponse({
+    description: 'Timeslip statuses updated successfully',
+    schema: {
+      example: {
+        updatedCount: 3,
+        message: 'Successfully updated 3 timeslip(s) to APPROVED status'
+      }
+    }
+  })
+  @ApiBadRequestResponse({ description: 'Invalid input data' })
+  @ApiNotFoundResponse({ description: 'No timeslips found with provided IDs' })
+  @ApiBody({ type: BatchUpdateTimeslipStatusDto })
+  async batchUpdateStatuses(@Body() dto: BatchUpdateTimeslipStatusDto) {
+    return this.timeslipService.batchUpdateStatuses(dto);
   }
 }
