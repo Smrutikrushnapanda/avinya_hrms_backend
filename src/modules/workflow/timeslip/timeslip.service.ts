@@ -353,4 +353,128 @@ async findAllByEmployee(employeeId: string) {
     };
   });
 }
+
+/** ---- GET TIMESLIPS BY APPROVER ---- */
+async findByApprover(approverId: string, options: { status?: string; page: number; limit: number }) {
+  const { status, page, limit } = options;
+  
+  let queryBuilder = this.timeslipRepo
+    .createQueryBuilder('t')
+    .leftJoin('t.employee', 'emp')
+    .leftJoin('emp.department', 'dept')
+    .leftJoin('emp.designation', 'desig')
+    .leftJoin('t.approvals', 'a')
+    .select([
+      // Timeslip fields
+      't.id',
+      't.date',
+      't.missing_type',
+      't.corrected_in',
+      't.corrected_out',
+      't.reason',
+      't.status',
+      't.created_at',
+      't.updated_at',
+      // Employee fields
+      'emp.id',
+      'emp.firstName', 
+      'emp.lastName',
+      'emp.employeeCode',
+      'emp.workEmail',
+      'emp.photoUrl',
+      // Department fields
+      'dept.id',
+      'dept.name',
+      'dept.code',
+      // Designation fields
+      'desig.id',
+      'desig.name',
+      'desig.code',
+      // Approval fields
+      'a.id',
+      'a.action',
+      'a.remarks',
+      'a.acted_at'
+    ])
+    .where('a.approver_id = :approverId', { approverId });
+
+  // Add status filter if provided
+  if (status) {
+    queryBuilder = queryBuilder.andWhere('a.action = :status', { status });
+  }
+
+  // Order by creation date (newest first)
+  queryBuilder = queryBuilder.orderBy('t.created_at', 'DESC');
+
+  // Get total count for pagination
+  const total = await queryBuilder.getCount();
+
+  // Apply pagination
+  const offset = (page - 1) * limit;
+  queryBuilder = queryBuilder.skip(offset).take(limit);
+
+  // Execute query
+  const results = await queryBuilder.getMany();
+
+  // Transform data to clean structure
+  const data = results.map((t: any) => {
+    // Find the approval for this approver
+    const approval = t.approvals?.find((a: any) => a.approver_id === approverId) || t.approvals?.[0];
+    
+    return {
+      id: t.id,
+      date: t.date,
+      missing_type: t.missing_type,
+      corrected_in: t.corrected_in,
+      corrected_out: t.corrected_out,
+      reason: t.reason,
+      status: t.status,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      employee: {
+        id: t.employee?.id,
+        firstName: t.employee?.firstName,
+        lastName: t.employee?.lastName,
+        employeeCode: t.employee?.employeeCode,
+        workEmail: t.employee?.workEmail,
+        photoUrl: t.employee?.photoUrl,
+        department: t.employee?.department ? {
+          id: t.employee.department.id,
+          name: t.employee.department.name,
+          code: t.employee.department.code,
+        } : null,
+        designation: t.employee?.designation ? {
+          id: t.employee.designation.id,
+          name: t.employee.designation.name,
+          code: t.employee.designation.code,
+        } : null,
+      },
+      approval: approval ? {
+        id: approval.id,
+        action: approval.action,
+        remarks: approval.remarks,
+        acted_at: approval.acted_at,
+      } : null,
+    };
+  });
+
+  // Calculate pagination info
+  const totalPages = Math.ceil(total / limit);
+  const hasNext = page < totalPages;
+  const hasPrev = page > 1;
+
+  return {
+    data,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNext,
+      hasPrev,
+    },
+  };
+}
+
+
 }
