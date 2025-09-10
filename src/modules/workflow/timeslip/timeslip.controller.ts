@@ -123,4 +123,36 @@ export class TimeslipController {
   async batchUpdateStatuses(@Body() dto: BatchUpdateTimeslipStatusDto) {
     return this.timeslipService.batchUpdateStatuses(dto);
   }
+
+  @Get('all-by-employee/:employeeId')
+@ApiOperation({ 
+  summary: 'Get all timeslips for a specific employee',
+  description: 'Fetch all timeslips for an employee without pagination'
+})
+@ApiParam({ name: 'employeeId', description: 'Employee ID (UUID)' })
+@ApiOkResponse({ 
+  description: 'List of all timeslips for the employee returned.',
+  schema: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', example: 'c3ce15eb-3c04-4cf2-9596-73de7f006ba1' },
+        date: { type: 'string', example: '2025-09-06' },
+        missing_type: { type: 'string', enum: ['IN', 'OUT', 'BOTH'] },
+        corrected_in: { type: 'string', nullable: true },
+        corrected_out: { type: 'string', nullable: true },
+        reason: { type: 'string', nullable: true },
+        status: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+        created_at: { type: 'string' },
+        updated_at: { type: 'string' },
+        approvals: { type: 'array', items: { type: 'object' } }
+      }
+    }
+  }
+})
+@ApiNotFoundResponse({ description: 'Employee not found or no timeslips exist.' })
+async getAllByEmployee(@Param('employeeId') employeeId: string) {
+  return this.timeslipService.findAllByEmployee(employeeId);
+}
 }
