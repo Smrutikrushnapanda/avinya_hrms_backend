@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectEntityManager } from '@nestjs/typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { Workflow } from './entities/workflow.entity';
 import { WorkflowStep } from './entities/workflow-step.entity';
 import { WorkflowAssignment } from './entities/workflow-assignment.entity';
+import { Employee } from '../employee/entities/employee.entity';
 
 @Injectable()
 export class WorkflowService {
@@ -16,6 +17,9 @@ export class WorkflowService {
 
     @InjectRepository(WorkflowAssignment)
     private assignmentRepo: Repository<WorkflowAssignment>,
+
+    @InjectEntityManager()
+    private entityManager: EntityManager,
   ) {}
 
   /** ---- Workflows ---- */
@@ -74,4 +78,50 @@ export class WorkflowService {
   async deleteAssignment(id: string): Promise<void> {
     await this.assignmentRepo.delete(id);
   }
+
+  // In your workflow.service.ts
+async updateStepApprover(stepId: string, newApproverId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    // Find existing assignment
+    const existingAssignment = await this.assignmentRepo.findOne({ 
+      where: { stepId },
+      relations: ['approver'] 
+    });
+
+    if (existingAssignment) {
+      // Only update the approverId - keep employeeId unchanged
+      existingAssignment.approverId = newApproverId;
+      
+      // Update the approver relation object
+      existingAssignment.approver = { id: newApproverId } as Employee;
+
+      await this.assignmentRepo.save(existingAssignment);
+      
+      return {
+        success: true,
+        message: 'Approver updated successfully'
+      };
+    } else {
+      // No existing assignment - create new one
+      // For new assignments, you might need to set employeeId based on your business logic
+      const newAssignment = this.assignmentRepo.create({
+        stepId,
+        approverId: newApproverId,
+        // employeeId: ... (set this based on your workflow logic - who is the requester?)
+      });
+
+      await this.assignmentRepo.save(newAssignment);
+      
+      return {
+        success: true,
+        message: 'Approver assigned successfully'
+      };
+    }
+  } catch (error) {
+    console.error('Error updating step approver:', error);
+    throw error;
+  }
+}
+
+
 }
