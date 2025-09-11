@@ -3,6 +3,7 @@ import { WorkflowService } from './workflow.service';
 import { Workflow } from './entities/workflow.entity';
 import { WorkflowStep } from './entities/workflow-step.entity';
 import { WorkflowAssignment } from './entities/workflow-assignment.entity';
+import { ApiBadRequestResponse, ApiBody, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam } from '@nestjs/swagger';
 
 @Controller('workflows')
 export class WorkflowController {
@@ -65,4 +66,29 @@ export class WorkflowController {
   deleteAssignment(@Param('id') id: string) {
     return this.workflowService.deleteAssignment(id);
   }
+
+  // In your workflow.controller.ts
+@Put('steps/:stepId/approver')
+@ApiOperation({ 
+  summary: 'Update approver for workflow step',
+  description: 'Replace the current approver with a new one'
+})
+@ApiParam({ name: 'stepId', description: 'Workflow Step ID (UUID)' })
+@ApiBody({
+  schema: {
+    type: 'object',
+    properties: {
+      approverId: { type: 'string', format: 'uuid' }
+    },
+    required: ['approverId']
+  }
+})
+async updateStepApprover(
+  @Param('stepId') stepId: string,
+  @Body() body: { approverId: string }
+) {
+  return this.workflowService.updateStepApprover(stepId, body.approverId);
+}
+
+
 }
