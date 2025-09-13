@@ -67,7 +67,7 @@ export class WorkflowController {
     return this.workflowService.deleteAssignment(id);
   }
 
-  // In your workflow.controller.ts
+//New
 @Put('steps/:stepId/approver')
 @ApiOperation({ 
   summary: 'Update approver for workflow step',
