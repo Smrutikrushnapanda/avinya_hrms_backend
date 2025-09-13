@@ -24,6 +24,8 @@ import { UserRole } from './entities/user-role.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { UserActivity } from './entities/user-actvities.entity';
 import { OrganizationRole } from './entities/organization-role.entity';
+import { TimeslipApproval } from '../workflow/timeslip/entities/timeslip-approval.entity';
+import { Employee } from '../employee/entities/employee.entity';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { OrganizationRole } from './entities/organization-role.entity';
       UserRole,
       RolePermission,
       UserActivity,
+      TimeslipApproval,
+      Employee,
     ]),
     PassportModule,
     JwtModule.register({

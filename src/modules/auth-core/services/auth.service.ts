@@ -5,12 +5,15 @@ import { Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
 import { JwtPayload } from '../dto/auth.dto';
 import { UserActivitiesService } from './user-activities.service';
+import { TimeslipApproval } from 'src/modules/workflow/timeslip/entities/timeslip-approval.entity';
+import { Employee } from 'src/modules/employee/entities/employee.entity';
 import * as bcrypt from 'bcrypt';
 
 export interface UserWithRoles extends User {
   roles: { id: string; roleName: string }[];
   permissions: { id: string; permissionName: string }[];
 }
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -18,6 +21,10 @@ export class AuthService {
     private userActivitiesService: UserActivitiesService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(TimeslipApproval)
+    private timeslipApprovalRepository: Repository<TimeslipApproval>,
+    @InjectRepository(Employee)
+    private employeeRepository: Repository<Employee>,
   ) {}
 
   // Generate JWT after successful login
@@ -37,8 +44,40 @@ export class AuthService {
       permissions: user.permissions,
       mustChangePassword: user.mustChangePassword,
     };
+
     return {
       access_token: this.jwtService.sign(payload),
+    };
+  }
+
+  // Check if user is an approver
+  async checkIsApprover(userId: string): Promise<boolean> {
+    try {
+      const employee = await this.employeeRepository.findOne({
+        where: { userId: userId },
+      });
+
+      if (!employee) {
+        return false;
+      }
+
+      const approvalRecord = await this.timeslipApprovalRepository.findOne({
+        where: { approver_id: employee.id },
+      });
+      
+      return !!approvalRecord;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Get enhanced profile with isApprover flag
+  async getEnhancedProfile(user: any): Promise<any> {
+    const isApprover = await this.checkIsApprover(user.userId);
+    
+    return {
+      ...user,
+      isApprover
     };
   }
 
@@ -61,6 +100,7 @@ export class AuthService {
     if (!entities || entities.length === 0) {
       return null;
     }
+
     const user = entities[0];
 
     // Extract unique roles
@@ -69,7 +109,7 @@ export class AuthService {
       .map((r) => ({ id: r.role_role_id, roleName: r.role_role_name }))
       .filter((r, i, self) => self.findIndex((x) => x.id === r.id) === i);
 
-    user['roles'] = roles; // temporarily attach roles for payload
+    user['roles'] = roles;
 
     if (user && (await bcrypt.compare(password, user.password))) {
       await this.userRepository
