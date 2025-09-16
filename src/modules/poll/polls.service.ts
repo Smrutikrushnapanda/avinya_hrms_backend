@@ -15,7 +15,9 @@ import {
   PollSummaryDto,
   QuestionAnalyticsDto,
   OptionBreakdownDto,
-  UserResponseDto
+  UserResponseDto,
+  SimpleEmployeeResponseDto,
+  SimpleQuestionResponseDto
 } from './dto/poll-analytics.dto';
 
 interface CreatePollResponseDto {
@@ -366,4 +368,75 @@ export class PollsService {
     const response = this.pollResponseRepo.create(data);
     return this.pollResponseRepo.save(response);
   }
+
+  //New api
+ // Simplified version - Get employees with basic response status
+async getEmployeeResponsesByQuestion(
+  questionId: string, 
+  organizationId?: string
+): Promise<SimpleQuestionResponseDto> {
+  // Validate question exists
+  const question = await this.questionRepo.findOne({
+    where: { id: questionId },
+    relations: ['poll']
+  });
+
+  if (!question) {
+    throw new NotFoundException('Question not found');
+  }
+
+  // Get organization ID - either provided or derive from poll creator
+  let orgId = organizationId;
+  if (!orgId) {
+    const pollCreator = await this.employeeRepo.findOne({
+      where: { userId: question.poll.created_by },
+      select: ['organizationId']
+    });
+    
+    if (!pollCreator) {
+      throw new NotFoundException('Cannot determine organization for this poll');
+    }
+    orgId = pollCreator.organizationId;
+  }
+  
+  // Get all active employees for the organization
+  const employees = await this.employeeRepo.find({
+    where: { 
+      organizationId: orgId,
+      status: 'active'
+    },
+    select: ['id', 'userId', 'firstName', 'lastName'], // Only select needed fields
+    order: { firstName: 'ASC' }
+  });
+
+  // Get user IDs who responded to this question
+  const respondedUserIds = await this.pollResponseRepo
+    .createQueryBuilder('response')
+    .select('DISTINCT response.user_id', 'user_id')
+    .where('response.question_id = :questionId', { questionId })
+    .andWhere('response.user_id IS NOT NULL')
+    .getRawMany();
+
+  // Create a Set for faster lookup
+  const respondedUserSet = new Set(respondedUserIds.map(r => r.user_id));
+
+  // Build simplified employee list
+  const employeeStatuses: SimpleEmployeeResponseDto[] = employees.map(employee => ({
+    employee_id: employee.id,
+    employee_name: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+    has_responded: respondedUserSet.has(employee.userId)
+  }));
+
+  const respondedCount = employeeStatuses.filter(emp => emp.has_responded).length;
+  const totalEmployees = employeeStatuses.length;
+
+  return {
+    question_id: questionId,
+    question_text: question.question_text,
+    total_employees: totalEmployees,
+    responded_count: respondedCount,
+    employees: employeeStatuses
+  };
+}
+
 }

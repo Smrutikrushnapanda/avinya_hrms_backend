@@ -50,3 +50,16 @@ export interface PollSummaryDto {
   is_active: boolean | undefined;
   questions: number;  // ADDED
 }
+export interface SimpleEmployeeResponseDto {
+  employee_id: string;
+  employee_name: string;
+  has_responded: boolean;
+}
+
+export interface SimpleQuestionResponseDto {
+  question_id: string;
+  question_text: string;
+  total_employees: number;
+  responded_count: number;
+  employees: SimpleEmployeeResponseDto[];
+}
