@@ -11,6 +11,7 @@ import { WorkflowStep } from 'src/modules/workflow/entities/workflow-step.entity
 import { WorkflowAssignment } from 'src/modules/workflow/entities/workflow-assignment.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
+import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto';
 
 @Injectable()
 export class TimeslipService {
@@ -380,34 +381,106 @@ export class TimeslipService {
   }
 
   /** ---- BATCH UPDATE STATUSES ---- */
-  async batchUpdateStatuses(dto: BatchUpdateTimeslipStatusDto): Promise<{ updatedCount: number; message: string }> {
-    const { timeslipIds, status } = dto;
+  /** ---- CORRECTED BATCH UPDATE STATUSES ---- */
+async batchUpdateStatuses(dto: BatchUpdateTimeslipStatusDto, approverId?: string): Promise<{ updatedCount: number; message: string; errors?: string[] }> {
+  const { timeslipIds, status } = dto;
+  const errors: string[] = [];
+  let successCount = 0;
 
-    // Check if any of the timeslips exist
-    const existingTimeslips = await this.timeslipRepo
-      .createQueryBuilder('timeslip')
-      .where('timeslip.id IN (:...ids)', { ids: timeslipIds })
-      .getCount();
+  // ✅ FIX 1: Add initial existence check
+  const existingTimeslips = await this.timeslipRepo
+    .createQueryBuilder('timeslip')
+    .where('timeslip.id IN (:...ids)', { ids: timeslipIds })
+    .getCount();
 
-    if (existingTimeslips === 0) {
-      throw new NotFoundException('No timeslips found with the provided IDs');
-    }
-
-    // Update the timeslips
-    const updateResult = await this.timeslipRepo
-      .createQueryBuilder()
-      .update(Timeslip)
-      .set({ status })
-      .where('id IN (:...ids)', { ids: timeslipIds })
-      .execute();
-
-    const updatedCount = updateResult.affected || 0;
-
-    return {
-      updatedCount,
-      message: `Successfully updated ${updatedCount} timeslip(s) to ${status} status`
-    };
+  if (existingTimeslips === 0) {
+    throw new NotFoundException('No timeslips found with the provided IDs');
   }
+
+  // Process each timeslip individually to maintain workflow integrity
+  for (const timeslipId of timeslipIds) {
+    try {
+      // ✅ FIX 2: Check if timeslip exists and get current status
+      const timeslip = await this.timeslipRepo.findOne({
+        where: { id: timeslipId },
+        select: ['id', 'status']
+      });
+
+      if (!timeslip) {
+        errors.push(`Timeslip ${timeslipId} not found`);
+        continue;
+      }
+
+      if (approverId) {
+        // Workflow-based update for specific approver
+        const approval = await this.approvalRepo.findOne({
+          where: {
+            timeslip: { id: timeslipId },
+            approver_id: approverId,
+            action: 'PENDING',
+          }
+        });
+
+        if (!approval) {
+          errors.push(`No pending approval found for timeslip ${timeslipId} and approver ${approverId}`);
+          continue;
+        }
+
+        // Update the approval
+        approval.action = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+        approval.acted_at = new Date();
+        await this.approvalRepo.save(approval);
+
+        // Check if workflow is complete
+        const remainingPending = await this.approvalRepo.count({
+          where: { timeslip: { id: timeslipId }, action: 'PENDING' },
+        });
+
+        // Only update timeslip status if workflow is complete
+        if (remainingPending === 0) {
+          const anyRejected = await this.approvalRepo.count({
+            where: { timeslip: { id: timeslipId }, action: 'REJECTED' },
+          });
+          
+          const finalStatus = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
+          await this.timeslipRepo.update(timeslipId, { status: finalStatus });
+        }
+      } else {
+        // ✅ FIX 3: Admin override with validation
+        if (timeslip.status === 'APPROVED' || timeslip.status === 'REJECTED') {
+          errors.push(`Timeslip ${timeslipId} is already in ${timeslip.status} state`);
+          continue;
+        }
+
+        // Update all pending approvals for this timeslip
+        const updateResult = await this.approvalRepo.update(
+          { timeslip: { id: timeslipId }, action: 'PENDING' },
+          { 
+            action: status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+            acted_at: new Date()
+          }
+        );
+
+        // Only proceed if we actually updated some approvals
+        if (updateResult.affected && updateResult.affected > 0) {
+          await this.timeslipRepo.update(timeslipId, { status });
+        } else {
+          errors.push(`No pending approvals found for timeslip ${timeslipId}`);
+          continue;
+        }
+      }
+      successCount++;
+    } catch (error) {
+      errors.push(`Error processing timeslip ${timeslipId}: ${error.message}`);
+    }
+  }
+
+  return {
+    updatedCount: successCount,
+    message: `Successfully updated ${successCount} timeslip(s) to ${status} status`,
+    ...(errors.length > 0 && { errors })
+  };
+}
 
   /** ---- GET ALL BY EMPLOYEE ---- */
   async findAllByEmployee(employeeId: string) {
@@ -474,155 +547,9 @@ export class TimeslipService {
   }
 
   /** ---- GET TIMESLIPS BY APPROVER ---- */
-private async getAllApprovalsForTimeslip(timeslipId: string) {
-  return await this.approvalRepo.find({
-    where: { timeslip_id: timeslipId },
-    relations: ['approver']
-  });
-}
-
-/**
- * Get workflow steps information for multiple timeslips
- */
-private async getWorkflowStepsForTimeslips(timeslipIds: string[]) {
-  if (timeslipIds.length === 0) return {};
-
-  // Get workflow information for all timeslips
-  const workflowData = await this.timeslipRepo
-    .createQueryBuilder('t')
-    .leftJoin('t.employee', 'emp')
-    .leftJoin('t.approvals', 'ta')
-    .leftJoin('workflow_assignments', 'wa', 'wa.approver_id = ta.approver_id AND wa.employee_id = emp.id')
-    .leftJoin('wa.step', 'ws')
-    .leftJoin('ws.workflow', 'w')
-    .select([
-      't.id as timeslip_id',
-      'ta.approver_id',
-      'ta.action',
-      'ws.step_order',
-      'ws.name as step_name',
-      'ws.id as step_id'
-    ])
-    .where('t.id IN (:...timeslipIds)', { timeslipIds })
-    .andWhere('w.type = :workflowType', { workflowType: 'TIMESLIP' })
-    .andWhere('w.is_active = true')
-    .andWhere('ws.status = :stepStatus', { stepStatus: 'ACTIVE' })
-    .orderBy('ws.step_order', 'ASC')
-    .getRawMany();
-
-  // Group by timeslip ID
-  const groupedData = {};
-  workflowData.forEach(item => {
-    if (!groupedData[item.timeslip_id]) {
-      groupedData[item.timeslip_id] = [];
-    }
-    groupedData[item.timeslip_id].push({
-      approverId: item.ta_approver_id,
-      action: item.ta_action,
-      stepOrder: item.ws_step_order,
-      stepName: item.step_name,
-      stepId: item.ws_id
-    });
-  });
-
-  return groupedData;
-}
-
-/**
- * Calculate step tracking information for a timeslip
- */
-private calculateStepTracking(approvals: any[], workflowSteps: any[], currentApproverId: string) {
-  // Sort approvals by step order if workflow data is available
-  const sortedApprovals = approvals.sort((a, b) => {
-    const stepA = workflowSteps.find(ws => ws.approverId === a.approver_id);
-    const stepB = workflowSteps.find(ws => ws.approverId === b.approver_id);
-    return (stepA?.stepOrder || 999) - (stepB?.stepOrder || 999);
-  });
-
-  const totalSteps = sortedApprovals.length;
-  let currentStep = 1;
-  let workflowStatus = 'IN_PROGRESS';
-  let isThisStep = false;
-
-  // Create step details array
-  const stepDetails = sortedApprovals.map((approval, index) => {
-    const workflowStep = workflowSteps.find(ws => ws.approverId === approval.approver_id);
-    const stepNumber = workflowStep?.stepOrder || (index + 1);
-    
-    return {
-      stepNumber,
-      stepName: workflowStep?.stepName || `Step ${stepNumber}`,
-      approverId: approval.approver_id,
-      approver: approval.approver ? {
-        id: approval.approver.id,
-        firstName: approval.approver.firstName,
-        lastName: approval.approver.lastName,
-        employeeCode: approval.approver.employeeCode
-      } : null,
-      status: approval.action,
-      remarks: approval.remarks,
-      acted_at: approval.acted_at,
-      isThisStep: false // Will be updated below
-    };
-  });
-
-  // Sort step details by step number
-  stepDetails.sort((a, b) => a.stepNumber - b.stepNumber);
-
-  // Calculate current step and isThisStep flag
-  let foundPendingStep = false;
-  
-  for (let i = 0; i < stepDetails.length; i++) {
-    const step = stepDetails[i];
-    
-    if (step.status === 'REJECTED') {
-      // If any step is rejected, workflow is rejected
-      workflowStatus = 'REJECTED';
-      currentStep = step.stepNumber;
-      // The rejected step becomes the current step (for potential re-approval)
-      if (step.approverId === currentApproverId) {
-        isThisStep = true;
-        step.isThisStep = true;
-      }
-      break;
-    } else if (step.status === 'PENDING' && !foundPendingStep) {
-      // First pending step is the current step
-      currentStep = step.stepNumber;
-      foundPendingStep = true;
-      
-      if (step.approverId === currentApproverId) {
-        isThisStep = true;
-        step.isThisStep = true;
-      }
-    } else if (step.status === 'APPROVED') {
-      // Continue to next step
-      continue;
-    }
-  }
-
-  // If all steps are approved, workflow is complete
-  if (!foundPendingStep && stepDetails.every(step => step.status === 'APPROVED')) {
-    workflowStatus = 'COMPLETED';
-    currentStep = totalSteps;
-  }
-
-  return {
-    currentStep,
-    totalSteps,
-    isThisStep,
-    stepDetails,
-    workflowStatus,
-    approvalProgress: {
-      approved: stepDetails.filter(s => s.status === 'APPROVED').length,
-      pending: stepDetails.filter(s => s.status === 'PENDING').length,
-      rejected: stepDetails.filter(s => s.status === 'REJECTED').length,
-      total: totalSteps
-    }
-  };
-}
-
 async findByApprover(approverId: string, options: { status?: string; page: number; limit: number }) {
   const { status, page, limit } = options;
+
   let queryBuilder = this.timeslipRepo
     .createQueryBuilder('t')
     .leftJoin('t.employee', 'emp')
@@ -630,74 +557,145 @@ async findByApprover(approverId: string, options: { status?: string; page: numbe
     .leftJoin('emp.designation', 'desig')
     .leftJoin('t.approvals', 'a')
     .select([
-      // Timeslip fields
-      't.id',
-      't.date',
-      't.missing_type',
-      't.corrected_in',
-      't.corrected_out',
-      't.reason',
-      't.status',
-      't.created_at',
-      't.updated_at',
-      // Employee fields
-      'emp.id',
-      'emp.firstName',
-      'emp.lastName',
-      'emp.employeeCode',
-      'emp.workEmail',
-      'emp.photoUrl',
-      // Department fields
-      'dept.id',
-      'dept.name',
-      'dept.code',
-      // Designation fields
-      'desig.id',
-      'desig.name',
-      'desig.code',
-      // Approval fields
-      'a.id',
-      'a.action',
-      'a.remarks',
-      'a.acted_at'
+      't.id', 't.date', 't.missing_type', 't.corrected_in',
+      't.corrected_out', 't.reason', 't.status', 't.created_at', 't.updated_at',
+      'emp.id', 'emp.firstName', 'emp.lastName', 'emp.employeeCode',
+      'emp.workEmail', 'emp.photoUrl',
+      'dept.id', 'dept.name', 'dept.code',
+      'desig.id', 'desig.name', 'desig.code',
+      'a.id', 'a.action', 'a.remarks', 'a.acted_at', 'a.approver_id'
     ])
     .where('a.approver_id = :approverId', { approverId });
 
-  // Add status filter if provided
   if (status) {
     queryBuilder = queryBuilder.andWhere('a.action = :status', { status });
   }
 
-  // Order by creation date (newest first)
   queryBuilder = queryBuilder.orderBy('t.created_at', 'DESC');
-
-  // Get total count for pagination
   const total = await queryBuilder.getCount();
-
-  // Apply pagination
   const offset = (page - 1) * limit;
   queryBuilder = queryBuilder.skip(offset).take(limit);
-
-  // Execute query
   const results = await queryBuilder.getMany();
 
-  // Get all timeslip IDs for batch processing of workflow steps
   const timeslipIds = results.map(t => t.id);
-  
-  // Fetch workflow step information for all timeslips
-  const workflowSteps = await this.getWorkflowStepsForTimeslips(timeslipIds);
+  if (timeslipIds.length === 0) {
+    return {
+      data: [],
+      pagination: { page, limit, total: 0, totalPages: 0, hasNext: false, hasPrev: false }
+    };
+  }
 
-  // Transform data to clean structure
-  const data = await Promise.all(results.map(async (t: any) => {
-    // Get all approvals for this timeslip
-    const allTimeslipApprovals = await this.getAllApprovalsForTimeslip(t.id);
-    const workflowInfo = workflowSteps[t.id] || [];
+  // ✅ WORKING: Use the same approach as findByEmployee method
+  const workflowInfo = await this.assignmentRepo
+    .createQueryBuilder('wa')
+    .leftJoin('wa.step', 'ws')
+    .leftJoin('ws.workflow', 'w')
+    .leftJoin('timeslip_approvals', 'ta', 'ta.approver_id = wa.approver_id')
+    .select([
+      'ta.timeslip_id',
+      'ta.action', 
+      'ta.approver_id',
+      'ws.step_order',
+      'ws.name as step_name',
+      'w.type as workflow_type',
+      'wa.employee_id'
+    ])
+    .where('ta.timeslip_id IN (:...timeslipIds)', { timeslipIds })
+    .andWhere('w.type = :workflowType', { workflowType: 'TIMESLIP' })
+    .andWhere('w.is_active = true')
+    .andWhere('ws.status = :stepStatus', { stepStatus: 'ACTIVE' })
+    .orderBy('ws.step_order', 'ASC')
+    .getRawMany();
+
+  // Group workflow info by timeslip ID and approver
+  const workflowByTimeslipAndApprover: Record<string, Record<string, any>> = {};
+  workflowInfo.forEach(item => {
+    const timeslipId = item.ta_timeslip_id;
+    const approverId = item.ta_approver_id;
     
-    // Calculate step information
-    const stepTrackingInfo = this.calculateStepTracking(allTimeslipApprovals, workflowInfo, approverId);
+    if (!workflowByTimeslipAndApprover[timeslipId]) {
+      workflowByTimeslipAndApprover[timeslipId] = {};
+    }
     
-    // Find the approval for this approver
+    workflowByTimeslipAndApprover[timeslipId][approverId] = {
+      action: item.ta_action,
+      stepOrder: item.ws_step_order,
+      stepName: item.step_name,
+      workflowType: item.workflow_type,
+      employeeId: item.wa_employee_id
+    };
+  });
+
+  // ✅ WORKING: Get all approvals for each timeslip (simple query)  
+  const allApprovals = await this.approvalRepo
+    .createQueryBuilder('ta')
+    .select(['ta.id', 'ta.timeslip_id', 'ta.approver_id', 'ta.action', 'ta.acted_at'])
+    .where('ta.timeslip_id IN (:...timeslipIds)', { timeslipIds })
+    .andWhere('ta.timeslip_id IS NOT NULL')
+    .getMany();
+
+  // Group all approvals by timeslip ID
+  const allApprovalsByTimeslip: Record<string, any[]> = allApprovals.reduce((acc, approval) => {
+    if (approval.timeslip_id) {
+      if (!acc[approval.timeslip_id]) {
+        acc[approval.timeslip_id] = [];
+      }
+      acc[approval.timeslip_id].push(approval);
+    }
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  // ✅ WORKING: Calculate workflow info using both workflow data and approval data
+  const calculateWorkflowInfo = (timeslipId: string, targetApproverId: string) => {
+    const workflowData = workflowByTimeslipAndApprover[timeslipId] || {};
+    const allTimeslipApprovals = allApprovalsByTimeslip[timeslipId] || [];
+    
+    const totalSteps = allTimeslipApprovals.length;
+    
+    // Get step number from workflow data
+    const targetWorkflowData = workflowData[targetApproverId];
+    const stepNumber = targetWorkflowData?.stepOrder || 1;
+    
+    if (totalSteps === 0) {
+      return { isCurrentStep: false, stepNumber, totalSteps: 0 };
+    }
+
+    // Create a mapping of approver to step order
+    const approverStepMap: Record<string, number> = {};
+    Object.keys(workflowData).forEach(approverId => {
+      approverStepMap[approverId] = workflowData[approverId].stepOrder;
+    });
+
+    // Sort approvals by step order
+    const sortedApprovals = allTimeslipApprovals.sort((a, b) => {
+      const stepA = approverStepMap[a.approver_id] || 999;
+      const stepB = approverStepMap[b.approver_id] || 999;
+      return stepA - stepB;
+    });
+
+    // Check workflow status
+    const hasRejected = sortedApprovals.some(a => a.action === 'REJECTED');
+    if (hasRejected) {
+      return { isCurrentStep: false, stepNumber, totalSteps };
+    }
+
+    const allCompleted = sortedApprovals.every(a => a.action !== 'PENDING');
+    if (allCompleted) {
+      return { isCurrentStep: false, stepNumber, totalSteps };
+    }
+
+    // Find first pending approval in step order
+    const firstPendingApproval = sortedApprovals.find(a => a.action === 'PENDING');
+    const isCurrentStep = firstPendingApproval && firstPendingApproval.approver_id === targetApproverId;
+    
+    return { isCurrentStep: !!isCurrentStep, stepNumber, totalSteps };
+  };
+
+  const data = results.map((t: any) => {
     const approval = t.approvals?.find((a: any) => a.approver_id === approverId);
+    
+    // ✅ WORKING: Calculate workflow step information
+    const { isCurrentStep, stepNumber, totalSteps } = calculateWorkflowInfo(t.id, approverId);
 
     return {
       id: t.id,
@@ -727,37 +725,113 @@ async findByApprover(approverId: string, options: { status?: string; page: numbe
           code: t.employee.designation.code,
         } : null,
       },
+      // ✅ WORKING: Now should return correct values
       approval: approval ? {
         id: approval.id,
         action: approval.action,
         remarks: approval.remarks,
         acted_at: approval.acted_at,
+        total_steps: totalSteps,      // ✅ From actual approval count
+        current_step: isCurrentStep   // ✅ Based on workflow sequence
       } : null,
-      // New step tracking fields
-      currentStep: stepTrackingInfo.currentStep,
-      totalSteps: stepTrackingInfo.totalSteps,
-      isThisStep: stepTrackingInfo.isThisStep, // TRUE if this approver should act now
-      stepDetails: stepTrackingInfo.stepDetails,
-      workflowStatus: stepTrackingInfo.workflowStatus,
-      approvalProgress: stepTrackingInfo.approvalProgress
     };
-  }));
-
-  // Calculate pagination info
-  const totalPages = Math.ceil(total / limit);
-  const hasNext = page < totalPages;
-  const hasPrev = page > 1;
+  });
 
   return {
     data,
     pagination: {
-      page,
-      limit,
-      total,
-      totalPages,
-      hasNext,
-      hasPrev,
+      page, limit, total,
+      totalPages: Math.ceil(total / limit),
+      hasNext: page < Math.ceil(total / limit),
+      hasPrev: page > 1,
     },
+  };
+}
+
+/** ---- CORRECTED BATCH APPROVE SUBMISSIONS ---- */
+async batchApproveSubmissions(dto: BatchApproveSubmissionsDto): Promise<{ 
+  updatedCount: number; 
+  completedTimeslips: string[];
+  message: string; 
+  errors?: string[] 
+}> {
+  const { approvalIds, action, remarks } = dto;
+  const errors: string[] = [];
+  const completedTimeslips: string[] = [];
+  let successCount = 0;
+
+  const existingApprovals = await this.approvalRepo
+    .createQueryBuilder('approval')
+    .where('approval.id IN (:...ids)', { ids: approvalIds })
+    .getCount();
+
+  if (existingApprovals === 0) {
+    throw new NotFoundException('No approvals found with the provided IDs');
+  }
+
+  for (const approvalId of approvalIds) {
+    try {
+      const approval = await this.approvalRepo.findOne({
+        where: { id: approvalId },
+        relations: ['timeslip'],
+        select: {
+          id: true,
+          action: true,
+          timeslip_id: true,
+          timeslip: { id: true, status: true }
+        }
+      });
+
+      if (!approval) {
+        errors.push(`Approval ${approvalId} not found`);
+        continue;
+      }
+
+      if (approval.action !== 'PENDING') {
+        errors.push(`Approval ${approvalId} is already ${approval.action}`);
+        continue;
+      }
+
+      approval.action = action;
+      approval.remarks = remarks || null;
+      approval.acted_at = new Date();
+      await this.approvalRepo.save(approval);
+
+      // ✅ FIX: Add null check for timeslip_id
+      const timeslipId = approval.timeslip?.id;
+      if (!timeslipId) {
+        errors.push(`Approval ${approvalId} has no associated timeslip`);
+        continue;
+      }
+
+      const remainingPending = await this.approvalRepo.count({
+        where: { timeslip: { id: timeslipId }, action: 'PENDING' },
+      });
+
+      if (remainingPending === 0) {
+        const anyRejected = await this.approvalRepo.count({
+          where: { timeslip: { id: timeslipId }, action: 'REJECTED' },
+        });
+
+        const finalStatus = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
+        await this.timeslipRepo.update(timeslipId, { status: finalStatus });
+        
+        if (!completedTimeslips.includes(timeslipId)) {
+          completedTimeslips.push(timeslipId);
+        }
+      }
+
+      successCount++;
+    } catch (error) {
+      errors.push(`Error processing approval ${approvalId}: ${error.message}`);
+    }
+  }
+
+  return {
+    updatedCount: successCount,
+    completedTimeslips,
+    message: `Successfully ${action.toLowerCase()} ${successCount} approval(s)`,
+    ...(errors.length > 0 && { errors })
   };
 }
 
