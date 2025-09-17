@@ -513,8 +513,7 @@ export class TimeslipService {
         'a.id',
         'a.action',
         'a.remarks',
-        'a.acted_at',
-        'a.approver_id'
+        'a.acted_at'
       ])
       .where('a.approver_id = :approverId', { approverId });
 
@@ -536,68 +535,10 @@ export class TimeslipService {
     // Execute query
     const results = await queryBuilder.getMany();
 
-    // Get timeslip IDs for workflow step calculation
-    const timeslipIds = results.map(r => r.id);
-    
-    if (timeslipIds.length === 0) {
-      return {
-        data: [],
-        pagination: {
-          page,
-          limit,
-          total: 0,
-          totalPages: 0,
-          hasNext: false,
-          hasPrev: false,
-        },
-      };
-    }
-
-    // Get all approvals for these timeslips to calculate current step
-    const allApprovals = await this.approvalRepo
-      .createQueryBuilder('a')
-      .select(['a.timeslip_id', 'a.approver_id', 'a.action'])
-      .where('a.timeslip_id IN (:...timeslipIds)', { timeslipIds })
-      .orderBy('a.id', 'ASC')
-      .getRawMany();
-
-    // Group approvals by timeslip ID
-    const approvalsByTimeslip = allApprovals.reduce((acc, item) => {
-      if (!acc[item.a_timeslip_id]) {
-        acc[item.a_timeslip_id] = [];
-      }
-      acc[item.a_timeslip_id].push({
-        approverId: item.a_approver_id,
-        action: item.a_action
-      });
-      return acc;
-    }, {});
-
     // Transform data to clean structure
     const data = results.map((t: any) => {
       // Find the approval for this approver
       const approval = t.approvals?.find((a: any) => a.approver_id === approverId);
-      const timeslipApprovals = approvalsByTimeslip[t.id] || [];
-      
-      // Calculate current_step for this approver
-      let currentStep = false;
-      
-      if (timeslipApprovals.length > 0) {
-        // Find approver's position in the workflow (0-based index)
-        const approverIndex = timeslipApprovals.findIndex(a => a.approverId === approverId);
-        
-        if (approverIndex !== -1) {
-          // Count how many approvals before this approver are approved
-          const previousApprovals = timeslipApprovals.slice(0, approverIndex);
-          const allPreviousApproved = previousApprovals.every(a => a.action === 'APPROVED');
-          
-          // Current step if all previous approvals are approved (or no previous approvals)
-          currentStep = allPreviousApproved;
-        }
-      } else {
-        // Fallback: if no approval data, check if this approval exists and is pending
-        currentStep = approval?.action === 'PENDING';
-      }
 
       return {
         id: t.id,
@@ -633,7 +574,6 @@ export class TimeslipService {
           remarks: approval.remarks,
           acted_at: approval.acted_at,
         } : null,
-        current_step: currentStep
       };
     });
 
