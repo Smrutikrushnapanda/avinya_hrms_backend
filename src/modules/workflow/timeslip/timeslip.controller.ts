@@ -16,6 +16,7 @@ import { CreateTimeslipDto } from './dto/create-timeslip.dto';
 import { UpdateTimeslipDto } from './dto/update-timeslip.dto';
 import { ApproveTimeslipDto } from './dto/approve-timeslip.dto';
 import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
+import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto';
 
 
 @ApiTags('Timeslips')
@@ -121,8 +122,8 @@ export class TimeslipController {
   @ApiNotFoundResponse({ description: 'No timeslips found with provided IDs' })
   @ApiBody({ type: BatchUpdateTimeslipStatusDto })
   async batchUpdateStatuses(@Body() dto: BatchUpdateTimeslipStatusDto) {
-    return this.timeslipService.batchUpdateStatuses(dto);
-  }
+  return this.timeslipService.batchUpdateStatuses(dto, dto.approverId);
+}
 
   @Get('all-by-employee/:employeeId')
 @ApiOperation({ 
@@ -224,6 +225,27 @@ async getTimeslipsByApprover(
   if (limit > maxLimit) limit = maxLimit;
   
   return this.timeslipService.findByApprover(approverId, { status, page, limit });
+}
+
+@Post('batch-approve-submissions')
+@ApiOperation({
+  summary: 'Batch approve/reject timeslip submissions',
+  description: 'Update multiple TimeslipApproval records. Automatically updates timeslip status when workflow is complete.'
+})
+@ApiCreatedResponse({
+  description: 'Approvals updated successfully',
+  schema: {
+    example: {
+      updatedCount: 2,
+      completedTimeslips: ['timeslip-uuid-1'],
+      message: 'Successfully approved 2 approval(s)',
+      errors: []
+    }
+  }
+})
+@ApiBody({ type: BatchApproveSubmissionsDto })
+async batchApproveSubmissions(@Body() dto: BatchApproveSubmissionsDto) {
+  return this.timeslipService.batchApproveSubmissions(dto);
 }
 
 }

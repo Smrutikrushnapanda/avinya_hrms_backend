@@ -1,4 +1,4 @@
-import { IsArray, ArrayNotEmpty, IsEnum, IsUUID } from 'class-validator';
+import { IsArray, ArrayNotEmpty, IsEnum, IsUUID, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class BatchUpdateTimeslipStatusDto {
@@ -19,4 +19,14 @@ export class BatchUpdateTimeslipStatusDto {
   })
   @IsEnum(['PENDING', 'APPROVED', 'REJECTED'])
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+
+  @ApiProperty({
+    description: 'Optional: Specific approver ID for workflow-based updates. If not provided, performs admin override.',
+    type: String,
+    required: false,
+    example: 'approver-uuid-here'
+  })
+  @IsOptional()
+  @IsUUID()
+  approverId?: string;
 }
