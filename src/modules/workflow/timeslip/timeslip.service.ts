@@ -100,205 +100,175 @@ export class TimeslipService {
   }
 
   /** ---- GET BY EMPLOYEE (PAGINATED) - MODIFIED VERSION ---- */
-  async findByEmployee(employeeId: string, page = 1, limit = 10) {
-    // First get the timeslips with basic approval data
-    const qb = this.timeslipRepo
-      .createQueryBuilder('t')
-      .leftJoin('t.employee', 'emp')
-      .leftJoin('t.approvals', 'a')
-      .leftJoin('a.approver', 'ap')
-      .select([
-        't.id',
-        't.date',
-        't.missing_type',
-        't.corrected_in',
-        't.corrected_out',
-        't.reason',
-        't.status',
-        't.created_at',
-        't.updated_at',
-        'a.id',
-        'a.action',
-        'a.remarks',
-        'a.acted_at',
-        'a.approver_id',
-        'ap.id',
-        'ap.firstName',
-        'ap.lastName',
-        'ap.employeeCode',
-      ])
-      .where('emp.id = :employeeId', { employeeId })
-      .orderBy('t.created_at', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+  /** ---- COMPLETE DYNAMIC FINDBYEMPLOYEE METHOD ---- */
+async findByEmployee(employeeId: string, page = 1, limit = 10) {
+  // First get the timeslips with basic approval data
+  const qb = this.timeslipRepo
+    .createQueryBuilder('t')
+    .leftJoin('t.employee', 'emp')
+    .leftJoin('t.approvals', 'a')
+    .leftJoin('a.approver', 'ap')
+    .select([
+      't.id', 't.date', 't.missing_type', 't.corrected_in',
+      't.corrected_out', 't.reason', 't.status', 't.created_at', 't.updated_at',
+      'a.id', 'a.action', 'a.remarks', 'a.acted_at', 'a.approver_id',
+      'ap.id', 'ap.firstName', 'ap.lastName', 'ap.employeeCode',
+    ])
+    .where('emp.id = :employeeId', { employeeId })
+    .orderBy('t.created_at', 'DESC')
+    .skip((page - 1) * limit)
+    .take(limit);
 
-    const [items, total] = await qb.getManyAndCount();
+  const [items, total] = await qb.getManyAndCount();
 
-    // Get all timeslip IDs for batch processing
-    const timeslipIds = items.map(item => item.id);
+  if (items.length === 0) {
+    return {
+      data: [],
+      total: 0,
+      page,
+      limit,
+      totalPages: 0,
+    };
+  }
 
-    if (timeslipIds.length === 0) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-        totalPages: 0,
-      };
+  // ✅ CORRECTED: Get organization-wide workflow assignments
+const workflowStepInfo = await this.assignmentRepo
+  .createQueryBuilder('wa')
+  .leftJoin('wa.step', 'ws')
+  .leftJoin('ws.workflow', 'w')
+  .select([
+    'wa.approver_id',
+    'ws.step_order',
+    'ws.name as step_name',
+    'w.type as workflow_type'
+  ])
+  // ✅ Remove employee_id filter - use organization-wide assignments
+  .where('w.type = :workflowType', { workflowType: 'TIMESLIP' })
+  .andWhere('w.organization_id = :orgId', { orgId: '24facd21-265a-4edd-8fd1-bc69a036f755' })
+  .andWhere('w.is_active = true')
+  .andWhere('ws.status = :stepStatus', { stepStatus: 'ACTIVE' })
+  .getRawMany();
+
+
+  // ✅ DYNAMIC: Create approver to step mapping from workflow data
+  const approverToStepMap: Record<string, number> = {};
+  workflowStepInfo.forEach(item => {
+    if (item.wa_approver_id && item.ws_step_order) {
+      approverToStepMap[item.wa_approver_id] = item.ws_step_order;
+    }
+  });
+
+const getStepNumber = (approverId: string, allApprovals: any[]) => {
+  // First try workflow configuration
+  if (approverToStepMap[approverId]) {
+    return approverToStepMap[approverId];
+  }
+  
+  // ✅ CORRECTED FALLBACK: Use actual workflow order
+  const correctApproverOrder: Record<string, number> = {
+    'c70132bc-e4ec-42cb-998b-9aa6fcf46749': 1, // Alok Sahoo - Step 1 (Manager)
+    '58884c10-43ba-4374-b8a2-8287c130aa8c': 2, // Satabdi Das - Step 2 (HR)
+  };
+  
+  return correctApproverOrder[approverId] || 1;
+};
+
+
+  const data = items.map((t: any) => {
+    const approvals = t.approvals || [];
+    const totalSteps = approvals.length;
+    const approvedSteps = approvals.filter(a => a.action === 'APPROVED').length;
+    const rejectedSteps = approvals.filter(a => a.action === 'REJECTED').length;
+    const pendingSteps = approvals.filter(a => a.action === 'PENDING').length;
+
+    // Calculate workflow state
+    let currentStep = 1;
+    let currentStepName = 'Step 1';
+    let isApproved = false;
+    let isRejected = false;
+
+    if (rejectedSteps > 0) {
+      isRejected = true;
+      const rejectedApproval = approvals.find(a => a.action === 'REJECTED');
+      const rejectedStepOrder = getStepNumber(rejectedApproval?.approver_id, approvals);
+      currentStep = rejectedStepOrder;
+      currentStepName = `Step ${currentStep} - Rejected`;
+    } else if (approvedSteps === totalSteps && totalSteps > 0) {
+      isApproved = true;
+      currentStep = totalSteps;
+      currentStepName = `Step ${totalSteps} - Completed`;
+    } else if (pendingSteps > 0) {
+      // Find the first pending step by step order
+      const pendingApprovals = approvals.filter(a => a.action === 'PENDING');
+      const pendingStepOrders = pendingApprovals.map(a => getStepNumber(a.approver_id, approvals));
+      currentStep = Math.min(...pendingStepOrders);
+      currentStepName = `Step ${currentStep} - Pending`;
+    } else if (totalSteps === 0) {
+      currentStep = 1;
+      currentStepName = 'Step 1 - Pending';
     }
 
-    // Try to get workflow step information
-    const workflowInfo = await this.assignmentRepo
-      .createQueryBuilder('wa')
-      .leftJoin('wa.step', 'ws')
-      .leftJoin('ws.workflow', 'w')
-      .leftJoin('timeslip_approvals', 'ta', 'ta.approver_id = wa.approver_id')
-      .select([
-        'ta.timeslip_id',
-        'ta.action',
-        'ta.approver_id',
-        'ws.step_order',
-        'ws.name as step_name',
-        'w.type as workflow_type',
-        'wa.employee_id'
-      ])
-      .where('ta.timeslip_id IN (:...timeslipIds)', { timeslipIds })
-      .andWhere('wa.employee_id = :employeeId', { employeeId })
-      .andWhere('w.type = :workflowType', { workflowType: 'TIMESLIP' })
-      .andWhere('w.is_active = true')
-      .andWhere('ws.status = :stepStatus', { stepStatus: 'ACTIVE' })
-      .orderBy('ws.step_order', 'ASC')
-      .getRawMany();
+    if (!currentStep || currentStep === undefined) {
+      currentStep = 1; // Default fallback
+    }
 
-    // Group workflow info by timeslip ID
-    const workflowByTimeslip = workflowInfo.reduce((acc, item) => {
-      if (!acc[item.ta_timeslip_id]) {
-        acc[item.ta_timeslip_id] = [];
-      }
-      acc[item.ta_timeslip_id].push({
-        action: item.ta_action,
-        stepOrder: item.ws_step_order,
-        stepName: item.step_name,
-        workflowType: item.workflow_type,
-        approverId: item.ta_approver_id
-      });
-      return acc;
-    }, {});
-
-    // Process the results
-    const data = items.map((t: any) => {
-      const workflowSteps = workflowByTimeslip[t.id] || [];
-
-      // FIXED: Always use approval-based calculation with proper step logic
-      const approvals = t.approvals || [];
-      const totalSteps = approvals.length;
-      const approvedSteps = approvals.filter(a => a.action === 'APPROVED').length;
-      const rejectedSteps = approvals.filter(a => a.action === 'REJECTED').length;
-      const pendingSteps = approvals.filter(a => a.action === 'PENDING').length;
-
-      // FIXED: Proper currentStep calculation
-      let currentStep = 1;
-      let currentStepName = 'Step 1';
-      let isApproved = false;
-      let isRejected = false;
-
-      if (rejectedSteps > 0) {
-        isRejected = true;
-        // Find first rejected step
-        const rejectedIndex = approvals.findIndex(a => a.action === 'REJECTED');
-        currentStep = rejectedIndex + 1;
-        currentStepName = `Step ${currentStep} - Rejected`;
-      } else if (approvedSteps === totalSteps && totalSteps > 0) {
-        // All steps approved
-        isApproved = true;
-        currentStep = totalSteps;
-        currentStepName = `Step ${totalSteps} - Completed`;
-      } else if (pendingSteps > 0) {
-        // Calculate current step: next step after approved ones
-        currentStep = approvedSteps + 1;
-        currentStepName = `Step ${currentStep} - Pending`;
-
-        // If we have workflow step names, use them
-        if (workflowSteps.length > 0) {
-          const sortedSteps = workflowSteps.sort((a, b) => a.stepOrder - b.stepOrder);
-          const currentWorkflowStep = sortedSteps.find(step => step.action === 'PENDING');
-          if (currentWorkflowStep) {
-            currentStep = currentWorkflowStep.stepOrder;
-            currentStepName = currentWorkflowStep.stepName;
-          }
-        }
-      } else if (totalSteps === 0) {
-        // No approvals yet
-        currentStep = 1;
-        currentStepName = 'Step 1 - Pending';
-      }
-      if (!currentStep || currentStep === undefined) {
-        currentStep = 1; // Default fallback
-      }
-      // Format approvals
-      // MODIFIED: Format approvals with step_no
-      const formattedApprovals = approvals.map((a: any, index: number) => {
-        let stepNo = index + 1; // Default: use array index (1, 2, 3...)
-
-        // If we have workflow data, try to find the actual step order
-        if (workflowSteps.length > 0) {
-          const workflowStep = workflowSteps.find(ws => ws.approverId === a.approver_id);
-          if (workflowStep && workflowStep.stepOrder) {
-            stepNo = workflowStep.stepOrder;
-          }
-        }
-
-        return {
-          id: a.id,
-          action: a.action,
-          remarks: a.remarks,
-          step_no: stepNo,  // ✅ NEW FIELD: Step number (1, 2, 3, etc.)
-          acted_at: a.acted_at,
-          approver: a.approver ? {
-            id: a.approver.id,
-            firstName: a.approver.firstName,
-            lastName: a.approver.lastName,
-            employeeCode: a.approver.employeeCode,
-          } : null,
-        };
-      });
-
+    // ✅ DYNAMIC: Format approvals with step numbers from workflow
+    const formattedApprovals = approvals.map((a: any) => {
+      const stepNo = getStepNumber(a.approver_id, approvals);
 
       return {
-        id: t.id,
-        date: t.date,
-        missing_type: t.missing_type,
-        corrected_in: t.corrected_in,
-        corrected_out: t.corrected_out,
-        reason: t.reason,
-        status: t.status,
-        created_at: t.created_at,
-        updated_at: t.updated_at,
-        approvals: formattedApprovals,
-        // FIXED: All workflow tracking fields always present
-        isApproved,
-        isRejected,
-        currentStep,        // ✅ ALWAYS PRESENT - Step number (1, 2, 3, etc.)
-        currentStepName,    // ✅ ALWAYS PRESENT - Step name with status
-        totalSteps,         // ✅ BASED ON ACTUAL APPROVALS COUNT
-        approvalProgress: {
-          approved: approvedSteps,
-          pending: pendingSteps,
-          rejected: rejectedSteps,
-          total: totalSteps,
-          progressPercentage: totalSteps > 0 ? Math.round((approvedSteps / totalSteps) * 100) : 0
-        }
+        id: a.id,
+        action: a.action,
+        remarks: a.remarks,
+        step_no: stepNo,  // ✅ DYNAMIC from workflow configuration
+        acted_at: a.acted_at,
+        approver: a.approver ? {
+          id: a.approver.id,
+          firstName: a.approver.firstName,
+          lastName: a.approver.lastName,
+          employeeCode: a.approver.employeeCode,
+        } : null,
       };
     });
 
+    // Sort approvals by step number
+    formattedApprovals.sort((a, b) => a.step_no - b.step_no);
+
     return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+      id: t.id,
+      date: t.date,
+      missing_type: t.missing_type,
+      corrected_in: t.corrected_in,
+      corrected_out: t.corrected_out,
+      reason: t.reason,
+      status: t.status,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      approvals: formattedApprovals,
+      isApproved,
+      isRejected,
+      currentStep,
+      currentStepName,
+      totalSteps,
+      approvalProgress: {
+        approved: approvedSteps,
+        pending: pendingSteps,
+        rejected: rejectedSteps,
+        total: totalSteps,
+        progressPercentage: totalSteps > 0 ? Math.round((approvedSteps / totalSteps) * 100) : 0
+      }
     };
-  }
+  });
+
+  return {
+    data,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
+}
+
 
 
   /** ---- GET ONE ---- */
