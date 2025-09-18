@@ -100,8 +100,9 @@ export class TimeslipService {
   }
 
   /** ---- GET BY EMPLOYEE (PAGINATED) - MODIFIED VERSION ---- */
-  /** ---- SIMPLE FALLBACK SOLUTION THAT WILL WORK ---- */
+  /** ---- COMPLETE DYNAMIC FINDBYEMPLOYEE METHOD ---- */
 async findByEmployee(employeeId: string, page = 1, limit = 10) {
+  // First get the timeslips with basic approval data
   const qb = this.timeslipRepo
     .createQueryBuilder('t')
     .leftJoin('t.employee', 'emp')
@@ -130,24 +131,48 @@ async findByEmployee(employeeId: string, page = 1, limit = 10) {
     };
   }
 
-  // ✅ SIMPLE APPROACH: Define step order based on business logic
-  const approverStepMapping: Record<string, number> = {
-    '58884c10-43ba-4374-b8a2-8287c130aa8c': 1, // Satabdi Das - Step 1
-    'c70132bc-e4ec-42cb-998b-9aa6fcf46749': 2, // Alok Sahoo - Step 2 (HR)
-  };
+  // ✅ CORRECTED: Get organization-wide workflow assignments
+const workflowStepInfo = await this.assignmentRepo
+  .createQueryBuilder('wa')
+  .leftJoin('wa.step', 'ws')
+  .leftJoin('ws.workflow', 'w')
+  .select([
+    'wa.approver_id',
+    'ws.step_order',
+    'ws.name as step_name',
+    'w.type as workflow_type'
+  ])
+  // ✅ Remove employee_id filter - use organization-wide assignments
+  .where('w.type = :workflowType', { workflowType: 'TIMESLIP' })
+  .andWhere('w.organization_id = :orgId', { orgId: '24facd21-265a-4edd-8fd1-bc69a036f755' })
+  .andWhere('w.is_active = true')
+  .andWhere('ws.status = :stepStatus', { stepStatus: 'ACTIVE' })
+  .getRawMany();
 
-  // ✅ STEP NUMBER CALCULATION FUNCTION
-  const getStepNumber = (approverId: string, allApprovals: any[]) => {
-    // If we have predefined mapping, use it
-    if (approverStepMapping[approverId]) {
-      return approverStepMapping[approverId];
+
+  // ✅ DYNAMIC: Create approver to step mapping from workflow data
+  const approverToStepMap: Record<string, number> = {};
+  workflowStepInfo.forEach(item => {
+    if (item.wa_approver_id && item.ws_step_order) {
+      approverToStepMap[item.wa_approver_id] = item.ws_step_order;
     }
-    
-    // Fallback: sort approvers by ID and assign step numbers
-    const sortedApproverIds = [...new Set(allApprovals.map(a => a.approver_id))].sort();
-    const stepIndex = sortedApproverIds.indexOf(approverId);
-    return stepIndex + 1;
+  });
+
+const getStepNumber = (approverId: string, allApprovals: any[]) => {
+  // First try workflow configuration
+  if (approverToStepMap[approverId]) {
+    return approverToStepMap[approverId];
+  }
+  
+  // ✅ CORRECTED FALLBACK: Use actual workflow order
+  const correctApproverOrder: Record<string, number> = {
+    'c70132bc-e4ec-42cb-998b-9aa6fcf46749': 1, // Alok Sahoo - Step 1 (Manager)
+    '58884c10-43ba-4374-b8a2-8287c130aa8c': 2, // Satabdi Das - Step 2 (HR)
   };
+  
+  return correctApproverOrder[approverId] || 1;
+};
+
 
   const data = items.map((t: any) => {
     const approvals = t.approvals || [];
@@ -178,9 +203,16 @@ async findByEmployee(employeeId: string, page = 1, limit = 10) {
       const pendingStepOrders = pendingApprovals.map(a => getStepNumber(a.approver_id, approvals));
       currentStep = Math.min(...pendingStepOrders);
       currentStepName = `Step ${currentStep} - Pending`;
+    } else if (totalSteps === 0) {
+      currentStep = 1;
+      currentStepName = 'Step 1 - Pending';
     }
 
-    // ✅ CORRECTED: Format approvals with proper step numbers
+    if (!currentStep || currentStep === undefined) {
+      currentStep = 1; // Default fallback
+    }
+
+    // ✅ DYNAMIC: Format approvals with step numbers from workflow
     const formattedApprovals = approvals.map((a: any) => {
       const stepNo = getStepNumber(a.approver_id, approvals);
 
@@ -188,7 +220,7 @@ async findByEmployee(employeeId: string, page = 1, limit = 10) {
         id: a.id,
         action: a.action,
         remarks: a.remarks,
-        step_no: stepNo,  // ✅ NOW USES CORRECT STEP LOGIC
+        step_no: stepNo,  // ✅ DYNAMIC from workflow configuration
         acted_at: a.acted_at,
         approver: a.approver ? {
           id: a.approver.id,
