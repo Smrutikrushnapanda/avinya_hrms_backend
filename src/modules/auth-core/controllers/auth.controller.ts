@@ -42,8 +42,8 @@ export class AuthController {
       example1: {
         summary: 'Sample Login Request',
         value: {
-          userName: 'alok.sahoo@panchsofttechnologies.com',
-          password: 'Ab@2025',
+          userName: 'smruti@company.com',
+          password: 'skp@2026',
           clientInfo: {
             ip: '203.0.113.42',
             device: 'Windows 11 Chrome',
@@ -61,8 +61,8 @@ export class AuthController {
         "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwODkzNjI5MS1kOGY0LTQ0MjktYWM1MS0yODc5ZWEzNGRmNDMiLCJ1c2VyTmFtZSI6ImFsb2suc2Fob29AcGFuY2hzb2Z0dGVjaG5vbG9naWVzLmNvbSIsImZpcnN0TmFtZSI6IkFsb2siLCJtaWRkbGVOYW1lIjoiIiwibGFzdE5hbWUiOiJTYWhvbyIsImdlbmRlciI6Ik1BTEUiLCJkb2IiOiIxOTk1LTA1LTI0IiwiZW1haWwiOiJhbG9rLnNhaG9vQHBhbmNoc29mdHRlY2hub2xvZ2llcy5jb20iLCJtb2JpbGVOdW1iZXIiOiI5NjU4MDQ4MjM1Iiwib3JnYW5pemF0aW9uSWQiOiIyNGZhY2QyMS0yNjVhLTRlZGQtOGZkMS1iYzY5YTAzNmY3NTUiLCJyb2xlcyI6W3siaWQiOiJlNWI3NjFmNi1kNTU3LTRkNDUtYjcyNC1hYTFiM2IyY2I5NWEiLCJyb2xlTmFtZSI6IkVNUExPWUVFIn1dLCJtdXN0Q2hhbmdlUGFzc3dvcmQiOnRydWUsImlhdCI6MTc1MjI5OTIyMSwiZXhwIjoxNzUyMzAyODIxfQ.3xusjy6rEaguYYD5s8eIlQf-CD2SfA8ibxg_R_K-gJc",
         "user": {
           "id": "08936291-d8f4-4429-ac51-2879ea34df43",
-          "userName": "alok.sahoo@panchsofttechnologies.com",
-          "email": "alok.sahoo@panchsofttechnologies.com",
+          "userName": "smruti@gmail.com",
+          "email": "smruti@gmail.com",
           "password": "$2b$12$Uzo/gUA/0kBehY0YNWYfreGrPvkj7dCnp9SDQum8h3rOHcrXyqPme",
           "firstName": "Alok",
           "middleName": "",
