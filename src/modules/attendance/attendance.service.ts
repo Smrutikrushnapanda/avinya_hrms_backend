@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
@@ -12,11 +12,17 @@ import {
   AttendanceLog,
   BiometricDevice,
   WifiLocation,
+  AttendanceSettings,
 } from './entities';
 import {
   CreateAttendanceLogDto,
   CreateBiometricDeviceDto,
   CreateWifiLocationDto,
+  UpdateWifiLocationDto,
+  CreateAttendanceSettingsDto,
+  UpdateAttendanceSettingsDto,
+  CreateHolidayDto,
+  UpdateHolidayDto,
 } from './dto';
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,6 +46,9 @@ export class AttendanceService {
     @InjectRepository(WifiLocation)
     private wifiRepo: Repository<WifiLocation>,
 
+    @InjectRepository(AttendanceSettings)
+    private attendanceSettingsRepo: Repository<AttendanceSettings>,
+
     @InjectRepository(LeaveRequest)
     private leaveRequestRepo: Repository<LeaveRequest>,
 
@@ -58,6 +67,29 @@ export class AttendanceService {
     });
 
     return this.wifiRepo.save(wifi);
+  }
+
+  async getWifiLocations(organizationId: string): Promise<WifiLocation[]> {
+    return this.wifiRepo.find({
+      where: { organization: { id: organizationId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async updateWifiLocation(id: string, dto: UpdateWifiLocationDto): Promise<WifiLocation> {
+    const wifi = await this.wifiRepo.findOne({ where: { id } });
+    if (!wifi) {
+      throw new NotFoundException(`WiFi location with ID ${id} not found`);
+    }
+    Object.assign(wifi, dto);
+    return this.wifiRepo.save(wifi);
+  }
+
+  async deleteWifiLocation(id: string): Promise<void> {
+    const result = await this.wifiRepo.delete(id);
+    if (result.affected === 0) {
+      throw new NotFoundException(`WiFi location with ID ${id} not found`);
+    }
   }
 
   async registerBiometricDevice(
@@ -88,28 +120,36 @@ export class AttendanceService {
     } = dto;
 
     const punchTime = new Date(timestamp);
-    const dateStr = punchTime.toISOString().split('T')[0];
+    const dateStr = formatLocal(punchTime, 'yyyy-MM-dd');
+    const dayStart = startOfDay(punchTime);
+    const dayEnd = endOfDay(punchTime);
 
-    // 1️⃣ Upload photo to GCS
+    // 1️⃣ Upload photo to GCS (optional in dev)
     let photoUrl: string | undefined;
-    if (photoFile) {
+    const gcsUploadDisabled = process.env.GCS_UPLOAD_DISABLED === 'true';
+    if (photoFile && !gcsUploadDisabled) {
       const destination = `images/attendance/${userId}/${Date.now()}-${uuidv4()}.jpg`;
-      photoUrl = await this.common.uploadFile(
-        photoFile.buffer,
-        destination,
-        photoFile.mimetype,
-        true,
-      );
+      try {
+        photoUrl = await this.common.uploadFile(
+          photoFile.buffer,
+          destination,
+          photoFile.mimetype,
+          true,
+        );
+      } catch (error) {
+        // Allow attendance to proceed if GCS is unavailable in dev
+        console.warn('GCS upload failed, proceeding without photo:', error?.message || error);
+        photoUrl = undefined;
+      }
+    } else if (photoFile && gcsUploadDisabled) {
+      console.warn('GCS upload disabled via GCS_UPLOAD_DISABLED; skipping photo upload.');
     }
 
     // 2️⃣ Determine punch type
     const existingLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
-        timestamp: Between(
-          new Date(`${dateStr}T00:00:00.000Z`),
-          new Date(`${dateStr}T23:59:59.999Z`),
-        ),
+        timestamp: Between(dayStart, dayEnd),
       },
       relations: ['user'],
       order: { timestamp: 'ASC' },
@@ -197,7 +237,77 @@ export class AttendanceService {
     const created = this.attendanceLogRepo.create(log);
     const saved = await this.attendanceLogRepo.save(created);
 
-    // 5️⃣ Respond to frontend
+    // 5️⃣ Update attendance summary for the day (ensure dashboard shows data)
+    const dayLogs = await this.attendanceLogRepo.find({
+      where: {
+        user: { id: userId },
+        organization: { id: organizationId },
+        timestamp: Between(dayStart, dayEnd),
+      },
+      order: { timestamp: 'ASC' },
+    });
+
+    if (dayLogs.length > 0) {
+      const sortedLogs = [...dayLogs].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+      const inLog = sortedLogs[0];
+      const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
+
+      const workingMinutes = Math.floor(
+        (+outLog.timestamp - +inLog.timestamp) / 60000,
+      );
+
+      const anyAnomaly = sortedLogs.some((l) => l.anomalyFlag);
+      const anomalyReason = sortedLogs
+        .map((l) => l.anomalyReason)
+        .filter(Boolean)
+        .join(', ') || undefined;
+
+      const baseData: DeepPartial<Attendance> = {
+        user: { id: userId },
+        organization: { id: organizationId },
+        attendanceDate: dateStr,
+        processedAt: new Date(),
+        inTime: inLog.timestamp,
+        outTime: outLog.timestamp,
+        workingMinutes,
+        status:
+          workingMinutes < 160
+            ? 'absent'
+            : workingMinutes >= 480
+              ? 'present'
+              : 'half-day',
+        inPhotoUrl: inLog.photoUrl,
+        inLatitude: inLog.latitude,
+        inLongitude: inLog.longitude,
+        inLocationAddress: inLog.locationAddress,
+        inWifiSsid: inLog.wifiSsid,
+        inWifiBssid: inLog.wifiBssid,
+        inDeviceInfo: inLog.deviceInfo,
+        outPhotoUrl: outLog.photoUrl,
+        outLatitude: outLog.latitude,
+        outLongitude: outLog.longitude,
+        outLocationAddress: outLog.locationAddress,
+        outWifiSsid: outLog.wifiSsid,
+        outWifiBssid: outLog.wifiBssid,
+        outDeviceInfo: outLog.deviceInfo,
+        anomalyFlag: anyAnomaly,
+        anomalyReason,
+      };
+
+      const existingAttendance = await this.attendanceRepo.findOne({
+        where: { user: { id: userId }, attendanceDate: dateStr },
+      });
+      if (existingAttendance) {
+        await this.attendanceRepo.update(existingAttendance.id, baseData);
+      } else {
+        await this.attendanceRepo.save(this.attendanceRepo.create(baseData));
+      }
+    }
+
+    // 6️⃣ Respond to frontend
     return anomalyFlag
       ? {
           status: 'anomaly',
@@ -486,6 +596,38 @@ export class AttendanceService {
     });
   }
 
+  async createHoliday(dto: CreateHolidayDto): Promise<Holiday> {
+    const { organizationId, date, ...rest } = dto;
+    const holiday = this.holidayRepo.create({
+      ...rest,
+      organization: { id: organizationId },
+      organizationId,
+      date: typeof date === 'string' ? new Date(date) : date,
+    });
+    return this.holidayRepo.save(holiday);
+  }
+
+  async updateHoliday(id: number, dto: UpdateHolidayDto): Promise<Holiday> {
+    const holiday = await this.holidayRepo.findOne({ where: { id } });
+    if (!holiday) {
+      throw new NotFoundException(`Holiday with ID ${id} not found`);
+    }
+    if (dto.date) {
+      holiday.date = typeof dto.date === 'string' ? new Date(dto.date) : dto.date;
+    }
+    if (dto.name !== undefined) holiday.name = dto.name;
+    if (dto.description !== undefined) holiday.description = dto.description;
+    if (dto.isOptional !== undefined) holiday.isOptional = dto.isOptional;
+    return this.holidayRepo.save(holiday);
+  }
+
+  async deleteHoliday(id: number): Promise<void> {
+    const result = await this.holidayRepo.delete(id);
+    if (result.affected === 0) {
+      throw new NotFoundException(`Holiday with ID ${id} not found`);
+    }
+  }
+
   async getMonthlyAttendanceByUser(
     userId: string,
     month: number,
@@ -528,6 +670,9 @@ export class AttendanceService {
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
+
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, settings);
 
     // 1. Attendance full record map
     const attendanceRecords = await this.attendanceRepo.find({
@@ -602,7 +747,7 @@ export class AttendanceService {
 
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
       const dateStr = formatDateLocal(d);
-      const isSunday = d.getDay() === 0;
+      const isSunday = !isWorkingDay(d);
       const holidayInfo = holidayMap.get(dateStr);
 
       const attendanceEntry = attendanceMap.get(dateStr);
@@ -910,6 +1055,9 @@ async getAttendanceReport(
     holidays.map((h) => formatDateLocal(new Date(h.date))),
   );
 
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, settings);
+
   // Generate all dates for the month
   const allDates: string[] = [];
   for (
@@ -920,10 +1068,9 @@ async getAttendanceReport(
     allDates.push(formatDateLocal(new Date(d)));
   }
 
-  // Calculate working days (excluding Sundays and holidays)
+  // Calculate working days (excluding non-working days and holidays)
   const workingDays = allDates.filter((date) => {
-    const dayOfWeek = new Date(date).getDay();
-    return dayOfWeek !== 0 && !holidaySet.has(date);
+    return isWorkingDay(new Date(date)) && !holidaySet.has(date);
   }).length;
 
   // Group attendance records by user
@@ -991,7 +1138,7 @@ async getAttendanceReport(
       outTime: formatTime(entry.outTime),
       workingHours: Math.round(workingHours * 100) / 100,
       isHoliday: holidaySet.has(entry.attendanceDate),
-      isSunday: new Date(entry.attendanceDate).getDay() === 0,
+      isSunday: !isWorkingDay(new Date(entry.attendanceDate)),
     });
 
     // Count status types
@@ -1091,7 +1238,7 @@ async getAttendanceReport(
     allDates.forEach((date) => {
       if (!existingDates.has(date)) {
         const isHoliday = holidaySet.has(date);
-        const isSunday = new Date(date).getDay() === 0;
+        const isSunday = !isWorkingDay(new Date(date));
         const isPending = new Date(date) > new Date();
 
         let status = 'absent';
@@ -1163,4 +1310,83 @@ async getAttendanceReport(
   };
 }
 
+  // ===== Attendance Settings Methods =====
+  
+  async getOrCreateAttendanceSettings(organizationId: string): Promise<AttendanceSettings> {
+    let settings = await this.attendanceSettingsRepo.findOne({
+      where: { organizationId },
+    });
+
+    if (!settings) {
+      settings = this.attendanceSettingsRepo.create({
+        organizationId,
+        workStartTime: '09:00:00',
+        workEndTime: '18:00:00',
+        graceMinutes: 15,
+        lateThresholdMinutes: 30,
+        allowedRadiusMeters: 100,
+        enableGpsValidation: true,
+        enableWifiValidation: false,
+        enableFaceValidation: true,
+        enableCheckinValidation: true,
+        enableCheckoutValidation: true,
+        halfDayCutoffTime: '14:00:00',
+        workingDays: [1, 2, 3, 4, 5, 6],
+        weekdayOffRules: {},
+      });
+      settings = await this.attendanceSettingsRepo.save(settings);
+    }
+
+    return settings;
+  }
+
+  private resolveWorkingDays(settings?: AttendanceSettings): number[] {
+    const days = settings?.workingDays;
+    if (Array.isArray(days) && days.length) return days;
+    return [1, 2, 3, 4, 5, 6];
+  }
+
+  private resolveWeekdayOffRules(
+    settings?: AttendanceSettings,
+  ): Record<string, number[]> {
+    const rules = settings?.weekdayOffRules;
+    if (rules && typeof rules === 'object') return rules;
+    return {};
+  }
+
+  private weekOfMonth(d: Date): number {
+    return Math.ceil(d.getDate() / 7);
+  }
+
+  private isWorkingDayForDate(d: Date, settings: AttendanceSettings): boolean {
+    const workingDaySet = new Set(this.resolveWorkingDays(settings));
+    if (!workingDaySet.has(d.getDay())) return false;
+    const week = this.weekOfMonth(d);
+    const weekdayRules = this.resolveWeekdayOffRules(settings);
+    const ruleWeeks = weekdayRules[String(d.getDay())] || [];
+    if (ruleWeeks.includes(week)) return false;
+    return true;
+  }
+
+  async updateAttendanceSettings(
+    organizationId: string,
+    dto: UpdateAttendanceSettingsDto,
+  ): Promise<AttendanceSettings> {
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+
+    // Strip fields that should not be overwritten
+    const { organizationId: _orgId, ...safeDto } = dto as any;
+    delete safeDto.id;
+    delete safeDto.createdAt;
+    delete safeDto.updatedAt;
+
+    // Update only provided fields
+    Object.assign(settings, safeDto);
+
+    return this.attendanceSettingsRepo.save(settings);
+  }
+
+  async getAttendanceSettings(organizationId: string): Promise<AttendanceSettings> {
+    return this.getOrCreateAttendanceSettings(organizationId);
+  }
 }

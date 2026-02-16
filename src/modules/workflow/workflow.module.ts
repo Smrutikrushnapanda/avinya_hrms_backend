@@ -7,8 +7,10 @@ import { WorkflowService } from './workflow.service';
 import { WorkflowController } from './workflow.controller';
 import { TimeslipController } from './timeslip/timeslip.controller';
 import { TimeslipService } from './timeslip/timeslip.service';
-import { Timeslip } from './timeslip/entities/timeslip.entity'
+import { Timeslip } from './timeslip/entities/timeslip.entity';
 import { TimeslipApproval } from './timeslip/entities/timeslip-approval.entity';
+import { MessageModule } from '../message/message.module';
+import { Employee } from '../employee/entities/employee.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -16,8 +18,10 @@ import { TimeslipApproval } from './timeslip/entities/timeslip-approval.entity';
       WorkflowStep,
       WorkflowAssignment,
       Timeslip,
-      TimeslipApproval
+      TimeslipApproval,
+      Employee,
     ]),
+    MessageModule,
   ],
   controllers: [WorkflowController, TimeslipController],
   providers: [WorkflowService, TimeslipService],

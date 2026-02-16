@@ -23,6 +23,17 @@ export class OrganizationService {
   async update(id: string, data: UpdateOrganizationDto, updatedBy: string) {
     const org = await this.orgRepo.findOne({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
+    
+    // Map frontend field 'name' to entity field 'organizationName'
+    if (data.name) {
+      data.organizationName = data.name;
+    }
+    
+    // Map the new fields
+    if (data.email !== undefined) org.email = data.email;
+    if (data.phone !== undefined) org.phone = data.phone;
+    if (data.address !== undefined) org.address = data.address;
+    
     Object.assign(org, data, { updatedBy });
     return this.orgRepo.save(org);
   }
@@ -37,6 +48,10 @@ export class OrganizationService {
       relations: ['users', 'organizationFeatures'],
     });
     if (!org) throw new NotFoundException('Organization not found');
-    return org;
+    // Map organizationName to name for frontend compatibility
+    return {
+      ...org,
+      name: org.organizationName,
+    };
   }
 }

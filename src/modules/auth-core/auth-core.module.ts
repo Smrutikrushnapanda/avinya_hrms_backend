@@ -26,6 +26,7 @@ import { UserActivity } from './entities/user-actvities.entity';
 import { OrganizationRole } from './entities/organization-role.entity';
 import { TimeslipApproval } from '../workflow/timeslip/entities/timeslip-approval.entity';
 import { Employee } from '../employee/entities/employee.entity';
+import { LogReportModule } from '../log-report/log-report.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { Employee } from '../employee/entities/employee.entity';
       TimeslipApproval,
       Employee,
     ]),
+    LogReportModule,
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET_KEY,

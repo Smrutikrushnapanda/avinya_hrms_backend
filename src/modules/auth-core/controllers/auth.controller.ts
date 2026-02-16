@@ -6,12 +6,15 @@ import {
   UnauthorizedException,
   Get,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { AuthService, UserWithRoles } from '../services/auth.service';
 import { LoginDto } from '../dto/auth.dto';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { GetUser } from '../decorators/get-user.decorator';
+import { LogReportService } from 'src/modules/log-report/log-report.service';
+import { UsersService } from '../services/users.service';
 import {
   ApiTags,
   ApiOperation,
@@ -24,7 +27,11 @@ import {
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private logReportService: LogReportService,
+    private usersService: UsersService,
+  ) {}
 
   @Post('login')
   @ApiOperation({ summary: 'User login and get JWT token' })
@@ -88,6 +95,7 @@ export class AuthController {
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: any,
   ) {
     const user = await this.authService.validateUser(
       loginDto.userName,
@@ -110,6 +118,18 @@ export class AuthController {
       maxAge: 1000 * 60 * 60, // 1 hour
     });
 
+    // Log login action
+    await this.logReportService.create({
+      organizationId: user.organization?.id || user.organizationId,
+      userId: user.id,
+      userName: user.userName,
+      actionType: 'LOGIN',
+      module: 'auth',
+      description: 'User login',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return { access_token, user };
   }
 
@@ -129,6 +149,16 @@ export class AuthController {
 
     if (body?.userId) {
       await this.authService.logout(body.userId, body.clientInfo);
+
+      const user = await this.usersService.findOne(body.userId);
+      await this.logReportService.create({
+        organizationId: user.organizationId,
+        userId: user.id,
+        userName: user.userName,
+        actionType: 'LOGOUT',
+        module: 'auth',
+        description: 'User logout',
+      });
     }
 
     return { message: 'Logged out successfully' };

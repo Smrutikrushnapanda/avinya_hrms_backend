@@ -13,13 +13,13 @@ export class Department {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'name' })
+  @Column({ name: 'name', nullable: true })
   name: string;
 
-  @Column({ name: 'code' })
+  @Column({ name: 'code', nullable: true })
   code: string;
 
-  @Column({ name: 'organization_id' })
+  @Column({ name: 'organization_id', nullable: true })
   organizationId: string;
 
   @CreateDateColumn({ name: 'created_at' })

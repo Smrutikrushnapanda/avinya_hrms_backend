@@ -17,6 +17,15 @@ export class Organization {
   @Column({ name: 'organization_name', unique: true })
   organizationName: string;
 
+  @Column({ name: 'email', type: 'varchar', nullable: true })
+  email?: string;
+
+  @Column({ name: 'phone', type: 'varchar', nullable: true })
+  phone?: string;
+
+  @Column({ name: 'address', type: 'text', nullable: true })
+  address?: string;
+
   @Column({ name: 'logo_url', type: 'text', nullable: true })
   logoUrl?: string;
 
@@ -25,6 +34,15 @@ export class Organization {
 
   @Column({ name: 'landing_link', type: 'text', nullable: true })
   landingLink?: string;
+
+  @Column({ name: 'enable_gps_validation', type: 'boolean', default: true })
+  enableGpsValidation: boolean;
+
+  @Column({ name: 'enable_wifi_validation', type: 'boolean', default: false })
+  enableWifiValidation: boolean;
+
+  @Column({ name: 'wfh_approval_mode', type: 'varchar', length: 20, default: 'MANAGER' })
+  wfhApprovalMode: string;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

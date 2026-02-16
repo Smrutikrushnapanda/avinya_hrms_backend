@@ -119,18 +119,15 @@ export class UsersService {
     sortField: string = 'userName',
     sortOrder: 'ASC' | 'DESC' = 'ASC',
   ): Promise<{ data: User[]; total: number }> {
-    const qb = this.userRepository
-      .createQueryBuilder('user')
-      .where('user.roleId = :role', {
-        role: 'APPLICANT',
-      });
+    const qb = this.userRepository.createQueryBuilder('user');
 
     if (search) {
       qb.andWhere(
         `
-        user.id ILIKE :search OR
         user.userName ILIKE :search OR
-        user.name ILIKE :search
+        user.firstName ILIKE :search OR
+        user.lastName ILIKE :search OR
+        user.email ILIKE :search
       `,
         { search: `%${search}%` },
       );
@@ -138,8 +135,12 @@ export class UsersService {
 
     const sortFieldMap: Record<string, string> = {
       userId: 'user.id',
+      user_name: 'user.userName',
       userName: 'user.userName',
-      name: 'user.name',
+      firstName: 'user.firstName',
+      lastName: 'user.lastName',
+      email: 'user.email',
+      createdAt: 'user.createdAt',
     };
 
     const sortColumn = sortFieldMap[sortField] || 'user.userName';
@@ -173,7 +174,7 @@ export class UsersService {
     });
     if (!user) {
       throw new NotFoundException(
-        `User with name ${name} and DOB ${dob} not found`,
+        `User with name ${firstName} and DOB ${dob} not found`,
       );
     }
     return user;

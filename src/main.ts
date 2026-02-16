@@ -3,27 +3,24 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+
+  // Enable cookie parser
   app.use(cookieParser());
 
-  const allowedOrigins = [
-    'https://hrms-app-frontend.vercel.app'
-  ];
-
-  if (process.env.NODE_ENV !== 'production') {
-    allowedOrigins.push('http://localhost:3000');
-    allowedOrigins.push('http://192.168.1.62:3000');
-  }
-
-  
+  // ✅ Allow ALL origins
   app.enableCors({
-    origin: allowedOrigins,
+    origin: true, // allows all origins
     credentials: true,
   });
 
+  // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -32,6 +29,7 @@ async function bootstrap() {
     }),
   );
 
+  // Swagger setup
   const config = new DocumentBuilder()
     .setTitle('Avinya HRMS API')
     .setDescription('Avinya HRMS API Documentation')
@@ -42,6 +40,11 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
+  // Start server
   await app.listen(process.env.PORT || 8080);
+
+  console.log(`Server running on: http://localhost:${process.env.PORT || 8080}`);
+  console.log(`Swagger docs: http://localhost:${process.env.PORT || 8080}/docs`);
 }
+
 bootstrap();

@@ -156,4 +156,21 @@ export class RolesService {
 
     return [...defaultRoles, ...customRoles];
   }
+
+  async updateRole(id: string, dto: { roleName?: string; description?: string }): Promise<Role> {
+    const role = await this.roleRepo.findOne({ where: { id } });
+    if (!role) throw new NotFoundException('Role not found');
+    if (dto.roleName !== undefined) role.roleName = dto.roleName;
+    if (dto.description !== undefined) role.description = dto.description;
+    return this.roleRepo.save(role);
+  }
+
+  async deleteRole(id: string): Promise<void> {
+    const role = await this.roleRepo.findOne({ where: { id } });
+    if (!role) throw new NotFoundException('Role not found');
+    if (role.type === RoleType.DEFAULT) {
+      throw new ForbiddenException('Default roles cannot be deleted');
+    }
+    await this.roleRepo.delete(id);
+  }
 }

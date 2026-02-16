@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { DepartmentService, DepartmentStatistics } from './department.service';
@@ -15,6 +15,27 @@ export class DepartmentController {
   async findAll(@Query('organizationId') organizationId: string) {
     const departments = await this.departmentService.findAll(organizationId);
     return { data: departments };
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create a new department' })
+  async create(@Body() data: { name: string; code: string; organizationId: string }) {
+    const department = await this.departmentService.create(data);
+    return { data: department };
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update a department' })
+  async update(@Param('id') id: string, @Body() data: { name?: string; code?: string }) {
+    const department = await this.departmentService.update(id, data);
+    return { data: department };
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a department' })
+  async remove(@Param('id') id: string) {
+    await this.departmentService.remove(id);
+    return { message: 'Department deleted successfully' };
   }
 
   @Get('statistics')

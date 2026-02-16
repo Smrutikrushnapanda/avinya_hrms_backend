@@ -29,6 +29,14 @@ export class CreateEmployeeDto {
   employeeCode: string;
 
   @IsString()
+  @Length(3, 50)
+  loginUserName: string;
+
+  @IsString()
+  @Length(6, 100)
+  loginPassword: string;
+
+  @IsString()
   @Length(1, 100)
   firstName: string;
 

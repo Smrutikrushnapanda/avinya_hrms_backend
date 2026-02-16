@@ -40,8 +40,8 @@ export class User {
   @Column({ nullable: true })
   gender: string;
 
-  @Column({ name: 'mobile_number', unique: true })
-  mobileNumber: string;
+  @Column({ name: 'mobile_number', unique: true, nullable: true, type: 'varchar' })
+  mobileNumber?: string;
 
   @ManyToOne(() => Organization, (org) => org.users, { nullable: true })
   @JoinColumn({ name: 'organization_id' })

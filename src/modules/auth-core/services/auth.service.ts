@@ -38,7 +38,7 @@ export class AuthService {
       gender: user.gender,
       dob: user.dob,
       email: user.email,
-      mobileNumber: user.mobileNumber,
+      mobileNumber: user.mobileNumber ?? null,
       organizationId: user.organization.id,
       roles: user.roles,
       permissions: user.permissions,

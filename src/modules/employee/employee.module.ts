@@ -14,6 +14,8 @@ import { Attendance } from '../attendance/entities/attendance.entity';
 import { LeaveRequest } from '../leave/entities/leave-request.entity';
 import { UserRole } from '../auth-core/entities/user-role.entity';
 import { Role } from '../auth-core/entities/role.entity';
+import { LeaveModule } from '../leave/leave.module';
+import { WfhModule } from '../wfh/wfh.module';
 
 @Module({
   imports: [
@@ -26,7 +28,9 @@ import { Role } from '../auth-core/entities/role.entity';
       UserRole,
       Role,
     ]),
-    AuthCoreModule
+    AuthCoreModule,
+    LeaveModule,
+    WfhModule,
   ],
   controllers: [
     EmployeeController,

@@ -21,7 +21,7 @@ export interface JwtPayload {
   gender: string;
   dob: Date;
   email: string;
-  mobileNumber: string;
+  mobileNumber: string | null;
   organizationId: string;
   roles: { id: string; roleName: string }[];
   permissions: { id: string; permissionName: string }[];

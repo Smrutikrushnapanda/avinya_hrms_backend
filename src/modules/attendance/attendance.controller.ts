@@ -2,10 +2,13 @@ import {
   Controller,
   Post,
   Get,
+  Put,
+  Delete,
   Body,
   Param,
   Query,
   ParseUUIDPipe,
+  ParseIntPipe,
   UploadedFile,
   UseInterceptors,
   BadRequestException,
@@ -15,12 +18,17 @@ import {
   CreateAttendanceLogDto,
   CreateBiometricDeviceDto,
   CreateWifiLocationDto,
+  UpdateWifiLocationDto,
+  UpdateAttendanceSettingsDto,
+  CreateHolidayDto,
+  UpdateHolidayDto,
 } from './dto';
 import {
   AttendanceLog,
   Attendance,
   BiometricDevice,
   WifiLocation,
+  AttendanceSettings,
 } from './entities';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -40,6 +48,35 @@ import { DateTime } from 'luxon';
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
+  // 📋 Get or create attendance settings for organization
+  @Get('settings')
+  @ApiOperation({ summary: 'Get attendance settings for organization' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiResponse({
+    status: 200,
+    description: 'Attendance settings',
+    type: AttendanceSettings,
+  })
+  async getSettings(@Query('organizationId') organizationId: string) {
+    return this.attendanceService.getAttendanceSettings(organizationId);
+  }
+
+  // ✏️ Update attendance settings for organization
+  @Put('settings')
+  @ApiOperation({ summary: 'Update attendance settings for organization' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated attendance settings',
+    type: AttendanceSettings,
+  })
+  async updateSettings(
+    @Query('organizationId') organizationId: string,
+    @Body() dto: UpdateAttendanceSettingsDto,
+  ) {
+    return this.attendanceService.updateAttendanceSettings(organizationId, dto);
+  }
+
   // ➕ Create a new Wi-Fi location
   @Post('wifi-locations')
   @ApiOperation({ summary: 'Create Wi-Fi Location' })
@@ -52,6 +89,40 @@ export class AttendanceController {
     @Body() dto: CreateWifiLocationDto,
   ): Promise<WifiLocation> {
     return this.attendanceService.createWifiLocation(dto);
+  }
+
+  // 📋 List Wi-Fi locations for organization
+  @Get('wifi-locations')
+  @ApiOperation({ summary: 'List Wi-Fi locations for organization' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiResponse({ status: 200, description: 'List of Wi-Fi locations', type: [WifiLocation] })
+  async getWifiLocations(
+    @Query('organizationId') organizationId: string,
+  ): Promise<WifiLocation[]> {
+    return this.attendanceService.getWifiLocations(organizationId);
+  }
+
+  // ✏️ Update a Wi-Fi location
+  @Put('wifi-locations/:id')
+  @ApiOperation({ summary: 'Update Wi-Fi location' })
+  @ApiParam({ name: 'id', type: 'string' })
+  @ApiResponse({ status: 200, description: 'Updated Wi-Fi location', type: WifiLocation })
+  async updateWifiLocation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateWifiLocationDto,
+  ): Promise<WifiLocation> {
+    return this.attendanceService.updateWifiLocation(id, dto);
+  }
+
+  // 🗑️ Delete a Wi-Fi location
+  @Delete('wifi-locations/:id')
+  @ApiOperation({ summary: 'Delete Wi-Fi location' })
+  @ApiParam({ name: 'id', type: 'string' })
+  @ApiResponse({ status: 200, description: 'Wi-Fi location deleted' })
+  async deleteWifiLocation(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    return this.attendanceService.deleteWifiLocation(id);
   }
 
   // 📟 Register a biometric device
@@ -356,6 +427,31 @@ export class AttendanceController {
       organizationId,
       year,
     );
+  }
+
+  // ➕ Create holiday
+  @Post('holidays')
+  @ApiOperation({ summary: 'Create holiday' })
+  async createHoliday(@Body() dto: CreateHolidayDto) {
+    return this.attendanceService.createHoliday(dto);
+  }
+
+  // ✏️ Update holiday
+  @Put('holidays/:id')
+  @ApiOperation({ summary: 'Update holiday' })
+  async updateHoliday(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateHolidayDto,
+  ) {
+    return this.attendanceService.updateHoliday(id, dto);
+  }
+
+  // 🗑️ Delete holiday
+  @Delete('holidays/:id')
+  @ApiOperation({ summary: 'Delete holiday' })
+  async deleteHoliday(@Param('id', ParseIntPipe) id: number) {
+    await this.attendanceService.deleteHoliday(id);
+    return { message: 'Holiday deleted successfully' };
   }
 
   @Get('by-date')

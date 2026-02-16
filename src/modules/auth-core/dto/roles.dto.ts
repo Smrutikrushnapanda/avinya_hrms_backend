@@ -33,6 +33,16 @@ export class CreateRoleDto {
   createdBy?: string;
 }
 
+export class UpdateRoleDto {
+  @IsOptional()
+  @IsString({ message: 'Role name must be a string' })
+  roleName?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Description must be a string' })
+  description?: string;
+}
+
 export class AssignRoleDto {
   @IsUUID(undefined, { message: 'Invalid user ID format' })
   userId: string;

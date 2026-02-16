@@ -1,15 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager, Between, LessThanOrEqual, MoreThanOrEqual, Like, MoreThan } from 'typeorm';
+import { Repository, EntityManager, Between, LessThanOrEqual, MoreThanOrEqual, Like, MoreThan, QueryFailedError } from 'typeorm';
 import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UserRole } from '../auth-core/entities/user-role.entity';
 import { CreateUserDto } from '../auth-core/dto/create-user.dto';
 import { Role } from '../auth-core/entities/role.entity';
+import { RoleType } from '../auth-core/enums/role-type.enum';
 import { UsersService } from '../auth-core/services/users.service';
 import { Attendance } from '../attendance/entities/attendance.entity';
 import { LeaveRequest } from '../leave/entities/leave-request.entity';
+import { User } from '../auth-core/entities/user.entity';
+import { LeaveService } from '../leave/leave.service';
+import { WfhService } from '../wfh/wfh.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class EmployeeService {
@@ -23,45 +28,135 @@ export class EmployeeService {
     @InjectRepository(Role)
     private readonly roleRepository: Repository<Role>,
 
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+
     private readonly userService: UsersService,
     private readonly entityManager: EntityManager,
+    private readonly leaveService: LeaveService,
+    private readonly wfhService: WfhService,
   ) {}
 
   async create(dto: CreateEmployeeDto) {
-    const userDto: CreateUserDto = {
-      userName: dto.employeeCode,
-      password: 'Ab@2025',
-      firstName: dto.firstName,
-      middleName: dto.middleName,
-      lastName: dto.lastName ?? '',
-      email: dto.workEmail,
-      mobileNumber: dto.contactNumber ?? '',
-      dob: dto.dateOfBirth,
-      gender: dto.gender,
-      organizationId: dto.organizationId,
-    };
+    try {
+      if (!dto.loginUserName?.trim() || !dto.loginPassword?.trim()) {
+        throw new BadRequestException('loginUserName and loginPassword are required');
+      }
 
-    const createdUser = await this.userService.create(userDto);
+      const loginUserName = dto.loginUserName.trim();
 
-    const role = await this.roleRepository.findOne({
-      where: { roleName: 'EMPLOYEE' },
-    });
+      const existingUser = await this.userRepository.findOne({
+        where: [
+          { email: dto.workEmail },
+          { userName: loginUserName },
+          ...(dto.contactNumber ? [{ mobileNumber: dto.contactNumber }] : []),
+        ],
+      });
 
-    if (!role) throw new NotFoundException('Default Employee role not found');
+      const userDto: CreateUserDto = {
+        userName: loginUserName,
+        password: dto.loginPassword,
+        firstName: dto.firstName,
+        middleName: dto.middleName,
+        lastName: dto.lastName ?? '',
+        email: dto.workEmail,
+        mobileNumber: dto.contactNumber ?? undefined,
+        dob: dto.dateOfBirth,
+        gender: dto.gender,
+        organizationId: dto.organizationId,
+      };
 
-    const userRole = this.userRoleRepository.create({
-      user: createdUser,
-      role: role,
-    });
+      let role = await this.roleRepository.findOne({
+        where: { roleName: 'EMPLOYEE' },
+      });
 
-    await this.userRoleRepository.save(userRole);
+      if (!role) {
+        role = await this.roleRepository.save(
+          this.roleRepository.create({
+            roleName: 'EMPLOYEE',
+            type: RoleType.DEFAULT,
+            description: 'Default Employee role',
+            createdBy: 'system',
+          }),
+        );
+      }
 
-    const employee = this.employeeRepository.create({
-      ...dto,
-      userId: createdUser.id,
-    });
+      if (existingUser) {
+        const existingEmployee = await this.employeeRepository.findOne({
+          where: { userId: existingUser.id },
+        });
 
-    return this.employeeRepository.save(employee);
+        if (existingEmployee) {
+          throw new ConflictException('Employee already exists for this user');
+        }
+
+        const existingUserRole = await this.userRoleRepository.findOne({
+          where: { user: { id: existingUser.id }, role: { id: role.id } },
+        });
+
+        if (!existingUserRole) {
+          const userRole = this.userRoleRepository.create({
+            user: existingUser,
+            role,
+          });
+          await this.userRoleRepository.save(userRole);
+        }
+
+        const employee = this.employeeRepository.create({
+          ...dto,
+          userId: existingUser.id,
+        });
+
+        const savedEmployee = await this.employeeRepository.save(employee);
+        if (savedEmployee.employmentType) {
+          await this.leaveService.applyTemplatesToUser(
+            savedEmployee.userId,
+            savedEmployee.organizationId,
+            savedEmployee.employmentType,
+          );
+          await this.wfhService.applyTemplatesToUser(
+            savedEmployee.userId,
+            savedEmployee.organizationId,
+            savedEmployee.employmentType,
+          );
+        }
+        return savedEmployee;
+      }
+
+      const createdUser = await this.userService.create(userDto);
+
+      const userRole = this.userRoleRepository.create({
+        user: createdUser,
+        role: role,
+      });
+
+      await this.userRoleRepository.save(userRole);
+
+      const employee = this.employeeRepository.create({
+        ...dto,
+        userId: createdUser.id,
+      });
+
+      const savedEmployee = await this.employeeRepository.save(employee);
+      if (savedEmployee.employmentType) {
+        await this.leaveService.applyTemplatesToUser(
+          savedEmployee.userId,
+          savedEmployee.organizationId,
+          savedEmployee.employmentType,
+        );
+        await this.wfhService.applyTemplatesToUser(
+          savedEmployee.userId,
+          savedEmployee.organizationId,
+          savedEmployee.employmentType,
+        );
+      }
+      return savedEmployee;
+    } catch (error) {
+      if (error instanceof QueryFailedError && (error as any).code === '23505') {
+        throw new ConflictException('Employee already exists with provided unique details');
+      }
+      throw error;
+    }
   }
 
   async findByUserId(userId: string): Promise<Employee | null> {
@@ -74,21 +169,55 @@ export class EmployeeService {
   findAll(organizationId: string) {
     return this.employeeRepository.find({
       where: { organizationId },
-      relations: ['department', 'designation', 'manager'],
+      relations: ['department', 'designation', 'manager', 'user'],
       order: { firstName: 'ASC' },
     });
   }
 
-  findOne(id: string) {
-    return this.employeeRepository.findOne({
+  async findOne(id: string) {
+    const employee = await this.employeeRepository.findOne({
       where: { id },
-      relations: ['department', 'designation', 'manager'],
+      relations: ['department', 'designation', 'manager', 'user'],
     });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${id} not found`);
+    }
+    return {
+      ...(employee as any),
+      userName: (employee as any)?.user?.userName,
+    };
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
-    await this.employeeRepository.update(id, dto);
-    return this.findOne(id);
+    const { loginUserName, loginPassword, ...employeeUpdate } = dto as any;
+
+    await this.employeeRepository.update(id, employeeUpdate);
+    const employee = await this.findOne(id);
+
+    if (loginUserName || loginPassword) {
+      const user = await this.userRepository.findOne({ where: { id: employee.userId } });
+      if (!user) {
+        throw new NotFoundException(`User for employee ${id} not found`);
+      }
+
+      if (loginUserName) {
+        const existing = await this.userRepository.findOne({
+          where: { userName: loginUserName },
+        });
+        if (existing && existing.id !== user.id) {
+          throw new ConflictException('Username already in use');
+        }
+        user.userName = loginUserName;
+      }
+
+      if (loginPassword) {
+        user.password = await bcrypt.hash(loginPassword, 12);
+      }
+
+      await this.userRepository.save(user);
+    }
+
+    return employee;
   }
 
   async remove(id: string) {
@@ -335,6 +464,12 @@ export class EmployeeService {
     // Execute query
     const employees = await queryBuilder.getMany();
 
+    // Attach username for edit UI
+    const employeesWithUserName = employees.map((emp: any) => ({
+      ...emp,
+      userName: emp?.user?.userName,
+    }));
+
     // Calculate pagination info
     const totalPages = Math.ceil(total / limit);
     const hasNext = page < totalPages;
@@ -343,7 +478,7 @@ export class EmployeeService {
     console.log(`📊 Found ${employees.length} employees out of ${total} total`);
 
     return {
-      employees,
+      employees: employeesWithUserName,
       pagination: {
         page,
         limit,

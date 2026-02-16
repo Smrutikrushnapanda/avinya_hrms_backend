@@ -16,6 +16,13 @@ import { NoticeModule } from './modules/notice/notice.module';
 import { CommonModule } from './modules/common/common.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { LogReportModule } from './modules/log-report/log-report.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
+import { MessageModule } from './modules/message/message.module';
+import { WfhModule } from './modules/wfh/wfh.module';
+import { ChatModule } from './modules/chat/chat.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { LogReportInterceptor } from './shared/log-report.interceptor';
 
 @Module({
   imports: [
@@ -34,11 +41,17 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     NoticeModule,
     CommonModule,
     WorkflowModule,
-    DashboardModule
+    DashboardModule,
+    LogReportModule,
+    PayrollModule,
+    MessageModule,
+    WfhModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_INTERCEPTOR, useClass: LogReportInterceptor },
   ],
 })
 export class AppModule {}

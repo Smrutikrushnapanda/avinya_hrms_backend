@@ -33,8 +33,9 @@ export class CreateUserDto {
   @IsEmail()
   email: string;
 
+  @IsOptional()
   @IsMobilePhone('en-IN', {}, { message: 'Mobile number must be a valid Indian mobile number' })
-  mobileNumber: string;
+  mobileNumber?: string;
 
   @IsOptional()
   @IsDateString({}, { message: 'DOB must be a valid ISO 8601 date string (YYYY-MM-DD)' })

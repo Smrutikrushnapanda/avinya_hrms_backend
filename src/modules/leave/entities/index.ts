@@ -2,6 +2,7 @@ export * from '../../attendance/entities/holiday.entity';
 export * from './leave-approval-assignment.entity';
 export * from './leave-approval.entity';
 export * from './leave-balance.entity';
+export * from './leave-balance-template.entity';
 export * from './leave-policy.entity';
 export * from './leave-request.entity';
 export * from './leave-type.entity';
