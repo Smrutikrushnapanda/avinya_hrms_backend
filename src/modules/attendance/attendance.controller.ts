@@ -529,7 +529,6 @@ export class AttendanceController {
     return this.attendanceService.getTodayAnomalies();
   }
 
-  //New api @Nihar
   @Get('report')
 @ApiOperation({ summary: 'Get attendance report with user filters' })
 @ApiQuery({

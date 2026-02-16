@@ -979,7 +979,6 @@ export class AttendanceService {
     }
   }
 
-  //New api @Nihar
 async getAttendanceReport(
   organizationId: string,
   year: number,
