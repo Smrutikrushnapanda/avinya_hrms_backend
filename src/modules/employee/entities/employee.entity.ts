@@ -62,6 +62,15 @@ export class Employee {
   @Column({ name: 'photo_url', type: 'text', nullable: true })
   photoUrl: string;
 
+  @Column({ name: 'aadhar_photo_url', type: 'text', nullable: true })
+  aadharPhotoUrl: string;
+
+  @Column({ name: 'pan_card_photo_url', type: 'text', nullable: true })
+  panCardPhotoUrl: string;
+
+  @Column({ name: 'passport_photo_url', type: 'text', nullable: true })
+  passportPhotoUrl: string;
+
   @Column({ name: 'date_of_joining', type: 'date' })
   dateOfJoining: Date;
 

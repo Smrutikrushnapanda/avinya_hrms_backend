@@ -555,8 +555,15 @@ export class AttendanceService {
       order: { timestamp: 'ASC' },
     });
 
-    const punchInTime = logs.length > 0 ? logs[0].timestamp : null;
-    const lastPunch = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+    // Check if the Attendance summary has timeslip-corrected times
+    const dateStr = formatLocal(new Date(), 'yyyy-MM-dd');
+    const attendanceSummary = await this.attendanceRepo.findOne({
+      where: { user: { id: userId }, attendanceDate: dateStr },
+    });
+
+    // Prefer corrected inTime/outTime from the Attendance record (set by timeslip approval)
+    const punchInTime = attendanceSummary?.inTime ?? (logs.length > 0 ? logs[0].timestamp : null);
+    const lastPunch = attendanceSummary?.outTime ?? (logs.length > 0 ? logs[logs.length - 1].timestamp : null);
 
     return {
       logs,
@@ -763,8 +770,12 @@ export class AttendanceService {
         isHoliday: !!holidayInfo,
         holidayName: holidayInfo?.name,
         isOptional: holidayInfo?.isOptional,
-        inTime: logInfo?.inTime,
-        outTime: logInfo?.outTime,
+        inTime: attendanceEntry?.inTime
+          ? formatTime(attendanceEntry.inTime)
+          : logInfo?.inTime,
+        outTime: attendanceEntry?.outTime
+          ? formatTime(attendanceEntry.outTime)
+          : logInfo?.outTime,
         inPhotoUrl: attendanceEntry?.inPhotoUrl,
         outPhotoUrl: attendanceEntry?.outPhotoUrl,
       });

@@ -8,7 +8,9 @@ import {
   Body,
   ParseUUIDPipe,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { LeaveService } from './leave.service';
 import { ApplyLeaveDto } from './dto/apply-leave.dto';
 import { ApproveLeaveDto } from './dto/approve-leave.dto';
@@ -56,6 +58,8 @@ export class LeaveController {
   // ─── Leave Balance ───
 
   @Get('balance/:userId')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(300) // 5 minutes
   @ApiOperation({ summary: 'Get leave balance for a user' })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
   async getLeaveBalance(@Param('userId', ParseUUIDPipe) userId: string) {
@@ -144,6 +148,8 @@ export class LeaveController {
   // ─── Leave Requests Queries ───
 
   @Get('requests/:userId')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(300) // 5 minutes
   @ApiOperation({ summary: 'Get all leave requests for a user' })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
   async getLeaveRequestsByUser(@Param('userId', ParseUUIDPipe) userId: string) {

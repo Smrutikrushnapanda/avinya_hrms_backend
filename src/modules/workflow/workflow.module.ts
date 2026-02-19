@@ -11,6 +11,7 @@ import { Timeslip } from './timeslip/entities/timeslip.entity';
 import { TimeslipApproval } from './timeslip/entities/timeslip-approval.entity';
 import { MessageModule } from '../message/message.module';
 import { Employee } from '../employee/entities/employee.entity';
+import { Attendance } from '../attendance/entities/attendance.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -20,6 +21,7 @@ import { Employee } from '../employee/entities/employee.entity';
       Timeslip,
       TimeslipApproval,
       Employee,
+      Attendance,
     ]),
     MessageModule,
   ],

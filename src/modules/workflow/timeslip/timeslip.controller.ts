@@ -9,7 +9,9 @@ import {
   Query,
   DefaultValuePipe,
   ParseIntPipe,
+  UseInterceptors,
 } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { ApiTags, ApiOperation, ApiOkResponse, ApiCreatedResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiParam, ApiQuery, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { TimeslipService } from './timeslip.service';
 import { CreateTimeslipDto } from './dto/create-timeslip.dto';
@@ -45,6 +47,8 @@ export class TimeslipController {
 
   /** ---- Get timeslips for an employee (paginated) ---- */
   @Get('employee/:id')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(300) // 5 minutes
   @ApiOperation({ summary: 'Get timeslips for a specific employee (paginated)' })
   @ApiParam({ name: 'id', description: 'Employee id (UUID)' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })

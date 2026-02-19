@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   BadRequestException,
 } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { AttendanceService } from './attendance.service';
 import {
   CreateAttendanceLogDto,
@@ -214,6 +215,8 @@ export class AttendanceController {
   }
 
   @Get('today-logs')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(120) // 2 minutes – invalidated on next punch from client
   @ApiOperation({ summary: "Get today's logs by user and organization" })
   @ApiQuery({
     name: 'organizationId',
@@ -360,6 +363,8 @@ export class AttendanceController {
   }
 
   @Get('monthly')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(300) // 5 minutes
   @ApiOperation({ summary: 'Get attendance logs for a user by month' })
   @ApiQuery({
     name: 'userId',

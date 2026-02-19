@@ -73,11 +73,15 @@ export class AuthService {
 
   // Get enhanced profile with isApprover flag
   async getEnhancedProfile(user: any): Promise<any> {
-    const isApprover = await this.checkIsApprover(user.userId);
+    const [isApprover, employee] = await Promise.all([
+      this.checkIsApprover(user.userId),
+      this.employeeRepository.findOne({ where: { userId: user.userId } }),
+    ]);
     
     return {
       ...user,
-      isApprover
+      isApprover,
+      employee,
     };
   }
 

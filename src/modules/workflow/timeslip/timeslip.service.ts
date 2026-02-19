@@ -11,6 +11,7 @@ import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status
 import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto';
 import { MessageGateway } from 'src/modules/message/message.gateway';
 import { MessageService } from 'src/modules/message/message.service';
+import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
 
 @Injectable()
 export class TimeslipService {
@@ -21,9 +22,65 @@ export class TimeslipService {
     private approvalRepo: Repository<TimeslipApproval>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    @InjectRepository(Attendance)
+    private attendanceRepo: Repository<Attendance>,
     private readonly messageGateway: MessageGateway,
     private readonly messageService: MessageService,
   ) { }
+
+  /** When a timeslip is APPROVED, update the Attendance record with corrected times */
+  private async applyTimeslipToAttendance(timeslipId: string): Promise<void> {
+    const timeslip = await this.timeslipRepo.findOne({
+      where: { id: timeslipId },
+      relations: ['employee'],
+    });
+
+    if (!timeslip || !timeslip.employee?.userId) return;
+
+    const { date, missing_type, corrected_in, corrected_out, employee } = timeslip;
+
+    const existing = await this.attendanceRepo.findOne({
+      where: { user: { id: employee.userId }, attendanceDate: date },
+    });
+
+    let inTime: Date | null = existing?.inTime ?? null;
+    let outTime: Date | null = existing?.outTime ?? null;
+
+    if ((missing_type === 'IN' || missing_type === 'BOTH') && corrected_in) {
+      inTime = new Date(corrected_in);
+    }
+    if ((missing_type === 'OUT' || missing_type === 'BOTH') && corrected_out) {
+      outTime = new Date(corrected_out);
+    }
+
+    let workingMinutes = existing?.workingMinutes ?? 0;
+    if (inTime && outTime) {
+      workingMinutes = Math.max(0, Math.floor((+outTime - +inTime) / 60000));
+    }
+
+    const status: Attendance['status'] =
+      workingMinutes < 160 ? 'absent' : workingMinutes >= 480 ? 'present' : 'half-day';
+
+    const updateData: Partial<Attendance> = {
+      inTime: inTime ?? existing?.inTime,
+      outTime: outTime ?? existing?.outTime,
+      workingMinutes,
+      status,
+      processedAt: new Date(),
+    };
+
+    if (existing) {
+      await this.attendanceRepo.update(existing.id, updateData);
+    } else {
+      const newRecord = this.attendanceRepo.create({
+        user: { id: employee.userId },
+        organization: { id: employee.organizationId },
+        attendanceDate: date,
+        ...updateData,
+      });
+      await this.attendanceRepo.save(newRecord);
+    }
+  }
 
   private async notifyEmployeeOnFinalStatus(
     timeslipId: string,
@@ -339,15 +396,19 @@ async findByEmployee(employeeId: string, page = 1, limit = 10) {
         where: { timeslip: { id }, action: 'REJECTED' },
       });
 
+      const finalStatus = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
       const timeslipToUpdate = { id } as Timeslip;
-      (timeslipToUpdate as any).status =
-        anyRejected > 0 ? 'REJECTED' : 'APPROVED';
+      (timeslipToUpdate as any).status = finalStatus;
       await this.timeslipRepo.save(timeslipToUpdate);
+
+      if (finalStatus === 'APPROVED') {
+        await this.applyTimeslipToAttendance(id);
+      }
 
       const senderEmployeeId = dto.approverId;
       await this.notifyEmployeeOnFinalStatus(
         id,
-        anyRejected > 0 ? 'REJECTED' : 'APPROVED',
+        finalStatus,
         senderEmployeeId,
       );
     }
@@ -416,9 +477,12 @@ async batchUpdateStatuses(dto: BatchUpdateTimeslipStatusDto, approverId?: string
           const anyRejected = await this.approvalRepo.count({
             where: { timeslip: { id: timeslipId }, action: 'REJECTED' },
           });
-          
+
           const finalStatus = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
           await this.timeslipRepo.update(timeslipId, { status: finalStatus });
+          if (finalStatus === 'APPROVED') {
+            await this.applyTimeslipToAttendance(timeslipId);
+          }
           await this.notifyEmployeeOnFinalStatus(
             timeslipId,
             finalStatus as 'APPROVED' | 'REJECTED',
@@ -444,6 +508,9 @@ async batchUpdateStatuses(dto: BatchUpdateTimeslipStatusDto, approverId?: string
         // Only proceed if we actually updated some approvals
         if (updateResult.affected && updateResult.affected > 0) {
           await this.timeslipRepo.update(timeslipId, { status });
+          if (status === 'APPROVED') {
+            await this.applyTimeslipToAttendance(timeslipId);
+          }
           if (status === 'APPROVED' || status === 'REJECTED') {
             await this.notifyEmployeeOnFinalStatus(
               timeslipId,
@@ -687,13 +754,16 @@ async batchApproveSubmissions(dto: BatchApproveSubmissionsDto): Promise<{
 
         const finalStatus = anyRejected > 0 ? 'REJECTED' : 'APPROVED';
         await this.timeslipRepo.update(timeslipId, { status: finalStatus });
+        if (finalStatus === 'APPROVED') {
+          await this.applyTimeslipToAttendance(timeslipId);
+        }
         const senderEmployeeId = approval.approver_id || undefined;
         await this.notifyEmployeeOnFinalStatus(
           timeslipId,
           finalStatus as 'APPROVED' | 'REJECTED',
           senderEmployeeId,
         );
-        
+
         if (!completedTimeslips.includes(timeslipId)) {
           completedTimeslips.push(timeslipId);
         }

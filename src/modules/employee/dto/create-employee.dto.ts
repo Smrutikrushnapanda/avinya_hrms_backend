@@ -80,6 +80,18 @@ export class CreateEmployeeDto {
 
   @IsOptional()
   @IsString()
+  aadharPhotoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  panCardPhotoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  passportPhotoUrl?: string;
+
+  @IsOptional()
+  @IsString()
   @Length(1, 50)
   employmentType?: string;
 

@@ -24,7 +24,7 @@ const dataSource = new DataSource({
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
   migrations: [path.join(__dirname, '/../database/migrations/*{.ts,.js}')],
 
-  synchronize: false,
+  synchronize: true,
 
   ssl: {
     rejectUnauthorized: false,
