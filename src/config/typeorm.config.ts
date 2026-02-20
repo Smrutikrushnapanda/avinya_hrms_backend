@@ -34,6 +34,7 @@ const dataSource = new DataSource({
     ssl: {
       rejectUnauthorized: false,
     },
+    options: '-c search_path=public',
   },
 
   logging: false,

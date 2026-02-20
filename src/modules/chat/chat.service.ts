@@ -12,6 +12,7 @@ import { ChatMessage } from './entities/chat-message.entity';
 import { ChatAttachment } from './entities/chat-attachment.entity';
 import { User } from '../auth-core/entities/user.entity';
 import { CreateDirectConversationDto } from './dto/create-direct-conversation.dto';
+import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { Express } from 'express';
@@ -146,6 +147,43 @@ export class ChatService {
       },
       { conversation: conv, conversationId: conv.id, user: otherUser, userId: otherUser.id },
     ]);
+
+    return conv;
+  }
+
+  async createGroupConversation(currentUser: User, dto: CreateGroupConversationDto) {
+    const currentUserId = (currentUser as any)?.userId || currentUser.id;
+    const currentOrgId =
+      (currentUser as any)?.organizationId || currentUser.organizationId;
+
+    if (!currentUserId) {
+      throw new BadRequestException('Invalid current user');
+    }
+
+    if (!dto.title?.trim()) {
+      throw new BadRequestException('Group title is required');
+    }
+
+    const conv = await this.conversationRepo.save({
+      organizationId: currentOrgId,
+      type: 'GROUP',
+      title: dto.title.trim(),
+    });
+
+    const allUserIds = [
+      currentUserId,
+      ...dto.userIds.filter((id) => id !== currentUserId),
+    ];
+
+    await this.participantRepo.save(
+      allUserIds.map((userId) => ({
+        conversation: conv,
+        conversationId: conv.id,
+        user: { id: userId } as any,
+        userId,
+        role: userId === currentUserId ? 'admin' : 'member',
+      })),
+    );
 
     return conv;
   }

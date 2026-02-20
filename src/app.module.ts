@@ -21,6 +21,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { MessageModule } from './modules/message/message.module';
 import { WfhModule } from './modules/wfh/wfh.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { ClientsModule } from './modules/clients/clients.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
 
@@ -47,6 +48,7 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
     MessageModule,
     WfhModule,
     ChatModule,
+    ClientsModule,
   ],
   controllers: [AppController],
   providers: [

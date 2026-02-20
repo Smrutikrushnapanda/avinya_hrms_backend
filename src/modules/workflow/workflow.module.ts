@@ -12,6 +12,9 @@ import { TimeslipApproval } from './timeslip/entities/timeslip-approval.entity';
 import { MessageModule } from '../message/message.module';
 import { Employee } from '../employee/entities/employee.entity';
 import { Attendance } from '../attendance/entities/attendance.entity';
+import { Timesheet } from './timesheet/entities/timesheet.entity';
+import { TimesheetController } from './timesheet/timesheet.controller';
+import { TimesheetService } from './timesheet/timesheet.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -22,11 +25,12 @@ import { Attendance } from '../attendance/entities/attendance.entity';
       TimeslipApproval,
       Employee,
       Attendance,
+      Timesheet,
     ]),
     MessageModule,
   ],
-  controllers: [WorkflowController, TimeslipController],
-  providers: [WorkflowService, TimeslipService],
+  controllers: [WorkflowController, TimeslipController, TimesheetController],
+  providers: [WorkflowService, TimeslipService, TimesheetService],
   exports: [WorkflowService],
 })
 export class WorkflowModule {}

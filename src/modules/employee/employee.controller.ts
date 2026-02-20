@@ -69,6 +69,21 @@ async getUpcomingBirthdays(
   return { data: birthdays };
 }
 //------------------------------------------------- old code
+  @Get('hierarchy')
+  @ApiOperation({ summary: 'Get employee hierarchy or direct reports' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiQuery({ name: 'employeeId', type: 'string', required: false })
+  @ApiResponse({
+    status: 200,
+    description: 'Return employee hierarchy with direct reports when employeeId is provided.',
+  })
+  async getHierarchy(
+    @Query('organizationId') organizationId: string,
+    @Query('employeeId') employeeId?: string,
+  ) {
+    return this.employeeService.getEmployeeHierarchy(organizationId, employeeId);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a new employee' })
   create(@Body() dto: CreateEmployeeDto) {

@@ -7,6 +7,7 @@ import {
   MoreThanOrEqual,
   Repository,
 } from 'typeorm';
+import { Employee } from '../employee/entities/employee.entity';
 import {
   Attendance,
   AttendanceLog,
@@ -54,6 +55,9 @@ export class AttendanceService {
 
     @InjectRepository(Holiday)
     private holidayRepo: Repository<Holiday>,
+
+    @InjectRepository(Employee)
+    private employeeRepo: Repository<Employee>,
 
     private readonly common: Common,
   ) {}
@@ -652,6 +656,11 @@ export class AttendanceService {
       outTime?: string;
       inPhotoUrl?: string;
       outPhotoUrl?: string;
+      workingMinutes?: number;
+      anomalyFlag?: boolean;
+      anomalyReason?: string;
+      inLocationAddress?: string;
+      outLocationAddress?: string;
     }[]
   > {
     const formatDateLocal = (date: Date): string => {
@@ -750,6 +759,11 @@ export class AttendanceService {
       outTime?: string;
       inPhotoUrl?: string;
       outPhotoUrl?: string;
+      workingMinutes?: number;
+      anomalyFlag?: boolean;
+      anomalyReason?: string;
+      inLocationAddress?: string;
+      outLocationAddress?: string;
     }[] = [];
 
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
@@ -762,6 +776,19 @@ export class AttendanceService {
 
       let status: Attendance['status'] | 'absent' | 'pending' =
         attendanceEntry?.status ?? (d > yesterday ? 'pending' : 'absent');
+
+      const computedWorkingMinutes =
+        attendanceEntry?.workingMinutes ??
+        (attendanceEntry?.inTime && attendanceEntry?.outTime
+          ? Math.max(
+              0,
+              Math.floor(
+                (+new Date(attendanceEntry.outTime) -
+                  +new Date(attendanceEntry.inTime)) /
+                  60000,
+              ),
+            )
+          : undefined);
 
       results.push({
         date: dateStr,
@@ -778,6 +805,11 @@ export class AttendanceService {
           : logInfo?.outTime,
         inPhotoUrl: attendanceEntry?.inPhotoUrl,
         outPhotoUrl: attendanceEntry?.outPhotoUrl,
+        workingMinutes: computedWorkingMinutes,
+        anomalyFlag: attendanceEntry?.anomalyFlag ?? false,
+        anomalyReason: attendanceEntry?.anomalyReason,
+        inLocationAddress: attendanceEntry?.inLocationAddress,
+        outLocationAddress: attendanceEntry?.outLocationAddress,
       });
     }
 

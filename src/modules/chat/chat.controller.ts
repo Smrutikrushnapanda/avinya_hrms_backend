@@ -16,6 +16,7 @@ import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { User } from '../auth-core/entities/user.entity';
 import { ChatService } from './chat.service';
 import { CreateDirectConversationDto } from './dto/create-direct-conversation.dto';
+import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -42,6 +43,15 @@ export class ChatController {
     @Body() dto: CreateDirectConversationDto,
   ) {
     return this.chatService.createDirectConversation(user, dto);
+  }
+
+  @Post('conversations/group')
+  @ApiOperation({ summary: 'Create a group conversation' })
+  async createGroup(
+    @GetUser() user: User,
+    @Body() dto: CreateGroupConversationDto,
+  ) {
+    return this.chatService.createGroupConversation(user, dto);
   }
 
   @Get('conversations/:id/messages')
