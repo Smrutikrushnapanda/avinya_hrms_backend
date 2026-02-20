@@ -20,6 +20,7 @@ const dataSource = new DataSource({
   username: requireEnv('DB_USERNAME'),
   password: requireEnv('DB_PASSWORD'),
   database: requireEnv('DB_NAME'),
+  schema: 'public',
 
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
   migrations: [path.join(__dirname, '/../database/migrations/*{.ts,.js}')],
@@ -34,7 +35,7 @@ const dataSource = new DataSource({
     ssl: {
       rejectUnauthorized: false,
     },
-    options: '-c search_path=public',
+    options: '-c search_path=public,extensions',
   },
 
   logging: false,
