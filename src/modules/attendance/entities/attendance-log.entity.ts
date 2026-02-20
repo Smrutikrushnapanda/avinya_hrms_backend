@@ -9,6 +9,7 @@ import {
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
 import { BiometricDevice } from './biometric-device.entity';
+import { Branch } from './branch.entity';
 
 @Entity('attendance_logs')
 export class AttendanceLog {
@@ -80,6 +81,10 @@ export class AttendanceLog {
 
   @Column({ name: 'anomaly_reason', type: 'text', nullable: true })
   anomalyReason: string | null;
+
+  @ManyToOne(() => Branch, { nullable: true })
+  @JoinColumn({ name: 'branch_id' })
+  branch?: Branch | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

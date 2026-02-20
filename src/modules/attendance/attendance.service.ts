@@ -14,6 +14,7 @@ import {
   BiometricDevice,
   WifiLocation,
   AttendanceSettings,
+  Branch,
 } from './entities';
 import {
   CreateAttendanceLogDto,
@@ -24,6 +25,8 @@ import {
   UpdateAttendanceSettingsDto,
   CreateHolidayDto,
   UpdateHolidayDto,
+  CreateBranchDto,
+  UpdateBranchDto,
 } from './dto';
 import { Common } from '../common/common.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -60,6 +63,8 @@ export class AttendanceService {
     private employeeRepo: Repository<Employee>,
 
     private readonly common: Common,
+    @InjectRepository(Branch)
+    private branchRepo: Repository<Branch>,
   ) {}
 
   async createWifiLocation(dto: CreateWifiLocationDto): Promise<WifiLocation> {
@@ -124,9 +129,13 @@ export class AttendanceService {
     } = dto;
 
     const punchTime = new Date(timestamp);
-    const dateStr = formatLocal(punchTime, 'yyyy-MM-dd');
-    const dayStart = startOfDay(punchTime);
-    const dayEnd = endOfDay(punchTime);
+    const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+    const { windowStart, windowEnd, attendanceDate } = this.computeShiftWindow(
+      punchTime,
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const branchId = shiftConfig.branchId || null;
 
     // 1️⃣ Upload photo to GCS (optional in dev)
     let photoUrl: string | undefined;
@@ -153,7 +162,7 @@ export class AttendanceService {
     const existingLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
-        timestamp: Between(dayStart, dayEnd),
+        timestamp: Between(windowStart, windowEnd),
       },
       relations: ['user'],
       order: { timestamp: 'ASC' },
@@ -236,6 +245,7 @@ export class AttendanceService {
       faceVerified: match?.verified,
       anomalyFlag,
       anomalyReason: anomalyFlag ? anomalyReasons.join(', ') : null,
+      branch: branchId ? { id: branchId } : undefined,
     };
 
     const created = this.attendanceLogRepo.create(log);
@@ -246,7 +256,7 @@ export class AttendanceService {
       where: {
         user: { id: userId },
         organization: { id: organizationId },
-        timestamp: Between(dayStart, dayEnd),
+        timestamp: Between(windowStart, windowEnd),
       },
       order: { timestamp: 'ASC' },
     });
@@ -272,11 +282,11 @@ export class AttendanceService {
       const baseData: DeepPartial<Attendance> = {
         user: { id: userId },
         organization: { id: organizationId },
-        attendanceDate: dateStr,
+        attendanceDate,
         processedAt: new Date(),
         inTime: inLog.timestamp,
         outTime: outLog.timestamp,
-        workingMinutes,
+        workingMinutes: Math.max(0, workingMinutes),
         status:
           workingMinutes < 160
             ? 'absent'
@@ -299,10 +309,11 @@ export class AttendanceService {
         outDeviceInfo: outLog.deviceInfo,
         anomalyFlag: anyAnomaly,
         anomalyReason,
+        branch: branchId ? { id: branchId } : undefined,
       };
 
       const existingAttendance = await this.attendanceRepo.findOne({
-        where: { user: { id: userId }, attendanceDate: dateStr },
+        where: { user: { id: userId }, attendanceDate },
       });
       if (existingAttendance) {
         await this.attendanceRepo.update(existingAttendance.id, baseData);
@@ -895,6 +906,66 @@ export class AttendanceService {
     };
   }
 
+  private combineDateTime(base: Date, timeStr: string): Date {
+    const [hh, mm, ss] = timeStr.split(':').map((t) => parseInt(t, 10));
+    const dt = new Date(base);
+    dt.setHours(hh || 0, mm || 0, ss || 0, 0);
+    return dt;
+  }
+
+  private computeShiftWindow(
+    punchTime: Date,
+    workStartTime: string,
+    workEndTime: string,
+  ): { windowStart: Date; windowEnd: Date; attendanceDate: string } {
+    let windowStart = this.combineDateTime(punchTime, workStartTime);
+    let windowEnd = this.combineDateTime(punchTime, workEndTime);
+    const crossesMidnight = windowEnd <= windowStart;
+
+    if (crossesMidnight) {
+      windowEnd.setDate(windowEnd.getDate() + 1);
+      // If punch happens after midnight but before shift start, shift belongs to previous day
+      if (punchTime < windowStart) {
+        windowStart.setDate(windowStart.getDate() - 1);
+        windowEnd.setDate(windowEnd.getDate() - 1);
+      }
+    }
+
+    const attendanceDate = formatLocal(windowStart, 'yyyy-MM-dd');
+    return { windowStart, windowEnd, attendanceDate };
+  }
+
+  private async resolveShiftConfig(organizationId: string, userId: string) {
+    const employee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      relations: ['branch'],
+    });
+
+    if (employee?.branchId) {
+      const branch = await this.branchRepo.findOne({
+        where: { id: employee.branchId, organizationId: organizationId, isActive: true },
+      });
+      if (branch) {
+        return {
+          branchId: branch.id,
+          workStartTime: branch.workStartTime,
+          workEndTime: branch.workEndTime,
+          graceMinutes: branch.graceMinutes,
+          lateThresholdMinutes: branch.lateThresholdMinutes,
+        };
+      }
+    }
+
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    return {
+      branchId: null,
+      workStartTime: settings.workStartTime,
+      workEndTime: settings.workEndTime,
+      graceMinutes: settings.graceMinutes,
+      lateThresholdMinutes: settings.lateThresholdMinutes,
+    };
+  }
+
   async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
     const start = startOfDay(date);
     const end = endOfDay(date);
@@ -1350,7 +1421,36 @@ async getAttendanceReport(
       holidays: holidays.length,
     },
   };
-}
+  }
+
+  // ===== Branch Methods =====
+  async createBranch(dto: CreateBranchDto): Promise<Branch> {
+    const branch = this.branchRepo.create(dto);
+    return this.branchRepo.save(branch);
+  }
+
+  async listBranches(organizationId: string): Promise<Branch[]> {
+    return this.branchRepo.find({
+      where: { organizationId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async updateBranch(id: string, dto: UpdateBranchDto): Promise<Branch> {
+    const branch = await this.branchRepo.findOne({ where: { id } });
+    if (!branch) {
+      throw new NotFoundException(`Branch with ID ${id} not found`);
+    }
+    Object.assign(branch, dto);
+    return this.branchRepo.save(branch);
+  }
+
+  async deleteBranch(id: string): Promise<void> {
+    const result = await this.branchRepo.delete(id);
+    if (!result.affected) {
+      throw new NotFoundException(`Branch with ID ${id} not found`);
+    }
+  }
 
   // ===== Attendance Settings Methods =====
   

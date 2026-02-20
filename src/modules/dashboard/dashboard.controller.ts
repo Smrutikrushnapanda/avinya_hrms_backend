@@ -80,6 +80,7 @@ export class DashboardController {
   @ApiQuery({ name: 'status', type: 'string', required: false, description: 'Filter by status (all, active, inactive, terminated)' })
   @ApiQuery({ name: 'department', type: 'string', required: false, description: 'Filter by department ID' })
   @ApiQuery({ name: 'designation', type: 'string', required: false, description: 'Filter by designation ID' })
+  @ApiQuery({ name: 'branch', type: 'string', required: false, description: 'Filter by branch ID' })
   @ApiQuery({ name: 'joinDateFilter', type: 'string', required: false, description: 'Filter by join date (all, last30, last90, thisYear)' })
   @ApiQuery({ name: 'sortBy', type: 'string', required: false, description: 'Sort field (default: firstName)' })
   @ApiQuery({ name: 'sortOrder', type: 'string', required: false, description: 'Sort order (asc, desc)' })
@@ -95,6 +96,7 @@ export class DashboardController {
     @Query('status') status?: string,
     @Query('department') department?: string,
     @Query('designation') designation?: string,
+    @Query('branch') branch?: string,
     @Query('joinDateFilter') joinDateFilter?: string,
     @Query('sortBy', new DefaultValuePipe('firstName')) sortBy?: string,
     @Query('sortOrder', new DefaultValuePipe('asc')) sortOrder?: 'asc' | 'desc',
@@ -107,6 +109,7 @@ export class DashboardController {
       status: status || 'all',
       department: department || 'all',
       designation: designation || 'all',
+      branch: branch || 'all',
       joinDateFilter: joinDateFilter || 'all',
       sortBy: sortBy || 'firstName',
       sortOrder: sortOrder || 'asc',
@@ -119,7 +122,8 @@ export class DashboardController {
         designations,
         dashboardStats,
         managers,
-        recentJoiners
+        recentJoiners,
+        branches,
       ] = await Promise.all([
         this.employeeService.findAllWithFilters(organizationId, filters),
         this.departmentService.findAll(organizationId),
@@ -127,6 +131,7 @@ export class DashboardController {
         this.employeeService.getDashboardStats(organizationId),
         this.employeeService.findManagers(organizationId),
         this.employeeService.getRecentJoiners(organizationId, 30),
+        this.employeeService.getBranchesForOrg(organizationId),
       ]);
 
       return {
@@ -138,6 +143,7 @@ export class DashboardController {
             departments,
             designations,
             managers,
+            branches,
             appliedFilters: filters,
           },
           summary: {

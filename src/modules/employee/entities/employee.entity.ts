@@ -11,6 +11,7 @@ import { Organization } from 'src/modules/auth-core/entities/organization.entity
 import { Department } from './department.entity';
 import { Designation } from './designation.entity';
 import { User } from 'src/modules/auth-core/entities/user.entity';
+import { Branch } from 'src/modules/attendance/entities/branch.entity';
 
 @Entity('employees')
 export class Employee {
@@ -28,6 +29,9 @@ export class Employee {
 
   @Column({ name: 'designation_id', nullable: true })
   designationId: string;
+
+  @Column({ name: 'branch_id', nullable: true })
+  branchId: string | null;
 
   @Column({ name: 'reporting_to', nullable: true })
   reportingTo: string;
@@ -121,6 +125,10 @@ export class Employee {
   @ManyToOne(() => Designation, { nullable: true })
   @JoinColumn({ name: 'designation_id' })
   designation: Designation;
+
+  @ManyToOne(() => Branch, { nullable: true })
+  @JoinColumn({ name: 'branch_id' })
+  branch: Branch | null;
 
   @ManyToOne(() => Employee, { nullable: true })
   @JoinColumn({ name: 'reporting_to' })

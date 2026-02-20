@@ -22,6 +22,10 @@ export class CreateEmployeeDto {
   designationId?: string;
 
   @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsOptional()
   reportingTo?: string;
 
   @IsString()

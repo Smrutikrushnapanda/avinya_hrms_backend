@@ -34,6 +34,10 @@ export class ChatService {
   ) {}
 
   async getConversations(userId: string) {
+    if (!userId) {
+      throw new BadRequestException('Invalid authenticated user');
+    }
+
     const participants = await this.participantRepo.find({
       where: { user: { id: userId } },
       relations: ['conversation'],
@@ -282,16 +286,16 @@ export class ChatService {
     const allParticipants = await this.participantRepo.find({
       where: { conversation: { id: conversationId } },
     });
-    const recipientIds = allParticipants
-      .map((p) => p.userId)
-      .filter((id) => id !== userId);
+    const participantIds = Array.from(
+      new Set(allParticipants.map((p) => p.userId).filter(Boolean)),
+    );
 
     const payloadMessage = {
       ...fullMessage,
       readByAll: this.isReadByAll(fullMessage, allParticipants),
     };
 
-    this.messageGateway.emitChatToUsers(recipientIds, {
+    this.messageGateway.emitChatToUsers(participantIds, {
       conversationId,
       message: payloadMessage,
     });

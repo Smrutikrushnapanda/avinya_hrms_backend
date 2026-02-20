@@ -16,6 +16,7 @@ import { UserRole } from '../auth-core/entities/user-role.entity';
 import { Role } from '../auth-core/entities/role.entity';
 import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
+import { Branch } from '../attendance/entities/branch.entity';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { WfhModule } from '../wfh/wfh.module';
       LeaveRequest,
       UserRole,
       Role,
+      Branch,
     ]),
     AuthCoreModule,
     LeaveModule,

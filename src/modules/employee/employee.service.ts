@@ -15,12 +15,15 @@ import { User } from '../auth-core/entities/user.entity';
 import { LeaveService } from '../leave/leave.service';
 import { WfhService } from '../wfh/wfh.service';
 import * as bcrypt from 'bcrypt';
+import { Branch } from '../attendance/entities/branch.entity';
 
 @Injectable()
 export class EmployeeService {
   constructor(
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
 
     @InjectRepository(UserRole)
     private readonly userRoleRepository: Repository<UserRole>,
@@ -169,7 +172,7 @@ export class EmployeeService {
   findAll(organizationId: string) {
     return this.employeeRepository.find({
       where: { organizationId },
-      relations: ['department', 'designation', 'manager', 'user'],
+      relations: ['department', 'designation', 'manager', 'user', 'branch'],
       order: { firstName: 'ASC' },
     });
   }
@@ -177,7 +180,7 @@ export class EmployeeService {
   async findOne(id: string) {
     const employee = await this.employeeRepository.findOne({
       where: { id },
-      relations: ['department', 'designation', 'manager', 'user'],
+      relations: ['department', 'designation', 'manager', 'user', 'branch'],
     });
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
@@ -387,6 +390,7 @@ export class EmployeeService {
       joinDateFilter,
       sortBy,
       sortOrder,
+      branch,
     } = filters;
 
     console.log('🔍 Finding employees with filters:', filters);
@@ -397,6 +401,7 @@ export class EmployeeService {
       .leftJoinAndSelect('employee.department', 'department')
       .leftJoinAndSelect('employee.designation', 'designation')
       .leftJoinAndSelect('employee.manager', 'manager')
+      .leftJoinAndSelect('employee.branch', 'branch')
       .leftJoinAndSelect('employee.user', 'user')
       .where('employee.organizationId = :organizationId', { organizationId });
 
@@ -413,6 +418,11 @@ export class EmployeeService {
     // Add designation filter
     if (designation !== 'all') {
       queryBuilder = queryBuilder.andWhere('employee.designationId = :designationId', { designationId: designation });
+    }
+
+    // Add branch filter
+    if (branch && branch !== 'all') {
+      queryBuilder = queryBuilder.andWhere('employee.branchId = :branchId', { branchId: branch });
     }
 
     // Add join date filter
@@ -450,6 +460,7 @@ export class EmployeeService {
     const sortColumn = sortBy === 'department' ? 'department.name' :
                       sortBy === 'designation' ? 'designation.name' :
                       sortBy === 'manager' ? 'manager.firstName' :
+                      sortBy === 'branch' ? 'branch.name' :
                       `employee.${sortBy}`;
     
     queryBuilder = queryBuilder.orderBy(sortColumn, sortOrder.toUpperCase() as 'ASC' | 'DESC');
@@ -523,6 +534,13 @@ export class EmployeeService {
       console.error('Error finding managers:', error);
       return [];
     }
+  }
+
+  async getBranchesForOrg(organizationId: string) {
+    return this.branchRepository.find({
+      where: { organizationId, isActive: true },
+      order: { name: 'ASC' },
+    });
   }
 
   // --- NEW: GET RECENT JOINERS ---

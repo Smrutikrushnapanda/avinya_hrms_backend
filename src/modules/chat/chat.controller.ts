@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -10,7 +11,14 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { User } from '../auth-core/entities/user.entity';
@@ -30,10 +38,21 @@ import { Express } from 'express';
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
+  private getAuthenticatedUserId(user: Partial<User> & { userId?: string }) {
+    const resolvedUserId = user?.userId || user?.id;
+    if (!resolvedUserId) {
+      throw new BadRequestException('Invalid authenticated user');
+    }
+    return resolvedUserId;
+  }
+
   @Get('conversations')
   @ApiOperation({ summary: 'Get user conversations' })
   async getConversations(@GetUser() user: User) {
-    return this.chatService.getConversations(user.id);
+    const userId = this.getAuthenticatedUserId(
+      user as Partial<User> & { userId?: string },
+    );
+    return this.chatService.getConversations(userId);
   }
 
   @Post('conversations/direct')
@@ -66,7 +85,10 @@ export class ChatController {
     @Query('before') before?: string,
   ) {
     const take = limit ? Number(limit) : 30;
-    return this.chatService.getMessages(id, user.id, take, before);
+    const userId = this.getAuthenticatedUserId(
+      user as Partial<User> & { userId?: string },
+    );
+    return this.chatService.getMessages(id, userId, take, before);
   }
 
   @Post('conversations/:id/messages')
@@ -106,7 +128,9 @@ export class ChatController {
     @Body() dto: SendChatMessageDto,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
-    const senderId = (user as any)?.userId || user.id;
+    const senderId = this.getAuthenticatedUserId(
+      user as Partial<User> & { userId?: string },
+    );
     return this.chatService.sendMessage(id, senderId, dto, files);
   }
 }

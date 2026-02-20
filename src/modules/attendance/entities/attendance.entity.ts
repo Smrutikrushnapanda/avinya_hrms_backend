@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
+import { Branch } from './branch.entity';
 
 @Entity('attendance')
 export class Attendance {
@@ -120,6 +121,10 @@ export class Attendance {
 
   @Column({ name: 'processed_at', type: 'timestamptz', nullable: true })
   processedAt: Date;
+
+  @ManyToOne(() => Branch, { nullable: true })
+  @JoinColumn({ name: 'branch_id' })
+  branch?: Branch | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

@@ -23,6 +23,8 @@ import {
   UpdateAttendanceSettingsDto,
   CreateHolidayDto,
   UpdateHolidayDto,
+  CreateBranchDto,
+  UpdateBranchDto,
 } from './dto';
 import {
   AttendanceLog,
@@ -76,6 +78,32 @@ export class AttendanceController {
     @Body() dto: UpdateAttendanceSettingsDto,
   ) {
     return this.attendanceService.updateAttendanceSettings(organizationId, dto);
+  }
+
+  // 🌐 Branch Management
+  @Get('branches')
+  @ApiOperation({ summary: 'List branches for organization' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  async getBranches(@Query('organizationId') organizationId: string) {
+    return this.attendanceService.listBranches(organizationId);
+  }
+
+  @Post('branches')
+  @ApiOperation({ summary: 'Create branch with timings' })
+  async createBranch(@Body() dto: CreateBranchDto) {
+    return this.attendanceService.createBranch(dto);
+  }
+
+  @Put('branches/:id')
+  @ApiOperation({ summary: 'Update branch' })
+  async updateBranch(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
+    return this.attendanceService.updateBranch(id, dto);
+  }
+
+  @Delete('branches/:id')
+  @ApiOperation({ summary: 'Delete branch' })
+  async deleteBranch(@Param('id') id: string) {
+    return this.attendanceService.deleteBranch(id);
   }
 
   // ➕ Create a new Wi-Fi location
