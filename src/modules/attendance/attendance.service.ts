@@ -269,9 +269,12 @@ export class AttendanceService {
       const inLog = sortedLogs[0];
       const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
 
-      const workingMinutes = Math.floor(
-        (+outLog.timestamp - +inLog.timestamp) / 60000,
-      );
+      // If there's only a single punch, treat the employee as present
+      // immediately and wait for clock-out to refine working time.
+      const hasClockOut = sortedLogs.length > 1;
+      const workingMinutes = hasClockOut
+        ? Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000)
+        : 0;
 
       const anyAnomaly = sortedLogs.some((l) => l.anomalyFlag);
       const anomalyReason = sortedLogs
@@ -279,20 +282,23 @@ export class AttendanceService {
         .filter(Boolean)
         .join(', ') || undefined;
 
+      const status: Attendance['status'] = !hasClockOut
+        ? 'present'
+        : workingMinutes >= 480
+          ? 'present'
+          : workingMinutes >= 160
+            ? 'half-day'
+            : 'absent';
+
       const baseData: DeepPartial<Attendance> = {
         user: { id: userId },
         organization: { id: organizationId },
         attendanceDate,
         processedAt: new Date(),
         inTime: inLog.timestamp,
-        outTime: outLog.timestamp,
+        outTime: hasClockOut ? outLog.timestamp : null,
         workingMinutes: Math.max(0, workingMinutes),
-        status:
-          workingMinutes < 160
-            ? 'absent'
-            : workingMinutes >= 480
-              ? 'present'
-              : 'half-day',
+        status,
         inPhotoUrl: inLog.photoUrl,
         inLatitude: inLog.latitude,
         inLongitude: inLog.longitude,
@@ -300,13 +306,13 @@ export class AttendanceService {
         inWifiSsid: inLog.wifiSsid,
         inWifiBssid: inLog.wifiBssid,
         inDeviceInfo: inLog.deviceInfo,
-        outPhotoUrl: outLog.photoUrl,
-        outLatitude: outLog.latitude,
-        outLongitude: outLog.longitude,
-        outLocationAddress: outLog.locationAddress,
-        outWifiSsid: outLog.wifiSsid,
-        outWifiBssid: outLog.wifiBssid,
-        outDeviceInfo: outLog.deviceInfo,
+        outPhotoUrl: hasClockOut ? outLog.photoUrl : null,
+        outLatitude: hasClockOut ? outLog.latitude : null,
+        outLongitude: hasClockOut ? outLog.longitude : null,
+        outLocationAddress: hasClockOut ? outLog.locationAddress : null,
+        outWifiSsid: hasClockOut ? outLog.wifiSsid : null,
+        outWifiBssid: hasClockOut ? outLog.wifiBssid : null,
+        outDeviceInfo: hasClockOut ? outLog.deviceInfo : null,
         anomalyFlag: anyAnomaly,
         anomalyReason,
         branch: branchId ? { id: branchId } : undefined,
