@@ -8,6 +8,7 @@ import { UserActivitiesService } from './user-activities.service';
 import { TimeslipApproval } from 'src/modules/workflow/timeslip/entities/timeslip-approval.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import * as bcrypt from 'bcrypt';
+import { StorageService } from 'src/modules/attendance/storage.service';
 
 export interface UserWithRoles extends User {
   roles: { id: string; roleName: string }[];
@@ -25,6 +26,7 @@ export class AuthService {
     private timeslipApprovalRepository: Repository<TimeslipApproval>,
     @InjectRepository(Employee)
     private employeeRepository: Repository<Employee>,
+    private storageService: StorageService,
   ) {}
 
   // Generate JWT after successful login
@@ -77,11 +79,34 @@ export class AuthService {
       this.checkIsApprover(user.userId),
       this.employeeRepository.findOne({ where: { userId: user.userId } }),
     ]);
-    
+
+    let avatar: string | null = null;
+    if (employee) {
+      const key = employee.passportPhotoUrl || employee.photoUrl || null;
+      if (key) {
+        if (/^(https?:)?\/\//i.test(key) || key.startsWith('data:')) {
+          avatar = key;
+        } else {
+          try {
+            avatar = await this.storageService.getSignedUrl(key);
+          } catch {
+            avatar = key; // fallback to raw key
+          }
+        }
+      }
+    }
+
     return {
       ...user,
+      avatar,
       isApprover,
-      employee,
+      employee: employee
+        ? {
+            ...employee,
+            photoUrl: avatar || employee.photoUrl || null,
+            passportPhotoUrl: avatar || employee.passportPhotoUrl || null,
+          }
+        : employee,
     };
   }
 

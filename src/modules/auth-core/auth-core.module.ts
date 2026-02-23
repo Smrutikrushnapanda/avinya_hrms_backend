@@ -16,6 +16,7 @@ import { UsersService } from './services/users.service';
 import { RolesService } from './services/roles.service';
 import { UserActivitiesService } from './services/user-activities.service';
 import { AdminSeederService } from './services/admin-seeder.service';
+import { StorageService } from '../attendance/storage.service';
 
 import { Organization } from './entities/organization.entity';
 import { User } from './entities/user.entity';
@@ -57,7 +58,16 @@ import { LogReportModule } from '../log-report/log-report.module';
     RolesController,
     UserActivitiesController,
   ],
-  providers: [JwtStrategy, OrganizationService, AuthService, UsersService, RolesService, UserActivitiesService, AdminSeederService],
+  providers: [
+    JwtStrategy,
+    OrganizationService,
+    AuthService,
+    UsersService,
+    RolesService,
+    UserActivitiesService,
+    AdminSeederService,
+    StorageService,
+  ],
   exports: [OrganizationService, AuthService, UsersService, RolesService, TypeOrmModule],
 })
 export class AuthCoreModule {}

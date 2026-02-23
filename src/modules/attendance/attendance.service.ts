@@ -29,6 +29,8 @@ import {
   UpdateBranchDto,
 } from './dto';
 import { Common } from '../common/common.service';
+import { StorageService } from './storage.service';
+import { AttendancePhotoType } from './dto';
 import { v4 as uuidv4 } from 'uuid';
 import { startOfDay, endOfDay, format as formatLocal } from 'date-fns';
 import { toZonedTime, format as formatTZ } from 'date-fns-tz';
@@ -63,6 +65,7 @@ export class AttendanceService {
     private employeeRepo: Repository<Employee>,
 
     private readonly common: Common,
+    private readonly storageService: StorageService,
     @InjectRepository(Branch)
     private branchRepo: Repository<Branch>,
   ) {}
@@ -137,28 +140,7 @@ export class AttendanceService {
     );
     const branchId = shiftConfig.branchId || null;
 
-    // 1️⃣ Upload photo to GCS (optional in dev)
-    let photoUrl: string | undefined;
-    const gcsUploadDisabled = process.env.GCS_UPLOAD_DISABLED === 'true';
-    if (photoFile && !gcsUploadDisabled) {
-      const destination = `images/attendance/${userId}/${Date.now()}-${uuidv4()}.jpg`;
-      try {
-        photoUrl = await this.common.uploadFile(
-          photoFile.buffer,
-          destination,
-          photoFile.mimetype,
-          true,
-        );
-      } catch (error) {
-        // Allow attendance to proceed if GCS is unavailable in dev
-        console.warn('GCS upload failed, proceeding without photo:', error?.message || error);
-        photoUrl = undefined;
-      }
-    } else if (photoFile && gcsUploadDisabled) {
-      console.warn('GCS upload disabled via GCS_UPLOAD_DISABLED; skipping photo upload.');
-    }
-
-    // 2️⃣ Determine punch type
+    // 1️⃣ Determine punch type
     const existingLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
@@ -214,10 +196,41 @@ export class AttendanceService {
       }
     }
 
-    // 3b. Face Match
+    // 3c. GPS-only validation against office/branch geofence (primary + alternates)
+    if (enableGPSValidation && latitude != null && longitude != null) {
+      const gpsOk = this.isWithinAllowedLocations(
+        latitude,
+        longitude,
+        shiftConfig.officeLatitude,
+        shiftConfig.officeLongitude,
+        shiftConfig.allowedRadiusMeters,
+        shiftConfig.altLocations ?? [],
+      );
+      if (!gpsOk) {
+        anomalyFlag = true;
+        anomalyReasons.push('GPS outside allowed office radius');
+      }
+    }
+
+    // 3b. Upload photo to Supabase Storage (private) and optional face match
+    let photoKey: string | undefined;
+    let signedPhotoUrl: string | undefined;
     let match: { score: number; verified: boolean } | undefined;
-    if (enableFaceValidation && photoUrl) {
-      match = await this.performFaceMatch(userId, photoUrl);
+
+    if (photoFile) {
+      photoKey = await this.storageService.uploadAttendancePhoto(
+        photoFile,
+        organizationId,
+        userId,
+        type === 'check-in'
+          ? AttendancePhotoType.CHECKIN
+          : AttendancePhotoType.CHECKOUT,
+      );
+      signedPhotoUrl = await this.storageService.getSignedUrl(photoKey);
+    }
+
+    if (enableFaceValidation && signedPhotoUrl) {
+      match = await this.performFaceMatch(userId, signedPhotoUrl);
       if (!match.verified) {
         anomalyFlag = true;
         anomalyReasons.push(`Face mismatch (score: ${match.score})`);
@@ -231,7 +244,7 @@ export class AttendanceService {
       timestamp: new Date(timestamp),
       type,
       source: dto.source,
-      photoUrl,
+      photoUrl: photoKey, // store only storage key
       latitude,
       longitude,
       locationAddress: dto.locationAddress,
@@ -250,6 +263,9 @@ export class AttendanceService {
 
     const created = this.attendanceLogRepo.create(log);
     const saved = await this.attendanceLogRepo.save(created);
+    const photoUrl = saved.photoUrl
+      ? await this.storageService.getSignedUrl(saved.photoUrl)
+      : undefined;
 
     // 5️⃣ Update attendance summary for the day (ensure dashboard shows data)
     const dayLogs = await this.attendanceLogRepo.find({
@@ -296,23 +312,24 @@ export class AttendanceService {
         attendanceDate,
         processedAt: new Date(),
         inTime: inLog.timestamp,
-        outTime: hasClockOut ? outLog.timestamp : null,
+        outTime: hasClockOut ? outLog.timestamp : undefined,
         workingMinutes: Math.max(0, workingMinutes),
         status,
-        inPhotoUrl: inLog.photoUrl,
+        inPhotoUrl: inLog.photoUrl ?? undefined,
         inLatitude: inLog.latitude,
         inLongitude: inLog.longitude,
         inLocationAddress: inLog.locationAddress,
         inWifiSsid: inLog.wifiSsid,
         inWifiBssid: inLog.wifiBssid,
         inDeviceInfo: inLog.deviceInfo,
-        outPhotoUrl: hasClockOut ? outLog.photoUrl : null,
-        outLatitude: hasClockOut ? outLog.latitude : null,
-        outLongitude: hasClockOut ? outLog.longitude : null,
-        outLocationAddress: hasClockOut ? outLog.locationAddress : null,
-        outWifiSsid: hasClockOut ? outLog.wifiSsid : null,
-        outWifiBssid: hasClockOut ? outLog.wifiBssid : null,
-        outDeviceInfo: hasClockOut ? outLog.deviceInfo : null,
+        outPhotoUrl:
+          hasClockOut && outLog.photoUrl ? outLog.photoUrl : undefined,
+        outLatitude: hasClockOut ? outLog.latitude : undefined,
+        outLongitude: hasClockOut ? outLog.longitude : undefined,
+        outLocationAddress: hasClockOut ? outLog.locationAddress : undefined,
+        outWifiSsid: hasClockOut ? outLog.wifiSsid : undefined,
+        outWifiBssid: hasClockOut ? outLog.wifiBssid : undefined,
+        outDeviceInfo: hasClockOut ? outLog.deviceInfo : undefined,
         anomalyFlag: anyAnomaly,
         anomalyReason,
         branch: branchId ? { id: branchId } : undefined,
@@ -329,15 +346,20 @@ export class AttendanceService {
     }
 
     // 6️⃣ Respond to frontend
+    const responseData = {
+      ...saved,
+      photoUrl: photoUrl ?? null,
+    };
+
     return anomalyFlag
       ? {
           status: 'anomaly',
-          data: saved,
+          data: responseData,
           reasons: anomalyReasons,
         }
       : {
           status: 'success',
-          data: saved,
+          data: responseData,
         };
   }
 
@@ -376,6 +398,7 @@ export class AttendanceService {
       .addSelect([
         'emp.employee_code AS "employeeCode"',
         'emp.photo_url AS "photoUrl"',
+        'emp.passport_photo_url AS "passportPhotoUrl"',
       ])
       .orderBy('att.inTime', 'ASC')
       .skip((page - 1) * limit)
@@ -401,40 +424,71 @@ export class AttendanceService {
       return `${formattedHour}:${minutes} ${suffix}`;
     };
 
-    const results = records.map((att, i) => ({
-      userId: att.user.id,
-      userName: [att.user.firstName, att.user.middleName, att.user.lastName]
-        .filter(Boolean)
-        .join(' '),
-      email: att.user.email,
+    const results = await Promise.all(
+      records.map(async (att, i) => {
+        const profileImageKey =
+          (raw[i].passportPhotoUrl as string | null) ??
+          (raw[i].photoUrl as string | null);
+        const profileImageSigned =
+          profileImageKey && !profileImageKey.startsWith('http')
+            ? await this.storageService
+                .getSignedUrl(profileImageKey)
+                .catch(() => null)
+            : profileImageKey;
 
-      employeeCode: raw[i].employeeCode,
-      profileImage: raw[i].photoUrl,
+        const inSigned =
+          att.inPhotoUrl && !att.inPhotoUrl.startsWith('http')
+            ? await this.storageService
+                .getSignedUrl(att.inPhotoUrl)
+                .catch(() => null)
+            : att.inPhotoUrl;
 
-      status: att.status,
-      workingMinutes: att.workingMinutes ?? 0,
+        const outSigned =
+          att.outPhotoUrl && !att.outPhotoUrl.startsWith('http')
+            ? await this.storageService
+                .getSignedUrl(att.outPhotoUrl)
+                .catch(() => null)
+            : att.outPhotoUrl;
 
-      inTime: formatTime(att.inTime),
-      inPhotoUrl: att.inPhotoUrl,
-      inLatitude: att.inLatitude,
-      inLongitude: att.inLongitude,
-      inLocationAddress: att.inLocationAddress,
-      inWifiSsid: att.inWifiSsid,
-      inWifiBssid: att.inWifiBssid,
-      inDeviceInfo: att.inDeviceInfo,
+        return {
+          userId: att.user.id,
+          userName: [att.user.firstName, att.user.middleName, att.user.lastName]
+            .filter(Boolean)
+            .join(' '),
+          email: att.user.email,
 
-      outTime: formatTime(att.outTime),
-      outPhotoUrl: att.outPhotoUrl,
-      outLatitude: att.outLatitude,
-      outLongitude: att.outLongitude,
-      outLocationAddress: att.outLocationAddress,
-      outWifiSsid: att.outWifiSsid,
-      outWifiBssid: att.outWifiBssid,
-      outDeviceInfo: att.outDeviceInfo,
+          employeeCode: raw[i].employeeCode,
+          profileImage: profileImageKey,
+          profileImageSigned,
 
-      anomalyFlag: att.anomalyFlag,
-      anomalyReason: att.anomalyReason,
-    }));
+          status: att.status,
+          workingMinutes: att.workingMinutes ?? 0,
+
+          inTime: formatTime(att.inTime),
+          inPhotoUrl: att.inPhotoUrl,
+          inPhotoUrlSigned: inSigned,
+          inLatitude: att.inLatitude,
+          inLongitude: att.inLongitude,
+          inLocationAddress: att.inLocationAddress,
+          inWifiSsid: att.inWifiSsid,
+          inWifiBssid: att.inWifiBssid,
+          inDeviceInfo: att.inDeviceInfo,
+
+          outTime: formatTime(att.outTime),
+          outPhotoUrl: att.outPhotoUrl,
+          outPhotoUrlSigned: outSigned,
+          outLatitude: att.outLatitude,
+          outLongitude: att.outLongitude,
+          outLocationAddress: att.outLocationAddress,
+          outWifiSsid: att.outWifiSsid,
+          outWifiBssid: att.outWifiBssid,
+          outDeviceInfo: att.outDeviceInfo,
+
+          anomalyFlag: att.anomalyFlag,
+          anomalyReason: att.anomalyReason,
+        };
+      }),
+    );
 
     return {
       results,
@@ -764,6 +818,26 @@ export class AttendanceService {
       });
     }
 
+    // 4. Approved leave map (full-day coverage)
+    const approvedLeaves = await this.leaveRequestRepo.find({
+      where: {
+        user: { id: userId },
+        status: 'APPROVED',
+        startDate: LessThanOrEqual(formatDateLocal(toDate)),
+        endDate: MoreThanOrEqual(formatDateLocal(fromDate)),
+      },
+    });
+
+    const leaveSet = new Set<string>();
+    for (const leave of approvedLeaves) {
+      const start = new Date(leave.startDate);
+      const end = new Date(leave.endDate);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const key = formatDateLocal(d);
+        leaveSet.add(key);
+      }
+    }
+
     // 4. Final result
     const results: {
       date: string;
@@ -787,12 +861,22 @@ export class AttendanceService {
       const dateStr = formatDateLocal(d);
       const isSunday = !isWorkingDay(d);
       const holidayInfo = holidayMap.get(dateStr);
+      const isOnLeave = leaveSet.has(dateStr);
 
       const attendanceEntry = attendanceMap.get(dateStr);
       const logInfo = logMap.get(dateStr);
 
       let status: Attendance['status'] | 'absent' | 'pending' =
-        attendanceEntry?.status ?? (d > yesterday ? 'pending' : 'absent');
+        attendanceEntry?.status ??
+        (holidayInfo
+          ? 'holiday'
+          : isSunday
+            ? 'weekend'
+            : isOnLeave
+              ? 'on-leave'
+              : d > yesterday
+                ? 'pending'
+                : 'absent');
 
       const computedWorkingMinutes =
         attendanceEntry?.workingMinutes ??
@@ -901,6 +985,43 @@ export class AttendanceService {
     return R * c;
   }
 
+  private isWithinAllowedLocations(
+    latitude: number,
+    longitude: number,
+    primaryLat?: number | null,
+    primaryLon?: number | null,
+    defaultRadius?: number | null,
+    altLocations: { latitude: number; longitude: number; radiusMeters?: number }[] = [],
+  ): boolean {
+    const locations: { lat: number; lon: number; radius: number }[] = [];
+
+    if (primaryLat != null && primaryLon != null) {
+      locations.push({
+        lat: Number(primaryLat),
+        lon: Number(primaryLon),
+        radius: defaultRadius ?? 100,
+      });
+    }
+
+    for (const loc of altLocations) {
+      if (loc.latitude != null && loc.longitude != null) {
+        locations.push({
+          lat: Number(loc.latitude),
+          lon: Number(loc.longitude),
+          radius: loc.radiusMeters ?? defaultRadius ?? 100,
+        });
+      }
+    }
+
+    // If no geofence configured, allow
+    if (locations.length === 0) return true;
+
+    return locations.some((loc) => {
+      const dist = this.calculateDistance(latitude, longitude, loc.lat, loc.lon);
+      return dist <= loc.radius;
+    });
+  }
+
   private async performFaceMatch(
     userId: string,
     photoUrl: string,
@@ -958,6 +1079,10 @@ export class AttendanceService {
           workEndTime: branch.workEndTime,
           graceMinutes: branch.graceMinutes,
           lateThresholdMinutes: branch.lateThresholdMinutes,
+          officeLatitude: branch.officeLatitude,
+          officeLongitude: branch.officeLongitude,
+          allowedRadiusMeters: branch.allowedRadiusMeters,
+          altLocations: branch.altLocations ?? [],
         };
       }
     }
@@ -969,6 +1094,10 @@ export class AttendanceService {
       workEndTime: settings.workEndTime,
       graceMinutes: settings.graceMinutes,
       lateThresholdMinutes: settings.lateThresholdMinutes,
+      officeLatitude: settings.officeLatitude,
+      officeLongitude: settings.officeLongitude,
+      allowedRadiusMeters: settings.allowedRadiusMeters,
+      altLocations: [],
     };
   }
 
@@ -976,6 +1105,23 @@ export class AttendanceService {
     const start = startOfDay(date);
     const end = endOfDay(date);
     const dateStr = formatLocal(start, 'yyyy-MM-dd');
+
+    // Preload attendance settings per organization lazily when needed
+    const settingsCache = new Map<string, AttendanceSettings>();
+    const getSettings = async (orgId: string) => {
+      if (!orgId) return null;
+      if (!settingsCache.has(orgId)) {
+        settingsCache.set(orgId, await this.getOrCreateAttendanceSettings(orgId));
+      }
+      return settingsCache.get(orgId)!;
+    };
+
+    const holidays = await this.holidayRepo.find({
+      where: { date: Between(start, end) },
+    });
+    const holidaySet = new Set(
+      holidays.map((h) => formatLocal(new Date(h.date), 'yyyy-MM-dd')),
+    );
 
     // 1️⃣ Fetch attendance logs for the day (non-anomalous)
     const logs = await this.attendanceLogRepo.find({
@@ -1038,9 +1184,19 @@ export class AttendanceService {
         processedAt: new Date(),
       };
 
+      const orgId = organizationId !== 'UNKNOWN' ? organizationId : undefined;
+      const settings = orgId ? await getSettings(orgId) : null;
+      const isWorking = settings ? this.isWorkingDayForDate(start, settings) : true;
+      const isHoliday = holidaySet.has(attendanceDate);
+
       // 💼 If on leave
       if (leave) {
         baseData.status = 'on-leave';
+      }
+
+      // 🗓️ Holiday or weekend (no logs, no leave)
+      else if (!isWorking || isHoliday) {
+        baseData.status = isHoliday ? 'holiday' : 'weekend';
       }
 
       // ✅ If attendance logs exist

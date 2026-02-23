@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class CreateBranchDto {
   @ApiProperty({ description: 'Organization UUID' })
@@ -33,6 +44,39 @@ export class CreateBranchDto {
   @Min(0)
   @Max(480)
   lateThresholdMinutes?: number;
+
+  @ApiPropertyOptional({ example: 20.3494624, description: 'Office latitude' })
+  @IsOptional()
+  @IsNumber()
+  officeLatitude?: number;
+
+  @ApiPropertyOptional({ example: 85.8078853, description: 'Office longitude' })
+  @IsOptional()
+  @IsNumber()
+  officeLongitude?: number;
+
+  @ApiPropertyOptional({ example: 150, description: 'Allowed GPS radius (meters) for this branch' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  allowedRadiusMeters?: number;
+
+  @ApiPropertyOptional({
+    description: 'Alternate geofences for this branch',
+    example: [
+      { latitude: 20.35, longitude: 85.81, radiusMeters: 120, label: 'Gate A' },
+      { latitude: 20.36, longitude: 85.82, radiusMeters: 80, label: 'Warehouse' },
+    ],
+  })
+  @IsOptional()
+  @IsArray()
+  altLocations?: {
+    latitude: number;
+    longitude: number;
+    radiusMeters?: number;
+    label?: string;
+  }[];
 
   @ApiPropertyOptional({ example: true, description: 'Whether branch is active' })
   @IsOptional()

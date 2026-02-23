@@ -9,9 +9,9 @@ import {
   Query,
   ParseUUIDPipe,
   ParseIntPipe,
-  UploadedFile,
   UseInterceptors,
   BadRequestException,
+  UploadedFile,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { AttendanceService } from './attendance.service';
@@ -34,6 +34,7 @@ import {
   AttendanceSettings,
 } from './entities';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import {
   ApiBody,
   ApiConsumes,
@@ -45,11 +46,83 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { DateTime } from 'luxon';
+import { UploadAttendancePhotoDto } from './dto';
+import { StorageService } from './storage.service';
 
 @ApiTags('Attendance')
 @Controller('attendance')
 export class AttendanceController {
-  constructor(private readonly attendanceService: AttendanceService) {}
+  constructor(
+    private readonly attendanceService: AttendanceService,
+    private readonly storageService: StorageService,
+  ) {}
+
+  @Get('photo-url')
+  @ApiOperation({ summary: 'Generate signed URL for stored attendance photo key' })
+  @ApiQuery({ name: 'key', type: 'string', required: true })
+  async getPhotoSignedUrl(@Query('key') key: string) {
+    const signedUrl = await this.storageService.getSignedUrl(key);
+    return { key, signedUrl, expiresIn: 60 * 60 * 24 * 180 };
+  }
+
+  @Post('upload')
+  @ApiOperation({ summary: 'Upload attendance photo to Supabase Storage' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description:
+      'Upload a check-in / check-out photo. File must be JPEG/PNG/WebP under 5MB; stored key is saved to DB.',
+    schema: {
+      type: 'object',
+      properties: {
+        companyId: { type: 'string', format: 'uuid' },
+        userId: { type: 'string', format: 'uuid' },
+        type: { type: 'string', enum: ['checkin', 'checkout'] },
+        file: { type: 'string', format: 'binary' },
+      },
+      required: ['companyId', 'userId', 'type', 'file'],
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Returns storage key and a signed URL (default 6 months).',
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowed.includes(file.mimetype)) {
+          return cb(
+            new BadRequestException(
+              'Only JPEG, PNG, or WebP images are allowed',
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadAttendancePhoto(
+    @Body() dto: UploadAttendancePhotoDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Photo file is required');
+    }
+
+    const key = await this.storageService.uploadAttendancePhoto(
+      file,
+      dto.companyId,
+      dto.userId,
+      dto.type,
+    );
+
+    const signedUrl = await this.storageService.getSignedUrl(key);
+
+    return { key, signedUrl, expiresIn: 60 * 60 * 24 * 180 };
+  }
 
   // 📋 Get or create attendance settings for organization
   @Get('settings')

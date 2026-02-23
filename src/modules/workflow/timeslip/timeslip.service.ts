@@ -614,7 +614,7 @@ async findByApprover(approverId: string, options: { status?: string; page: numbe
       't.id', 't.date', 't.missing_type', 't.corrected_in',
       't.corrected_out', 't.reason', 't.status', 't.created_at', 't.updated_at',
       'emp.id', 'emp.firstName', 'emp.lastName', 'emp.employeeCode',
-      'emp.workEmail', 'emp.photoUrl',
+      'emp.workEmail', 'emp.photoUrl', 'emp.passportPhotoUrl',
       'dept.id', 'dept.name', 'dept.code',
       'desig.id', 'desig.name', 'desig.code',
       'a.id', 'a.action', 'a.remarks', 'a.acted_at', 'a.approver_id'
@@ -652,7 +652,7 @@ async findByApprover(approverId: string, options: { status?: string; page: numbe
         lastName: t.employee?.lastName,
         employeeCode: t.employee?.employeeCode,
         workEmail: t.employee?.workEmail,
-        photoUrl: t.employee?.photoUrl,
+        photoUrl: t.employee?.passportPhotoUrl || t.employee?.photoUrl,
         department: t.employee?.department ? {
           id: t.employee.department.id,
           name: t.employee.department.name,

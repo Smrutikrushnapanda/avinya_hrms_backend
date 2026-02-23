@@ -33,8 +33,8 @@ export class AttendanceLog {
   @Column({ name: 'source', type: 'varchar' })
   source: 'mobile' | 'web' | 'biometric' | 'wifi' | 'manual';
 
-  @Column({ name: 'photo_url', nullable: true })
-  photoUrl: string;
+  @Column({ name: 'photo_url', type: 'varchar', nullable: true })
+  photoUrl: string | null;
 
   @Column({ name: 'face_match_score', type: 'float', nullable: true })
   faceMatchScore: number;

@@ -9,6 +9,7 @@ import { Common } from '../common/common.service';
 import { LeaveRequest } from '../leave/entities';
 import { Holiday } from '../leave/entities';
 import { Employee } from '../employee/entities/employee.entity';
+import { StorageService } from './storage.service';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { Employee } from '../employee/entities/employee.entity';
       ]),
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, Common],
+  providers: [AttendanceService, Common, StorageService],
   exports: [TypeOrmModule],
 })
 export class AttendanceModule {}

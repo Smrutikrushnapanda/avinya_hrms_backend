@@ -16,6 +16,7 @@ import { LeaveService } from '../leave/leave.service';
 import { WfhService } from '../wfh/wfh.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from '../attendance/entities/branch.entity';
+import { StorageService } from '../attendance/storage.service';
 
 @Injectable()
 export class EmployeeService {
@@ -38,6 +39,7 @@ export class EmployeeService {
     private readonly entityManager: EntityManager,
     private readonly leaveService: LeaveService,
     private readonly wfhService: WfhService,
+    private readonly storageService: StorageService,
   ) {}
 
   async create(dto: CreateEmployeeDto) {
@@ -162,19 +164,35 @@ export class EmployeeService {
     }
   }
 
-  async findByUserId(userId: string): Promise<Employee | null> {
-    return this.employeeRepository.findOne({
+  async findByUserId(userId: string): Promise<any | null> {
+    const employee = await this.employeeRepository.findOne({
       where: { userId },
       relations: ['user', 'organization', 'department', 'designation', 'manager'],
     });
+    if (!employee) return null;
+
+    const photoUrl = await this.signIfNeeded(this.getProfilePhotoKey(employee));
+    const managerPhotoUrl = await this.signIfNeeded(
+      this.getProfilePhotoKey(employee.manager as any),
+    );
+
+    return {
+      ...employee,
+      photoUrl,
+      manager: employee.manager
+        ? { ...employee.manager, photoUrl: managerPhotoUrl }
+        : employee.manager,
+    };
   }
 
   findAll(organizationId: string) {
-    return this.employeeRepository.find({
-      where: { organizationId },
-      relations: ['department', 'designation', 'manager', 'user', 'branch'],
-      order: { firstName: 'ASC' },
-    });
+    return this.employeeRepository
+      .find({
+        where: { organizationId },
+        relations: ['department', 'designation', 'manager', 'user', 'branch'],
+        order: { firstName: 'ASC' },
+      })
+      .then((emps) => Promise.all(emps.map((e) => this.addSignedProfilePhoto(e))));
   }
 
   async findOne(id: string) {
@@ -185,9 +203,18 @@ export class EmployeeService {
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
+    const photoUrl = await this.signIfNeeded(this.getProfilePhotoKey(employee));
+    const managerPhotoUrl = await this.signIfNeeded(
+      this.getProfilePhotoKey(employee.manager as any),
+    );
+
     return {
       ...(employee as any),
       userName: (employee as any)?.user?.userName,
+      photoUrl,
+      manager: employee.manager
+        ? { ...employee.manager, photoUrl: managerPhotoUrl }
+        : employee.manager,
     };
   }
 
@@ -346,8 +373,8 @@ export class EmployeeService {
       },
       relations: ['department'],
       select: [
-        'id', 'firstName', 'lastName', 'dateOfBirth', 
-        'photoUrl', 'workEmail'
+        'id', 'firstName', 'lastName', 'dateOfBirth',
+        'photoUrl', 'passportPhotoUrl', 'workEmail'
       ],
     });
 
@@ -375,7 +402,9 @@ export class EmployeeService {
       .filter(employee => employee.daysUntilBirthday <= days && employee.daysUntilBirthday >= 0)
       .sort((a, b) => a.daysUntilBirthday - b.daysUntilBirthday);
 
-    return upcomingBirthdays;
+    return Promise.all(
+      upcomingBirthdays.map(async (emp) => this.addSignedProfilePhoto(emp)),
+    );
   }
 
   // --- NEW: COMPREHENSIVE EMPLOYEE SEARCH WITH FILTERS AND PAGINATION ---
@@ -475,11 +504,16 @@ export class EmployeeService {
     // Execute query
     const employees = await queryBuilder.getMany();
 
-    // Attach username for edit UI
-    const employeesWithUserName = employees.map((emp: any) => ({
-      ...emp,
-      userName: emp?.user?.userName,
-    }));
+    // Attach username for edit UI + signed profile photo
+    const employeesWithUserName = await Promise.all(
+      employees.map(async (emp: any) => {
+        const withPhoto = await this.addSignedProfilePhoto(emp);
+        return {
+          ...withPhoto,
+          userName: emp?.user?.userName,
+        };
+      }),
+    );
 
     // Calculate pagination info
     const totalPages = Math.ceil(total / limit);
@@ -559,13 +593,15 @@ export class EmployeeService {
         order: { dateOfJoining: 'DESC' },
         take: 10, // Limit to latest 10
         select: [
-          'id', 'firstName', 'lastName', 'employeeCode', 
-          'dateOfJoining', 'photoUrl', 'workEmail'
+          'id', 'firstName', 'lastName', 'employeeCode',
+          'dateOfJoining', 'photoUrl', 'passportPhotoUrl', 'workEmail'
         ],
       });
 
       console.log(`📅 Found ${recentJoiners.length} recent joiners in last ${days} days`);
-      return recentJoiners;
+      return Promise.all(
+        recentJoiners.map(async (emp) => this.addSignedProfilePhoto(emp)),
+      );
     } catch (error) {
       console.error('Error getting recent joiners:', error);
       return [];
@@ -712,6 +748,7 @@ export class EmployeeService {
           'employee.employeeCode',
           'employee.workEmail',
           'employee.photoUrl',
+          'employee.passportPhotoUrl',
           'department.name',
           'designation.name'
         ])
@@ -725,7 +762,9 @@ export class EmployeeService {
         .take(limit)
         .getMany();
 
-      return suggestions;
+      return Promise.all(
+        suggestions.map(async (emp) => this.addSignedProfilePhoto(emp)),
+      );
     } catch (error) {
       console.error('Error getting search suggestions:', error);
       return [];
@@ -765,8 +804,10 @@ export class EmployeeService {
         });
 
         return {
-          employee,
-          directReports,
+          employee: await this.addSignedProfilePhoto(employee),
+          directReports: await Promise.all(
+            directReports.map((d) => this.addSignedProfilePhoto(d)),
+          ),
           reportCount: directReports.length,
         };
       } else {
@@ -776,7 +817,9 @@ export class EmployeeService {
           .orderBy('employee.firstName', 'ASC')
           .getMany();
 
-        return topLevelEmployees;
+        return Promise.all(
+          topLevelEmployees.map((emp) => this.addSignedProfilePhoto(emp)),
+        );
       }
     } catch (error) {
       console.error('Error getting employee hierarchy:', error);
@@ -848,5 +891,44 @@ export class EmployeeService {
     }
 
     return this.checkCircularReporting(employeeId, manager.reportingTo);
+  }
+
+  private async signIfNeeded(key?: string | null): Promise<string | null> {
+    if (!key) return null;
+    // Skip signing if it is already a full URL (http/https/gs) or a data URI
+    if (/^(https?:)?\/\//i.test(key)) return key;
+    if (key.startsWith('data:')) return key;
+    try {
+      return await this.storageService.getSignedUrl(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  private getProfilePhotoKey(employee?: Pick<Employee, 'passportPhotoUrl' | 'photoUrl'> | null) {
+    if (!employee) return null;
+    return employee.passportPhotoUrl || employee.photoUrl || null;
+  }
+
+  private async addSignedProfilePhoto<
+    T extends { passportPhotoUrl?: string | null; photoUrl?: string | null }
+  >(entity: T): Promise<
+    T & {
+      photoUrl: string | null;
+      passportPhotoUrl?: string | null;
+      profileImage?: string | null;
+    }
+  > {
+    const primaryKey = this.getProfilePhotoKey(entity as any);
+    const primarySigned = await this.signIfNeeded(primaryKey);
+    const passportSigned = await this.signIfNeeded(entity.passportPhotoUrl);
+    const photoSigned = await this.signIfNeeded(entity.photoUrl);
+
+    return {
+      ...entity,
+      passportPhotoUrl: passportSigned ?? entity.passportPhotoUrl ?? null,
+      photoUrl: primarySigned ?? passportSigned ?? photoSigned ?? null,
+      profileImage: primarySigned ?? passportSigned ?? photoSigned ?? null,
+    };
   }
 }

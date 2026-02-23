@@ -17,6 +17,7 @@ import { Role } from '../auth-core/entities/role.entity';
 import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
 import { Branch } from '../attendance/entities/branch.entity';
+import { StorageService } from '../attendance/storage.service';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { Branch } from '../attendance/entities/branch.entity';
     EmployeeService,
     DepartmentService,
     DesignationService,
+    StorageService,
   ],
   exports: [
     EmployeeService,

@@ -36,6 +36,40 @@ export class Branch {
   @Column({ name: 'late_threshold_minutes', type: 'int', default: 30 })
   lateThresholdMinutes!: number;
 
+  @Column({
+    name: 'office_latitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  officeLatitude?: number | null;
+
+  @Column({
+    name: 'office_longitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  officeLongitude?: number | null;
+
+  @Column({ name: 'allowed_radius_meters', type: 'int', default: 100 })
+  allowedRadiusMeters!: number;
+
+  @Column({
+    name: 'alt_locations',
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'[]'",
+  })
+  altLocations?: {
+    latitude: number;
+    longitude: number;
+    radiusMeters?: number;
+    label?: string;
+  }[];
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 
