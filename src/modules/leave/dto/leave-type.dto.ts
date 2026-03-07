@@ -15,6 +15,15 @@ export class CreateLeaveTypeDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // null = all genders; 'female' = female only; 'male' = male only
+  @IsOptional()
+  @IsString()
+  genderRestriction?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isEarned?: boolean;
 }
 
 export class UpdateLeaveTypeDto {
@@ -29,4 +38,12 @@ export class UpdateLeaveTypeDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  genderRestriction?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isEarned?: boolean;
 }

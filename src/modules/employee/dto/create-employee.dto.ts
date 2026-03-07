@@ -40,6 +40,10 @@ export class CreateEmployeeDto {
   @Length(6, 100)
   loginPassword: string;
 
+  @IsOptional()
+  @IsUUID()
+  roleId?: string;
+
   @IsString()
   @Length(1, 100)
   firstName: string;

@@ -7,6 +7,8 @@ import { JwtPayload } from '../dto/auth.dto';
 import { UserActivitiesService } from './user-activities.service';
 import { TimeslipApproval } from 'src/modules/workflow/timeslip/entities/timeslip-approval.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
+import { LeaveApprovalAssignment } from 'src/modules/leave/entities/leave-approval-assignment.entity';
+import { WfhApprovalAssignment } from 'src/modules/wfh/entities/wfh-approval-assignment.entity';
 import * as bcrypt from 'bcrypt';
 import { StorageService } from 'src/modules/attendance/storage.service';
 
@@ -26,6 +28,10 @@ export class AuthService {
     private timeslipApprovalRepository: Repository<TimeslipApproval>,
     @InjectRepository(Employee)
     private employeeRepository: Repository<Employee>,
+    @InjectRepository(LeaveApprovalAssignment)
+    private leaveApprovalAssignmentRepository: Repository<LeaveApprovalAssignment>,
+    @InjectRepository(WfhApprovalAssignment)
+    private wfhApprovalAssignmentRepository: Repository<WfhApprovalAssignment>,
     private storageService: StorageService,
   ) {}
 
@@ -63,12 +69,30 @@ export class AuthService {
         return false;
       }
 
-      const approvalRecord = await this.timeslipApprovalRepository.findOne({
-        where: { approver_id: employee.id },
-      });
-      
-      return !!approvalRecord;
-    } catch (error) {
+      const [timeslipApproval, hasDirectReports, leaveApprovalAssignment, wfhApprovalAssignment] =
+        await Promise.all([
+          this.timeslipApprovalRepository.findOne({
+            where: { approver_id: employee.id },
+          }),
+          this.employeeRepository.findOne({
+            where: { reportingTo: employee.id },
+            select: ['id'],
+          }),
+          this.leaveApprovalAssignmentRepository.findOne({
+            where: { approver: { id: userId }, isActive: true },
+          }),
+          this.wfhApprovalAssignmentRepository.findOne({
+            where: { approver: { id: userId }, isActive: true },
+          }),
+        ]);
+
+      return Boolean(
+        timeslipApproval ||
+          hasDirectReports ||
+          leaveApprovalAssignment ||
+          wfhApprovalAssignment,
+      );
+    } catch {
       return false;
     }
   }

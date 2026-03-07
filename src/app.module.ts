@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import dataSource from './config/typeorm.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -22,6 +23,14 @@ import { MessageModule } from './modules/message/message.module';
 import { WfhModule } from './modules/wfh/wfh.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { WfhMonitoringModule } from './modules/wfh-monitoring/wfh-monitoring.module';
+import { PolicyModule } from './modules/policy/policy.module';
+import { PerformanceModule } from './modules/performance/performance.module';
+import { ProjectModule } from './modules/project/project.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
+import { MeetingModule } from './modules/meeting/meeting.module';
+import { MailModule } from './modules/mail/mail.module';
+import { ResignationModule } from './modules/resignation/resignation.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
 
@@ -34,6 +43,7 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
       serveRoot: '/static', // makes your files accessible at /static/*
     }),
     GlobalCacheModule,
+    ScheduleModule.forRoot(),
     AuthCoreModule,
     AttendanceModule,
     LeaveModule,
@@ -49,6 +59,14 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
     WfhModule,
     ChatModule,
     ClientsModule,
+    WfhMonitoringModule,
+    PolicyModule,
+    PerformanceModule,
+    ProjectModule,
+    ExpensesModule,
+    MeetingModule,
+    MailModule,
+    ResignationModule,
   ],
   controllers: [AppController],
   providers: [

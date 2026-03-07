@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, IsUrl } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Min } from 'class-validator';
 
 export class CreateOrganizationDto {
   @IsString()
@@ -7,6 +7,10 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  hrMail?: string;
 
   @IsOptional()
   @IsString()
@@ -27,6 +31,19 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   landingLink?: string;
+
+  @IsOptional()
+  @IsString()
+  resignationPolicy?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  resignationNoticePeriodDays?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowEarlyRelievingByAdmin?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -48,6 +65,16 @@ export class CreateOrganizationDto {
   @IsString()
   createdBy?: string;
 }
+export class ChangeCredentialsDto {
+  @IsOptional()
+  @IsString()
+  newUserName?: string;
+
+  @IsOptional()
+  @IsString()
+  newPassword?: string;
+}
+
 export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
@@ -60,6 +87,10 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  hrMail?: string;
 
   @IsOptional()
   @IsString()
@@ -80,6 +111,19 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
   landingLink?: string;
+
+  @IsOptional()
+  @IsString()
+  resignationPolicy?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  resignationNoticePeriodDays?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowEarlyRelievingByAdmin?: boolean;
 
   @IsOptional()
   @IsBoolean()

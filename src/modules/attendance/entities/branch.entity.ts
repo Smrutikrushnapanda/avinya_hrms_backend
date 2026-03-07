@@ -36,6 +36,24 @@ export class Branch {
   @Column({ name: 'late_threshold_minutes', type: 'int', default: 30 })
   lateThresholdMinutes!: number;
 
+  @Column({ name: 'half_day_cutoff_time', type: 'time', default: '14:00:00' })
+  halfDayCutoffTime!: string;
+
+  @Column({
+    name: 'working_days',
+    type: 'integer',
+    array: true,
+    default: () => "'{1,2,3,4,5,6}'",
+  })
+  workingDays!: number[];
+
+  @Column({
+    name: 'weekday_off_rules',
+    type: 'jsonb',
+    default: () => "'{}'",
+  })
+  weekdayOffRules!: Record<string, number[]>;
+
   @Column({
     name: 'office_latitude',
     type: 'decimal',

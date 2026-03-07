@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager, Between, LessThanOrEqual, MoreThanOrEqual, Like, MoreThan, QueryFailedError } from 'typeorm';
+import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
 import { Employee } from './entities/employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -9,8 +9,6 @@ import { CreateUserDto } from '../auth-core/dto/create-user.dto';
 import { Role } from '../auth-core/entities/role.entity';
 import { RoleType } from '../auth-core/enums/role-type.enum';
 import { UsersService } from '../auth-core/services/users.service';
-import { Attendance } from '../attendance/entities/attendance.entity';
-import { LeaveRequest } from '../leave/entities/leave-request.entity';
 import { User } from '../auth-core/entities/user.entity';
 import { LeaveService } from '../leave/leave.service';
 import { WfhService } from '../wfh/wfh.service';
@@ -48,7 +46,12 @@ export class EmployeeService {
         throw new BadRequestException('loginUserName and loginPassword are required');
       }
 
-      const loginUserName = dto.loginUserName.trim();
+      const { loginUserName: rawLoginUserName, loginPassword, roleId, ...employeePayload } = dto;
+      const loginUserName = rawLoginUserName.trim();
+      const selectedRole = await this.resolveRoleForEmployee(
+        dto.organizationId,
+        roleId,
+      );
 
       const existingUser = await this.userRepository.findOne({
         where: [
@@ -60,7 +63,7 @@ export class EmployeeService {
 
       const userDto: CreateUserDto = {
         userName: loginUserName,
-        password: dto.loginPassword,
+        password: loginPassword,
         firstName: dto.firstName,
         middleName: dto.middleName,
         lastName: dto.lastName ?? '',
@@ -71,21 +74,6 @@ export class EmployeeService {
         organizationId: dto.organizationId,
       };
 
-      let role = await this.roleRepository.findOne({
-        where: { roleName: 'EMPLOYEE' },
-      });
-
-      if (!role) {
-        role = await this.roleRepository.save(
-          this.roleRepository.create({
-            roleName: 'EMPLOYEE',
-            type: RoleType.DEFAULT,
-            description: 'Default Employee role',
-            createdBy: 'system',
-          }),
-        );
-      }
-
       if (existingUser) {
         const existingEmployee = await this.employeeRepository.findOne({
           where: { userId: existingUser.id },
@@ -95,20 +83,10 @@ export class EmployeeService {
           throw new ConflictException('Employee already exists for this user');
         }
 
-        const existingUserRole = await this.userRoleRepository.findOne({
-          where: { user: { id: existingUser.id }, role: { id: role.id } },
-        });
-
-        if (!existingUserRole) {
-          const userRole = this.userRoleRepository.create({
-            user: existingUser,
-            role,
-          });
-          await this.userRoleRepository.save(userRole);
-        }
+        await this.setUserPrimaryRole(existingUser.id, selectedRole);
 
         const employee = this.employeeRepository.create({
-          ...dto,
+          ...employeePayload,
           userId: existingUser.id,
         });
 
@@ -125,20 +103,14 @@ export class EmployeeService {
             savedEmployee.employmentType,
           );
         }
-        return savedEmployee;
+        return this.findOne(savedEmployee.id);
       }
 
       const createdUser = await this.userService.create(userDto);
-
-      const userRole = this.userRoleRepository.create({
-        user: createdUser,
-        role: role,
-      });
-
-      await this.userRoleRepository.save(userRole);
+      await this.setUserPrimaryRole(createdUser.id, selectedRole);
 
       const employee = this.employeeRepository.create({
-        ...dto,
+        ...employeePayload,
         userId: createdUser.id,
       });
 
@@ -155,7 +127,7 @@ export class EmployeeService {
           savedEmployee.employmentType,
         );
       }
-      return savedEmployee;
+      return this.findOne(savedEmployee.id);
     } catch (error) {
       if (error instanceof QueryFailedError && (error as any).code === '23505') {
         throw new ConflictException('Employee already exists with provided unique details');
@@ -172,13 +144,24 @@ export class EmployeeService {
     if (!employee) return null;
 
     const photoUrl = await this.signIfNeeded(this.getProfilePhotoKey(employee));
+    const aadharPhotoUrl = await this.signIfNeeded(employee.aadharPhotoUrl);
+    const panCardPhotoUrl = await this.signIfNeeded(employee.panCardPhotoUrl);
+    const passportPhotoUrl = await this.signIfNeeded(employee.passportPhotoUrl);
     const managerPhotoUrl = await this.signIfNeeded(
       this.getProfilePhotoKey(employee.manager as any),
     );
+    const userRoles = await this.getUserRolesMap([employee.userId]);
+    const roles = userRoles.get(employee.userId) || [];
 
     return {
       ...employee,
+      roles,
+      roleId: roles[0]?.id ?? null,
+      primaryRole: roles[0]?.roleName ?? null,
       photoUrl,
+      aadharPhotoUrl: aadharPhotoUrl ?? employee.aadharPhotoUrl ?? null,
+      panCardPhotoUrl: panCardPhotoUrl ?? employee.panCardPhotoUrl ?? null,
+      passportPhotoUrl: passportPhotoUrl ?? employee.passportPhotoUrl ?? null,
       manager: employee.manager
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
@@ -207,10 +190,15 @@ export class EmployeeService {
     const managerPhotoUrl = await this.signIfNeeded(
       this.getProfilePhotoKey(employee.manager as any),
     );
+    const userRoles = await this.getUserRolesMap([employee.userId]);
+    const roles = userRoles.get(employee.userId) || [];
 
     return {
       ...(employee as any),
       userName: (employee as any)?.user?.userName,
+      roles,
+      roleId: roles[0]?.id ?? null,
+      primaryRole: roles[0]?.roleName ?? null,
       photoUrl,
       manager: employee.manager
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
@@ -219,9 +207,12 @@ export class EmployeeService {
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
-    const { loginUserName, loginPassword, ...employeeUpdate } = dto as any;
+    const { loginUserName, loginPassword, roleId, ...employeeUpdate } =
+      dto as any;
 
-    await this.employeeRepository.update(id, employeeUpdate);
+    if (Object.keys(employeeUpdate).length > 0) {
+      await this.employeeRepository.update(id, employeeUpdate);
+    }
     const employee = await this.findOne(id);
 
     if (loginUserName || loginPassword) {
@@ -231,13 +222,17 @@ export class EmployeeService {
       }
 
       if (loginUserName) {
+        const normalizedUserName = String(loginUserName).trim();
+        if (!normalizedUserName) {
+          throw new BadRequestException('loginUserName cannot be empty');
+        }
         const existing = await this.userRepository.findOne({
-          where: { userName: loginUserName },
+          where: { userName: normalizedUserName },
         });
         if (existing && existing.id !== user.id) {
           throw new ConflictException('Username already in use');
         }
-        user.userName = loginUserName;
+        user.userName = normalizedUserName;
       }
 
       if (loginPassword) {
@@ -247,7 +242,15 @@ export class EmployeeService {
       await this.userRepository.save(user);
     }
 
-    return employee;
+    if (roleId) {
+      const selectedRole = await this.resolveRoleForEmployee(
+        employee.organizationId,
+        roleId,
+      );
+      await this.setUserPrimaryRole(employee.userId, selectedRole);
+    }
+
+    return this.findOne(id);
   }
 
   async remove(id: string) {
@@ -264,74 +267,62 @@ export class EmployeeService {
   async getDashboardStats(organizationId: string) {
     try {
       console.log('🚀 Getting enhanced dashboard stats for organization:', organizationId);
-      
+
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
+      const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
 
-      // Parallel queries for performance
-      const [
-        totalEmployees,
-        activeEmployees,
-        newJoinersThisMonth,
-        newJoinersLastMonth,
-        todaysAttendances,
-        onLeaveToday,
-        pendingLeaveRequests,
-        departmentCount,
-        designationCount
-      ] = await Promise.all([
-        this.employeeRepository.count({ where: { organizationId } }),
-        this.employeeRepository.count({ where: { organizationId, status: 'active' } }),
-        this.employeeRepository.count({
-          where: { 
-            organizationId, 
-            dateOfJoining: MoreThan(thisMonthStart) 
-          }
-        }),
-        this.employeeRepository.count({
-          where: { 
-            organizationId, 
-            dateOfJoining: Between(lastMonthStart, thisMonthStart) 
-          }
-        }),
-        this.entityManager
-          .createQueryBuilder(Attendance, 'attendance')
-          .where('attendance.organization_id = :organizationId', { organizationId })
-          .andWhere('attendance.attendanceDate = :todayStr', { todayStr })
-          .getMany(),
-        this.entityManager
-          .createQueryBuilder(LeaveRequest, 'leave')
-          .leftJoin('leave.user', 'user')
-          .where('user.organizationId = :organizationId', { organizationId })
-          .andWhere('leave.status = :status', { status: 'approved' })
-          .andWhere('leave.startDate <= :todayStr', { todayStr })
-          .andWhere('leave.endDate >= :todayStr', { todayStr })
-          .getCount(),
-        this.entityManager
-          .createQueryBuilder(LeaveRequest, 'leave')
-          .leftJoin('leave.user', 'user')
-          .where('user.organizationId = :organizationId', { organizationId })
-          .andWhere('leave.status = :status', { status: 'pending' })
-          .getCount(),
-        this.entityManager.query(
-          'SELECT COUNT(DISTINCT department_id) FROM employees WHERE organization_id = $1 AND department_id IS NOT NULL',
-          [organizationId]
-        ),
-        this.entityManager.query(
-          'SELECT COUNT(DISTINCT designation_id) FROM employees WHERE organization_id = $1 AND designation_id IS NOT NULL',
-          [organizationId]
-        )
-      ]);
+      // Single consolidated query — uses only 1 connection instead of 9
+      const [row] = await this.entityManager.query(`
+        WITH
+          emp_stats AS (
+            SELECT
+              COUNT(*) AS total_employees,
+              COUNT(*) FILTER (WHERE status = 'active') AS active_employees,
+              COUNT(*) FILTER (WHERE date_of_joining > $2) AS new_this_month,
+              COUNT(*) FILTER (WHERE date_of_joining >= $3 AND date_of_joining < $2) AS new_last_month,
+              COUNT(DISTINCT department_id) FILTER (WHERE department_id IS NOT NULL) AS dept_count,
+              COUNT(DISTINCT designation_id) FILTER (WHERE designation_id IS NOT NULL) AS desig_count
+            FROM employees
+            WHERE organization_id = $1
+          ),
+          attendance_stats AS (
+            SELECT
+              COUNT(*) FILTER (WHERE status = 'present') AS present_today,
+              COUNT(*) FILTER (WHERE status = 'half-day') AS half_day_today
+            FROM attendance
+            WHERE organization_id = $1 AND attendance_date = $4
+          ),
+          leave_stats AS (
+            SELECT
+              COUNT(*) FILTER (WHERE lr.status IN ('APPROVED', 'approved') AND lr.start_date <= $4 AND lr.end_date >= $4) AS on_leave_today,
+              COUNT(*) FILTER (WHERE lr.status IN ('PENDING', 'pending')) AS pending_leaves
+            FROM leave_requests lr
+            JOIN users u ON u.user_id = lr.user_id
+            WHERE u.organization_id = $1
+          )
+        SELECT
+          e.total_employees, e.active_employees, e.new_this_month, e.new_last_month,
+          e.dept_count, e.desig_count,
+          a.present_today, a.half_day_today,
+          l.on_leave_today, l.pending_leaves
+        FROM emp_stats e, attendance_stats a, leave_stats l
+      `, [organizationId, thisMonthStart, lastMonthStart, todayStr]);
 
-      const presentToday = todaysAttendances.filter(a => a.status === 'present').length;
-      const halfDay = todaysAttendances.filter(a => a.status === 'half-day').length;
+      const totalEmployees = parseInt(row.total_employees) || 0;
+      const activeEmployees = parseInt(row.active_employees) || 0;
+      const newJoinersThisMonth = parseInt(row.new_this_month) || 0;
+      const newJoinersLastMonth = parseInt(row.new_last_month) || 0;
+      const presentToday = parseInt(row.present_today) || 0;
+      const halfDay = parseInt(row.half_day_today) || 0;
+      const onLeaveToday = parseInt(row.on_leave_today) || 0;
+      const pendingLeaveRequests = parseInt(row.pending_leaves) || 0;
+      const deptCount = parseInt(row.dept_count) || 0;
+      const desigCount = parseInt(row.desig_count) || 0;
+
       const absent = Math.max(0, activeEmployees - presentToday - halfDay - onLeaveToday);
-
-      // Calculate changes
-      const newJoinersChange = newJoinersLastMonth > 0 
+      const newJoinersChange = newJoinersLastMonth > 0
         ? Math.round(((newJoinersThisMonth - newJoinersLastMonth) / newJoinersLastMonth) * 100)
         : newJoinersThisMonth > 0 ? 100 : 0;
 
@@ -342,8 +333,8 @@ export class EmployeeService {
         onLeaveToday: { value: onLeaveToday, change: 0 },
         pendingLeaveRequests: { value: pendingLeaveRequests, change: 0 },
         newJoinersThisMonth: { value: newJoinersThisMonth, change: newJoinersChange },
-        departments: { value: departmentCount[0]?.count || 0, change: 0 },
-        designations: { value: designationCount?.count || 0, change: 0 },
+        departments: { value: deptCount, change: 0 },
+        designations: { value: desigCount, change: 0 },
         attendanceBreakdown: {
           present: presentToday,
           halfDay: halfDay,
@@ -503,14 +494,21 @@ export class EmployeeService {
 
     // Execute query
     const employees = await queryBuilder.getMany();
+    const userRoles = await this.getUserRolesMap(
+      employees.map((emp) => emp.userId).filter(Boolean),
+    );
 
     // Attach username for edit UI + signed profile photo
     const employeesWithUserName = await Promise.all(
       employees.map(async (emp: any) => {
         const withPhoto = await this.addSignedProfilePhoto(emp);
+        const roles = userRoles.get(emp.userId) || [];
         return {
           ...withPhoto,
           userName: emp?.user?.userName,
+          roles,
+          roleId: roles[0]?.id ?? null,
+          primaryRole: roles[0]?.roleName ?? null,
         };
       }),
     );
@@ -873,6 +871,103 @@ export class EmployeeService {
         errors: ['Validation error occurred'],
       };
     }
+  }
+
+  private async resolveRoleForEmployee(
+    organizationId: string,
+    roleId?: string,
+  ): Promise<Role> {
+    if (roleId) {
+      const selectedRole = await this.roleRepository.findOne({
+        where: { id: roleId },
+      });
+
+      if (!selectedRole) {
+        throw new BadRequestException('Selected role was not found');
+      }
+
+      const isDefaultRole = selectedRole.type === RoleType.DEFAULT;
+      const isOrgRole = selectedRole.organizationId === organizationId;
+      const isGlobalRole =
+        selectedRole.type === RoleType.CUSTOM && !selectedRole.organizationId;
+
+      if (!isDefaultRole && !isOrgRole && !isGlobalRole) {
+        throw new BadRequestException(
+          'Selected role does not belong to this organization',
+        );
+      }
+
+      return selectedRole;
+    }
+
+    const employeeRoles = await this.roleRepository.find({
+      where: { roleName: 'EMPLOYEE' },
+      order: { createdOn: 'ASC' },
+    });
+
+    const existingEmployeeRole =
+      employeeRoles.find((role) => role.organizationId === organizationId) ||
+      employeeRoles.find((role) => role.type === RoleType.DEFAULT) ||
+      employeeRoles.find((role) => !role.organizationId);
+
+    if (existingEmployeeRole) {
+      return existingEmployeeRole;
+    }
+
+    return this.roleRepository.save(
+      this.roleRepository.create({
+        roleName: 'EMPLOYEE',
+        type: RoleType.DEFAULT,
+        description: 'Default Employee role',
+        createdBy: 'system',
+      }),
+    );
+  }
+
+  private async setUserPrimaryRole(userId: string, role: Role) {
+    await this.userRoleRepository
+      .createQueryBuilder()
+      .delete()
+      .from(UserRole)
+      .where('user_id = :userId', { userId })
+      .execute();
+
+    const userRole = this.userRoleRepository.create({
+      user: { id: userId } as User,
+      role: { id: role.id } as Role,
+      isActive: true,
+    });
+
+    await this.userRoleRepository.save(userRole);
+  }
+
+  private async getUserRolesMap(userIds: string[]) {
+    const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+    const roleMap = new Map<string, { id: string; roleName: string }[]>();
+
+    if (uniqueUserIds.length === 0) {
+      return roleMap;
+    }
+
+    const rows = await this.userRoleRepository
+      .createQueryBuilder('userRole')
+      .innerJoin('userRole.user', 'user')
+      .innerJoin('userRole.role', 'role')
+      .select('user.id', 'userId')
+      .addSelect('role.id', 'roleId')
+      .addSelect('role.roleName', 'roleName')
+      .where('user.id IN (:...userIds)', { userIds: uniqueUserIds })
+      .andWhere('userRole.isActive = :isActive', { isActive: true })
+      .orderBy('userRole.assignedOn', 'ASC')
+      .getRawMany();
+
+    for (const row of rows) {
+      const existing = roleMap.get(row.userId) || [];
+      existing.push({ id: row.roleId, roleName: row.roleName });
+      roleMap.set(row.userId, existing);
+    }
+
+    return roleMap;
   }
 
   // --- HELPER: CHECK CIRCULAR REPORTING ---

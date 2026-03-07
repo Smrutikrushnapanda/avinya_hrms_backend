@@ -616,7 +616,7 @@ export class AttendanceController {
     // If no date passed, use today's date in Asia/Kolkata
     const finalDate = date
       ? new Date(date)
-      : new Date(DateTime.now().setZone('Asia/Kolkata').toISODate());
+      : new Date(DateTime.now().setZone('Asia/Kolkata').toISODate() ?? new Date().toISOString().slice(0, 10));
   
     await this.attendanceService.generateDailyAttendanceSummary(finalDate);
     console.log(`Attendance summary generated for date ${finalDate}`);

@@ -6,6 +6,7 @@ import { User } from '../auth-core/entities/user.entity';
 import { EmployeeService } from '../employee/employee.service';
 import { DepartmentService } from '../employee/department.service';
 import { DesignationService } from '../employee/designation.service';
+import { RolesService } from '../auth-core/services/roles.service';
 
 @ApiTags('Dashboard')
 @Controller('dashboard')
@@ -15,6 +16,7 @@ export class DashboardController {
     private readonly employeeService: EmployeeService,
     private readonly departmentService: DepartmentService,
     private readonly designationService: DesignationService,
+    private readonly rolesService: RolesService,
   ) {}
 
   @Get('summary')
@@ -27,21 +29,13 @@ export class DashboardController {
     const organizationId = user.organizationId;
 
     try {
-      const [
-        dashboardStats,
-        employees,
-        departments,
-        designations,
-        departmentStats,
-        upcomingBirthdays
-      ] = await Promise.all([
-        this.employeeService.getDashboardStats(organizationId),
-        this.employeeService.findAll(organizationId),
-        this.departmentService.findAll(organizationId),
-        this.designationService.findAll(organizationId),
-        this.departmentService.getStatistics(organizationId),
-        this.employeeService.getUpcomingBirthdays(organizationId, 30),
-      ]);
+      // Sequential queries to stay within Supabase free-tier session-mode connection limit
+      const dashboardStats = await this.employeeService.getDashboardStats(organizationId);
+      const employees = await this.employeeService.findAll(organizationId);
+      const departments = await this.departmentService.findAll(organizationId);
+      const designations = await this.designationService.findAll(organizationId);
+      const departmentStats = await this.departmentService.getStatistics(organizationId);
+      const upcomingBirthdays = await this.employeeService.getUpcomingBirthdays(organizationId, 30);
 
       return {
         success: true,
@@ -116,23 +110,15 @@ export class DashboardController {
     };
 
     try {
-      const [
-        employeeData,
-        departments,
-        designations,
-        dashboardStats,
-        managers,
-        recentJoiners,
-        branches,
-      ] = await Promise.all([
-        this.employeeService.findAllWithFilters(organizationId, filters),
-        this.departmentService.findAll(organizationId),
-        this.designationService.findAll(organizationId),
-        this.employeeService.getDashboardStats(organizationId),
-        this.employeeService.findManagers(organizationId),
-        this.employeeService.getRecentJoiners(organizationId, 30),
-        this.employeeService.getBranchesForOrg(organizationId),
-      ]);
+      // Sequential queries to stay within Supabase free-tier session-mode connection limit
+      const employeeData = await this.employeeService.findAllWithFilters(organizationId, filters);
+      const departments = await this.departmentService.findAll(organizationId);
+      const designations = await this.designationService.findAll(organizationId);
+      const dashboardStats = await this.employeeService.getDashboardStats(organizationId);
+      const managers = await this.employeeService.findManagers(organizationId);
+      const recentJoiners = await this.employeeService.getRecentJoiners(organizationId, 30);
+      const branches = await this.employeeService.getBranchesForOrg(organizationId);
+      const roles = await this.rolesService.findAllForOrg(organizationId);
 
       return {
         success: true,
@@ -144,6 +130,7 @@ export class DashboardController {
             designations,
             managers,
             branches,
+            roles,
             appliedFilters: filters,
           },
           summary: {
@@ -172,6 +159,8 @@ export class DashboardController {
             departments: [],
             designations: [],
             managers: [],
+            branches: [],
+            roles: [],
             appliedFilters: filters,
           },
           summary: {

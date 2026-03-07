@@ -7,6 +7,10 @@ import { CreateLogReportDto } from './dto/log-report.dto';
 
 @Injectable()
 export class LogReportService {
+  // In-memory cache: orgId → { value, expiresAt }
+  private readonly enabledCache = new Map<string, { value: boolean; expiresAt: number }>();
+  private readonly CACHE_TTL_MS = 60_000; // 1 minute
+
   constructor(
     @InjectRepository(LogReport)
     private readonly logRepo: Repository<LogReport>,
@@ -34,6 +38,7 @@ export class LogReportService {
     organizationId: string,
     isEnabled: boolean,
   ): Promise<LogReportSettings> {
+    this.enabledCache.delete(organizationId); // invalidate cache on update
     let settings = await this.settingsRepo.findOne({
       where: { organizationId },
     });
@@ -47,10 +52,12 @@ export class LogReportService {
 
   async isEnabled(organizationId?: string): Promise<boolean> {
     if (!organizationId) return false;
-    const settings = await this.settingsRepo.findOne({
-      where: { organizationId },
-    });
-    return settings ? settings.isEnabled : true;
+    const cached = this.enabledCache.get(organizationId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const settings = await this.settingsRepo.findOne({ where: { organizationId } });
+    const value = settings ? settings.isEnabled : true;
+    this.enabledCache.set(organizationId, { value, expiresAt: Date.now() + this.CACHE_TTL_MS });
+    return value;
   }
 
   async findAll(params: {

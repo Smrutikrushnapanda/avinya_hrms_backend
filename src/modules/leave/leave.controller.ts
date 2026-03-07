@@ -30,8 +30,11 @@ export class LeaveController {
   @Get('types/:orgId')
   @ApiOperation({ summary: 'Get leave types for an organization' })
   @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
-  async getLeaveTypes(@Param('orgId', ParseUUIDPipe) orgId: string) {
-    return this.leaveService.getLeaveTypes(orgId);
+  async getLeaveTypes(
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+    @Query('gender') gender?: string,
+  ) {
+    return this.leaveService.getLeaveTypes(orgId, gender);
   }
 
   @Post('types')
@@ -71,6 +74,16 @@ export class LeaveController {
   @ApiBody({ type: InitializeBalanceDto })
   async initializeBalance(@Body() dto: InitializeBalanceDto) {
     return this.leaveService.initializeLeaveBalance(dto);
+  }
+
+  @Post('credit-earned/:userId')
+  @ApiOperation({ summary: 'Credit earned leave when employee works on weekend/holiday' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async creditEarnedLeave(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() body: { days: number; organizationId: string },
+  ) {
+    return this.leaveService.creditEarnedLeave(userId, body.days, body.organizationId);
   }
 
   // ─── Leave Balance Templates ───

@@ -111,6 +111,15 @@ export class WfhController {
     return this.wfhService.getAssignments(userId);
   }
 
+  @Get('approval-assignments/org/:organizationId')
+  @ApiOperation({ summary: 'Get all WFH approval assignments for an organization' })
+  @ApiParam({ name: 'organizationId', type: 'string', format: 'uuid' })
+  async getAssignmentsByOrg(
+    @Param('organizationId', ParseUUIDPipe) organizationId: string,
+  ) {
+    return this.wfhService.getAssignmentsByOrg(organizationId);
+  }
+
   @Delete('approval-assignments/:id')
   @ApiOperation({ summary: 'Delete a WFH approval assignment' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })

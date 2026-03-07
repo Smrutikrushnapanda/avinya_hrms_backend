@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
 import { NoticeService } from './notice.service';
 import { Notice } from './entities/notice.entity';
 
@@ -15,11 +15,30 @@ export class NoticeController {
   }
 
   /**
-   * Create a new notice
+   * Create a new notice (supports optional meetingId to link a meeting)
    */
   @Post()
   async createNotice(@Body() data: Partial<Notice>): Promise<Notice> {
     return this.noticeService.createNotice(data);
+  }
+
+  /**
+   * Update an existing notice
+   */
+  @Put(':id')
+  async updateNotice(
+    @Param('id') id: string,
+    @Body() data: Partial<Notice>,
+  ): Promise<Notice> {
+    return this.noticeService.updateNotice(id, data);
+  }
+
+  /**
+   * Delete a notice
+   */
+  @Delete(':id')
+  async deleteNotice(@Param('id') id: string): Promise<{ message: string }> {
+    return this.noticeService.deleteNotice(id);
   }
 
   /**

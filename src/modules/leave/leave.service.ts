@@ -25,6 +25,7 @@ import { InitializeBalanceDto } from './dto/initialize-balance.dto';
 import { SetLeaveBalanceTemplatesDto } from './dto/set-leave-balance-templates.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MessageService } from '../message/message.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class LeaveService {
@@ -48,14 +49,20 @@ export class LeaveService {
     @InjectRepository(UserRole) private userRoleRepo: Repository<UserRole>,
     private messageGateway: MessageGateway,
     private messageService: MessageService,
+    private mailService: MailService,
   ) {}
 
   // ─── Leave Types ───
 
-  async getLeaveTypes(orgId: string): Promise<LeaveType[]> {
-    return this.leaveTypeRepo.find({
+  async getLeaveTypes(orgId: string, gender?: string): Promise<LeaveType[]> {
+    const all = await this.leaveTypeRepo.find({
       where: { organization: { id: orgId } },
     });
+    if (!gender) return all;
+    // Filter out types that are restricted to a different gender
+    return all.filter(
+      (lt) => !lt.genderRestriction || lt.genderRestriction.toLowerCase() === gender.toLowerCase(),
+    );
   }
 
   async createLeaveType(dto: CreateLeaveTypeDto): Promise<LeaveType> {
@@ -64,6 +71,8 @@ export class LeaveService {
       description: dto.description,
       isActive: dto.isActive ?? true,
       organization: { id: dto.organizationId },
+      genderRestriction: dto.genderRestriction ?? null,
+      isEarned: dto.isEarned ?? false,
     });
     return this.leaveTypeRepo.save(leaveType);
   }
@@ -85,9 +94,20 @@ export class LeaveService {
   // ─── Leave Balance ───
 
   async getLeaveBalance(userId: string): Promise<LeaveBalance[]> {
-    return this.balanceRepo.find({
+    const balances = await this.balanceRepo.find({
       where: { user: { id: userId } },
       relations: ['leaveType'],
+    });
+
+    // Get employee gender to filter out gender-restricted leave types
+    const employee = await this.employeeRepo.findOne({ where: { userId } });
+    const gender = employee?.gender?.toLowerCase() ?? null;
+
+    return balances.filter((b) => {
+      const restriction = b.leaveType?.genderRestriction?.toLowerCase();
+      if (!restriction) return true; // no restriction
+      if (!gender) return false; // employee gender unknown, hide restricted types
+      return restriction === gender;
     });
   }
 
@@ -109,6 +129,39 @@ export class LeaveService {
       openingBalance: dto.openingBalance,
       closingBalance: dto.openingBalance,
     });
+  }
+
+  // ─── Credit Earned Leave ───
+
+  async creditEarnedLeave(userId: string, days: number, organizationId: string): Promise<LeaveBalance> {
+    // Find the org's earned leave type
+    const earnedType = await this.leaveTypeRepo.findOne({
+      where: { organization: { id: organizationId }, isEarned: true, isActive: true },
+    });
+    if (!earnedType) {
+      throw new NotFoundException('No earned leave type configured for this organization');
+    }
+
+    let balance = await this.balanceRepo.findOne({
+      where: { user: { id: userId }, leaveType: { id: earnedType.id } },
+    });
+
+    if (!balance) {
+      balance = this.balanceRepo.create({
+        user: { id: userId },
+        leaveType: earnedType,
+        openingBalance: 0,
+        accrued: 0,
+        consumed: 0,
+        carriedForward: 0,
+        encashed: 0,
+        closingBalance: 0,
+      });
+    }
+
+    balance.accrued += days;
+    balance.closingBalance += days;
+    return this.balanceRepo.save(balance);
   }
 
   // ─── Leave Balance Templates ───
@@ -161,7 +214,13 @@ export class LeaveService {
       },
       relations: ['leaveType'],
     });
+
+    const employee = await this.employeeRepo.findOne({ where: { userId } });
+    const gender = employee?.gender?.toLowerCase() ?? null;
+
     for (const t of templates) {
+      const restriction = t.leaveType?.genderRestriction?.toLowerCase();
+      if (restriction && restriction !== gender) continue; // skip gender-restricted type
       await this.initializeLeaveBalance({
         userId,
         leaveTypeId: t.leaveType.id,
@@ -239,22 +298,12 @@ export class LeaveService {
 
       const orgId = employee?.organizationId;
       if (orgId) {
-        const adminRoleNames = ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN'];
-        const adminUserRole = await this.userRoleRepo
-          .createQueryBuilder('ur')
-          .innerJoinAndSelect('ur.user', 'user')
-          .innerJoinAndSelect('ur.role', 'role')
-          .where('user.organizationId = :orgId', { orgId })
-          .andWhere('role.roleName IN (:...roles)', { roles: adminRoleNames })
-          .andWhere('ur.isActive = true')
-          .getOne();
-
-        if (adminUserRole?.user?.id) {
-          const adminId = adminUserRole.user.id;
-          const already = fallbackApprovers.find((a) => a.approverId === adminId);
+        const hrUserId = await this.findHrUserIdInOrg(orgId, employee?.branchId);
+        if (hrUserId) {
+          const already = fallbackApprovers.find((a) => a.approverId === hrUserId);
           if (!already) {
             fallbackApprovers.push({
-              approverId: adminId,
+              approverId: hrUserId,
               level: fallbackApprovers.length ? 2 : 1,
             });
           }
@@ -262,7 +311,9 @@ export class LeaveService {
       }
 
       if (!fallbackApprovers.length) {
-        throw new BadRequestException('No approvers assigned');
+        // No approvers found - still create the request so admin can approve directly
+        // Request remains PENDING with no approval entities
+        return request;
       }
 
       approvalEntities = fallbackApprovers.map((a) =>
@@ -273,17 +324,17 @@ export class LeaveService {
           status: a.level === 1 ? 'PENDING' : 'WAITING',
         }),
       );
-    }
-    await this.approvalRepo.save(approvalEntities);
+      await this.approvalRepo.save(approvalEntities);
 
-    // Notify level-1 approver via WebSocket
-    const level1 = approvalEntities.find((a) => a.level === 1);
-    if (level1?.approver) {
-      this.messageGateway.emitToUser(level1.approver.id, {
-        type: 'leave:new_request',
-        message: 'New leave request received',
-        requestId: request.id,
-      });
+      // Notify level-1 approver via WebSocket
+      const level1 = approvalEntities.find((a) => a.level === 1);
+      if (level1?.approver) {
+        this.messageGateway.emitToUser(level1.approver.id, {
+          type: 'leave:new_request',
+          message: 'New leave request received',
+          requestId: request.id,
+        });
+      }
     }
 
     return request;
@@ -316,14 +367,18 @@ export class LeaveService {
     if (isAdmin) {
       // Admin bypass: approve/reject all pending steps directly
       const now = new Date();
-      for (const ap of request.approvals) {
-        if (ap.status === 'PENDING' || ap.status === 'WAITING') {
-          ap.status = approve ? 'APPROVED' : 'REJECTED';
-          ap.remarks = remarks;
-          ap.actionAt = now;
+      
+      // If there are approval entities, process them
+      if (request.approvals && request.approvals.length > 0) {
+        for (const ap of request.approvals) {
+          if (ap.status === 'PENDING' || ap.status === 'WAITING') {
+            ap.status = approve ? 'APPROVED' : 'REJECTED';
+            ap.remarks = remarks;
+            ap.actionAt = now;
+          }
         }
+        await this.approvalRepo.save(request.approvals);
       }
-      await this.approvalRepo.save(request.approvals);
 
       if (!approve) {
         request.status = 'REJECTED';
@@ -340,14 +395,24 @@ export class LeaveService {
           body: 'Your leave request has been rejected.',
           type: 'leave',
         });
+        if (request.user.email) {
+          this.mailService.sendLeaveStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'REJECTED',
+            { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+            request.user.organizationId,
+          ).catch(() => undefined);
+        }
         return { message: 'Leave rejected' };
       }
 
+      // Approve the request
       request.status = 'APPROVED';
       request.approvedBy = { id: approverId } as any;
       request.approvedAt = now;
       await this.requestRepo.save(request);
 
+      // Deduct leave balance
       const balance = await this.balanceRepo.findOne({
         where: {
           user: { id: request.user.id },
@@ -355,14 +420,12 @@ export class LeaveService {
         },
       });
 
-      if (!balance) {
-        throw new NotFoundException('Leave balance not found');
+      if (balance) {
+        const daysToDeduct = Math.max(1, request.numberOfDays || 0);
+        balance.consumed += daysToDeduct;
+        balance.closingBalance -= daysToDeduct;
+        await this.balanceRepo.save(balance);
       }
-
-      const daysToDeduct = Math.max(1, request.numberOfDays || 0);
-      balance.consumed += daysToDeduct;
-      balance.closingBalance -= daysToDeduct;
-      await this.balanceRepo.save(balance);
 
       this.messageGateway.emitToUser(request.user.id, {
         type: 'leave:approved',
@@ -376,6 +439,14 @@ export class LeaveService {
         body: 'Your leave request has been approved.',
         type: 'leave',
       });
+      if (request.user.email) {
+        this.mailService.sendLeaveStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'APPROVED',
+          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
 
       return { message: 'Leave approved' };
     }
@@ -410,6 +481,14 @@ export class LeaveService {
         body: 'Your leave request has been rejected.',
         type: 'leave',
       });
+      if (request.user.email) {
+        this.mailService.sendLeaveStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'REJECTED',
+          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
 
       return { message: 'Leave rejected' };
     }
@@ -457,6 +536,14 @@ export class LeaveService {
         body: 'Your leave request has been approved.',
         type: 'leave',
       });
+      if (request.user.email) {
+        this.mailService.sendLeaveStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'APPROVED',
+          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
     }
 
     return { message: 'Leave approved' };
@@ -559,6 +646,33 @@ export class LeaveService {
   }
 
   // ─── Helpers ───
+
+  private async findHrUserIdInOrg(
+    orgId: string,
+    branchId?: string | null,
+  ): Promise<string | null> {
+    // 1. Try same-branch HR first
+    if (branchId) {
+      const hrEmp = await this.employeeRepo
+        .createQueryBuilder('emp')
+        .innerJoin('emp.designation', 'desig')
+        .where('emp.organizationId = :orgId', { orgId })
+        .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+        .andWhere('emp.branchId = :branchId', { branchId })
+        .select(['emp.id', 'emp.userId'])
+        .getOne();
+      if (hrEmp?.userId) return hrEmp.userId;
+    }
+    // 2. Fall back to any HR in the org
+    const hrEmp = await this.employeeRepo
+      .createQueryBuilder('emp')
+      .innerJoin('emp.designation', 'desig')
+      .where('emp.organizationId = :orgId', { orgId })
+      .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+      .select(['emp.id', 'emp.userId'])
+      .getOne();
+    return hrEmp?.userId ?? null;
+  }
 
   private calculateBusinessDays(
     startDateStr: string,

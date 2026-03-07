@@ -146,29 +146,39 @@ export class TimeslipService {
     organizationId: string,
     employeeId: string,
   ): Promise<string> {
-    const employee = await this.employeeRepo.findOne({
+    // Get employee's branch for branch-aware HR lookup
+    const emp = await this.employeeRepo.findOne({
       where: { id: employeeId },
-      select: ['id', 'reportingTo'],
+      select: ['branchId'],
     });
+    const branchId = emp?.branchId;
 
-    if (employee?.reportingTo) {
-      return employee.reportingTo;
+    // Primary: find HR employee in same branch
+    if (branchId) {
+      const hrEmpSameBranch = await this.employeeRepo
+        .createQueryBuilder('emp')
+        .innerJoin('emp.designation', 'desig')
+        .where('emp.organizationId = :orgId', { orgId: organizationId })
+        .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+        .andWhere('emp.branchId = :branchId', { branchId })
+        .andWhere('emp.id != :employeeId', { employeeId })
+        .select(['emp.id'])
+        .getOne();
+      if (hrEmpSameBranch?.id) return hrEmpSameBranch.id;
     }
 
-    const adminRoles = ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN'];
-    const adminEmp = await this.employeeRepo
+    // Secondary: any HR in the org
+    const hrEmp = await this.employeeRepo
       .createQueryBuilder('emp')
-      .leftJoin('emp.user', 'user')
-      .leftJoin('user.userRoles', 'ur')
-      .leftJoin('ur.role', 'role')
+      .innerJoin('emp.designation', 'desig')
       .where('emp.organizationId = :orgId', { orgId: organizationId })
-      .andWhere('ur.isActive = true')
-      .andWhere('role.roleName IN (:...roles)', { roles: adminRoles })
+      .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+      .andWhere('emp.id != :employeeId', { employeeId })
       .select(['emp.id'])
       .getOne();
 
-    if (adminEmp?.id) {
-      return adminEmp.id;
+    if (hrEmp?.id) {
+      return hrEmp.id;
     }
 
     // Last-resort: pick any other employee in org

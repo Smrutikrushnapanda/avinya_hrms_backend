@@ -1,13 +1,16 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsArray,
   IsBoolean,
   IsInt,
+  IsObject,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
+  ArrayNotEmpty,
+  IsIn,
   Max,
   Min,
 } from 'class-validator';
@@ -21,15 +24,17 @@ export class CreateBranchDto {
   @IsString()
   name!: string;
 
-  @ApiProperty({ example: '09:00:00', description: 'Work start time (HH:mm:ss)' })
+  @ApiPropertyOptional({ example: '09:00:00', description: 'Work start time (HH:mm:ss)' })
+  @IsOptional()
   @IsString()
-  @Matches(/^\\d{2}:\\d{2}:\\d{2}$/)
-  workStartTime!: string;
+  @Matches(/^\d{2}:\d{2}:\d{2}$/)
+  workStartTime?: string;
 
-  @ApiProperty({ example: '18:00:00', description: 'Work end time (HH:mm:ss)' })
+  @ApiPropertyOptional({ example: '18:00:00', description: 'Work end time (HH:mm:ss)' })
+  @IsOptional()
   @IsString()
-  @Matches(/^\\d{2}:\\d{2}:\\d{2}$/)
-  workEndTime!: string;
+  @Matches(/^\d{2}:\d{2}:\d{2}$/)
+  workEndTime?: string;
 
   @ApiPropertyOptional({ example: 15, description: 'Grace minutes for late tolerance' })
   @IsOptional()
@@ -44,6 +49,35 @@ export class CreateBranchDto {
   @Min(0)
   @Max(480)
   lateThresholdMinutes?: number;
+
+  @ApiPropertyOptional({
+    example: '14:00:00',
+    description: 'Half-day cutoff time (HH:mm:ss)',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}:\d{2}$/)
+  halfDayCutoffTime?: string;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    example: [1, 2, 3, 4, 5, 6],
+    description: 'Working days where 0=Sun, 1=Mon ... 6=Sat',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsInt({ each: true })
+  @IsIn([0, 1, 2, 3, 4, 5, 6], { each: true })
+  workingDays?: number[];
+
+  @ApiPropertyOptional({
+    example: { '1': [2, 4], '6': [2, 4] },
+    description: 'Weekday off rules: key=weekday (1=Mon..6=Sat), value=weeks (1-5)',
+  })
+  @IsOptional()
+  @IsObject()
+  weekdayOffRules?: Record<string, number[]>;
 
   @ApiPropertyOptional({ example: 20.3494624, description: 'Office latitude' })
   @IsOptional()
@@ -84,7 +118,7 @@ export class CreateBranchDto {
   isActive?: boolean;
 }
 
-export class UpdateBranchDto extends CreateBranchDto {
+export class UpdateBranchDto extends PartialType(CreateBranchDto) {
   @ApiPropertyOptional({ description: 'Branch UUID' })
   @IsUUID()
   @IsOptional()

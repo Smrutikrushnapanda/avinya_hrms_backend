@@ -20,6 +20,7 @@ import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
 import { SetWfhBalanceTemplatesDto } from './dto/set-wfh-balance-templates.dto';
 import { MessageGateway } from '../message/message.gateway';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class WfhService {
@@ -42,6 +43,7 @@ export class WfhService {
     private organizationRepo: Repository<Organization>,
     private messageGateway: MessageGateway,
     private messageService: MessageService,
+    private mailService: MailService,
   ) {}
 
   async applyForWfh(userId: string, dto: ApplyWfhDto) {
@@ -106,29 +108,21 @@ export class WfhService {
         }
       }
 
-      const adminRoleNames = ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN'];
-      const adminUserRole = await this.userRoleRepo
-        .createQueryBuilder('ur')
-        .innerJoinAndSelect('ur.user', 'user')
-        .innerJoinAndSelect('ur.role', 'role')
-        .where('user.organizationId = :orgId', { orgId })
-        .andWhere('role.roleName IN (:...roles)', { roles: adminRoleNames })
-        .andWhere('ur.isActive = true')
-        .getOne();
-
-      if (adminUserRole?.user?.id) {
-        const adminId = adminUserRole.user.id;
-        const already = fallbackApprovers.find((a) => a.approverId === adminId);
+      const hrUserId = await this.findHrUserIdInOrg(orgId, employee?.branchId);
+      if (hrUserId) {
+        const already = fallbackApprovers.find((a) => a.approverId === hrUserId);
         if (!already) {
           fallbackApprovers.push({
-            approverId: adminId,
+            approverId: hrUserId,
             level: fallbackApprovers.length ? 2 : 1,
           });
         }
       }
 
       if (!fallbackApprovers.length) {
-        throw new BadRequestException('No WFH approvers assigned for this user');
+        // No approvers found - still create the request so admin can approve directly
+        // Request remains PENDING with no approval entities
+        return request;
       }
 
       approvalEntities = fallbackApprovers.map((a) =>
@@ -139,17 +133,17 @@ export class WfhService {
           status: a.level === 1 ? 'PENDING' : 'WAITING',
         }),
       );
-    }
-    await this.approvalRepo.save(approvalEntities);
+      await this.approvalRepo.save(approvalEntities);
 
-    // Notify level-1 approver via WebSocket
-    const level1 = approvalEntities.find((a) => a.level === 1);
-    if (level1?.approver) {
-      this.messageGateway.emitToUser(level1.approver.id, {
-        type: 'wfh:new_request',
-        message: `New WFH request received`,
-        requestId: request.id,
-      });
+      // Notify level-1 approver via WebSocket
+      const level1 = approvalEntities.find((a) => a.level === 1);
+      if (level1?.approver) {
+        this.messageGateway.emitToUser(level1.approver.id, {
+          type: 'wfh:new_request',
+          message: `New WFH request received`,
+          requestId: request.id,
+        });
+      }
     }
 
     return request;
@@ -179,14 +173,18 @@ export class WfhService {
 
     if (isAdmin) {
       const now = new Date();
-      for (const ap of request.approvals) {
-        if (ap.status === 'PENDING' || ap.status === 'WAITING') {
-          ap.status = approve ? 'APPROVED' : 'REJECTED';
-          ap.remarks = remarks;
-          ap.actionAt = now;
+      
+      // If there are approval entities, process them
+      if (request.approvals && request.approvals.length > 0) {
+        for (const ap of request.approvals) {
+          if (ap.status === 'PENDING' || ap.status === 'WAITING') {
+            ap.status = approve ? 'APPROVED' : 'REJECTED';
+            ap.remarks = remarks;
+            ap.actionAt = now;
+          }
         }
+        await this.approvalRepo.save(request.approvals);
       }
-      await this.approvalRepo.save(request.approvals);
 
       if (!approve) {
         request.status = 'REJECTED';
@@ -203,6 +201,14 @@ export class WfhService {
           body: 'Your WFH request has been rejected.',
           type: 'wfh',
         });
+        if (request.user.email) {
+          this.mailService.sendWfhStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'REJECTED',
+            { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+            request.user.organizationId,
+          ).catch(() => undefined);
+        }
         return { message: 'WFH request rejected' };
       }
 
@@ -211,16 +217,16 @@ export class WfhService {
       request.approvedAt = now;
       await this.requestRepo.save(request);
 
+      // Deduct WFH balance
       const balance = await this.wfhBalanceRepo.findOne({
         where: { user: { id: request.user.id } },
       });
-      if (!balance) {
-        throw new NotFoundException('WFH balance not found');
+      if (balance) {
+        const daysToDeduct = Math.max(1, request.numberOfDays || 0);
+        balance.consumed += daysToDeduct;
+        balance.closingBalance -= daysToDeduct;
+        await this.wfhBalanceRepo.save(balance);
       }
-      const daysToDeduct = Math.max(1, request.numberOfDays || 0);
-      balance.consumed += daysToDeduct;
-      balance.closingBalance -= daysToDeduct;
-      await this.wfhBalanceRepo.save(balance);
 
       this.messageGateway.emitToUser(request.user.id, {
         type: 'wfh:approved',
@@ -234,6 +240,14 @@ export class WfhService {
         body: 'Your WFH request has been approved.',
         type: 'wfh',
       });
+      if (request.user.email) {
+        this.mailService.sendWfhStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'APPROVED',
+          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
       return { message: 'WFH request approved' };
     }
 
@@ -269,6 +283,14 @@ export class WfhService {
         body: 'Your WFH request has been rejected.',
         type: 'wfh',
       });
+      if (request.user.email) {
+        this.mailService.sendWfhStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'REJECTED',
+          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
 
       return { message: 'WFH request rejected' };
     }
@@ -316,6 +338,14 @@ export class WfhService {
         body: 'Your WFH request has been approved.',
         type: 'wfh',
       });
+      if (request.user.email) {
+        this.mailService.sendWfhStatus(
+          { email: request.user.email, firstName: request.user.firstName },
+          'APPROVED',
+          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
+          request.user.organizationId,
+        ).catch(() => undefined);
+      }
     }
 
     return { message: `WFH request ${statusText}` };
@@ -372,7 +402,15 @@ export class WfhService {
   async getAssignments(userId: string): Promise<WfhApprovalAssignment[]> {
     return this.assignmentRepo.find({
       where: { user: { id: userId }, isActive: true },
-      relations: ['approver'],
+      relations: ['user', 'approver'],
+      order: { level: 'ASC' },
+    });
+  }
+
+  async getAssignmentsByOrg(organizationId: string): Promise<WfhApprovalAssignment[]> {
+    return this.assignmentRepo.find({
+      where: { organization: { id: organizationId }, isActive: true },
+      relations: ['user', 'approver'],
       order: { level: 'ASC' },
     });
   }
@@ -458,6 +496,33 @@ export class WfhService {
       userId,
       openingBalance: template.openingBalance,
     });
+  }
+
+  private async findHrUserIdInOrg(
+    orgId: string,
+    branchId?: string | null,
+  ): Promise<string | null> {
+    // 1. Try same-branch HR first
+    if (branchId) {
+      const hrEmp = await this.employeeRepo
+        .createQueryBuilder('emp')
+        .innerJoin('emp.designation', 'desig')
+        .where('emp.organizationId = :orgId', { orgId })
+        .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+        .andWhere('emp.branchId = :branchId', { branchId })
+        .select(['emp.id', 'emp.userId'])
+        .getOne();
+      if (hrEmp?.userId) return hrEmp.userId;
+    }
+    // 2. Fall back to any HR in the org
+    const hrEmp = await this.employeeRepo
+      .createQueryBuilder('emp')
+      .innerJoin('emp.designation', 'desig')
+      .where('emp.organizationId = :orgId', { orgId })
+      .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
+      .select(['emp.id', 'emp.userId'])
+      .getOne();
+    return hrEmp?.userId ?? null;
   }
 
   private calculateDays(startDateStr: string, endDateStr?: string): number {

@@ -28,6 +28,8 @@ import { UserActivity } from './entities/user-actvities.entity';
 import { OrganizationRole } from './entities/organization-role.entity';
 import { TimeslipApproval } from '../workflow/timeslip/entities/timeslip-approval.entity';
 import { Employee } from '../employee/entities/employee.entity';
+import { LeaveApprovalAssignment } from '../leave/entities/leave-approval-assignment.entity';
+import { WfhApprovalAssignment } from '../wfh/entities/wfh-approval-assignment.entity';
 import { LogReportModule } from '../log-report/log-report.module';
 
 @Module({
@@ -43,6 +45,8 @@ import { LogReportModule } from '../log-report/log-report.module';
       UserActivity,
       TimeslipApproval,
       Employee,
+      LeaveApprovalAssignment,
+      WfhApprovalAssignment,
     ]),
     LogReportModule,
     PassportModule,

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
@@ -37,6 +37,17 @@ import { toZonedTime, format as formatTZ } from 'date-fns-tz';
 import { Holiday, LeaveRequest } from '../leave/entities';
 import { DateTime } from 'luxon';
 
+type WorkingDayRuleSource = {
+  workingDays?: number[] | null;
+  weekdayOffRules?: Record<string, number[]> | null;
+};
+
+type ShiftRuleSource = WorkingDayRuleSource & {
+  workStartTime: string;
+  workEndTime: string;
+  halfDayCutoffTime?: string | null;
+};
+
 @Injectable()
 export class AttendanceService {
   constructor(
@@ -69,6 +80,14 @@ export class AttendanceService {
     @InjectRepository(Branch)
     private branchRepo: Repository<Branch>,
   ) {}
+
+  private normalizeBranchName(name: string): string {
+    return name.trim().replace(/\s+/g, ' ');
+  }
+
+  private canonicalBranchName(name: string): string {
+    return this.normalizeBranchName(name).toLowerCase();
+  }
 
   async createWifiLocation(dto: CreateWifiLocationDto): Promise<WifiLocation> {
     const { organizationId, ...rest } = dto;
@@ -298,13 +317,11 @@ export class AttendanceService {
         .filter(Boolean)
         .join(', ') || undefined;
 
-      const status: Attendance['status'] = !hasClockOut
-        ? 'present'
-        : workingMinutes >= 480
-          ? 'present'
-          : workingMinutes >= 160
-            ? 'half-day'
-            : 'absent';
+      const status = this.determineAttendanceStatus(
+        workingMinutes,
+        hasClockOut,
+        shiftConfig,
+      );
 
       const baseData: DeepPartial<Attendance> = {
         user: { id: userId },
@@ -758,8 +775,8 @@ export class AttendanceService {
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
 
-    const settings = await this.getOrCreateAttendanceSettings(organizationId);
-    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, settings);
+    const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, shiftConfig);
 
     // 1. Attendance full record map
     const attendanceRecords = await this.attendanceRepo.find({
@@ -1062,6 +1079,52 @@ export class AttendanceService {
     return { windowStart, windowEnd, attendanceDate };
   }
 
+  private parseTimeToMinutes(timeStr: string): number {
+    const [hh, mm] = timeStr.split(':').map((t) => parseInt(t, 10));
+    const safeH = Number.isFinite(hh) ? hh : 0;
+    const safeM = Number.isFinite(mm) ? mm : 0;
+    return safeH * 60 + safeM;
+  }
+
+  private calculateShiftDurationMinutes(workStartTime: string, workEndTime: string): number {
+    const start = this.parseTimeToMinutes(workStartTime);
+    const end = this.parseTimeToMinutes(workEndTime);
+    let diff = end - start;
+    if (diff <= 0) diff += 24 * 60;
+    return diff;
+  }
+
+  private calculateHalfDayThresholdMinutes(config: ShiftRuleSource): number {
+    const fullShiftMinutes = this.calculateShiftDurationMinutes(
+      config.workStartTime,
+      config.workEndTime,
+    );
+    const cutoffTime = config.halfDayCutoffTime || '14:00:00';
+    const start = this.parseTimeToMinutes(config.workStartTime);
+    const cutoff = this.parseTimeToMinutes(cutoffTime);
+
+    let threshold = cutoff - start;
+    if (threshold <= 0) threshold += 24 * 60;
+    if (threshold > fullShiftMinutes) threshold = fullShiftMinutes;
+    return Math.max(1, threshold);
+  }
+
+  private determineAttendanceStatus(
+    workingMinutes: number,
+    hasClockOut: boolean,
+    config: ShiftRuleSource,
+  ): Attendance['status'] {
+    if (!hasClockOut) return 'present';
+    const fullShiftMinutes = this.calculateShiftDurationMinutes(
+      config.workStartTime,
+      config.workEndTime,
+    );
+    const halfDayThreshold = this.calculateHalfDayThresholdMinutes(config);
+    if (workingMinutes >= fullShiftMinutes) return 'present';
+    if (workingMinutes >= halfDayThreshold) return 'half-day';
+    return 'absent';
+  }
+
   private async resolveShiftConfig(organizationId: string, userId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
@@ -1079,6 +1142,9 @@ export class AttendanceService {
           workEndTime: branch.workEndTime,
           graceMinutes: branch.graceMinutes,
           lateThresholdMinutes: branch.lateThresholdMinutes,
+          halfDayCutoffTime: branch.halfDayCutoffTime,
+          workingDays: branch.workingDays,
+          weekdayOffRules: branch.weekdayOffRules,
           officeLatitude: branch.officeLatitude,
           officeLongitude: branch.officeLongitude,
           allowedRadiusMeters: branch.allowedRadiusMeters,
@@ -1094,6 +1160,9 @@ export class AttendanceService {
       workEndTime: settings.workEndTime,
       graceMinutes: settings.graceMinutes,
       lateThresholdMinutes: settings.lateThresholdMinutes,
+      halfDayCutoffTime: settings.halfDayCutoffTime,
+      workingDays: settings.workingDays,
+      weekdayOffRules: settings.weekdayOffRules,
       officeLatitude: settings.officeLatitude,
       officeLongitude: settings.officeLongitude,
       allowedRadiusMeters: settings.allowedRadiusMeters,
@@ -1106,14 +1175,20 @@ export class AttendanceService {
     const end = endOfDay(date);
     const dateStr = formatLocal(start, 'yyyy-MM-dd');
 
-    // Preload attendance settings per organization lazily when needed
-    const settingsCache = new Map<string, AttendanceSettings>();
-    const getSettings = async (orgId: string) => {
-      if (!orgId) return null;
-      if (!settingsCache.has(orgId)) {
-        settingsCache.set(orgId, await this.getOrCreateAttendanceSettings(orgId));
+    // Cache user-level shift configs so branch calendar rules are reused during this run.
+    const shiftConfigCache = new Map<
+      string,
+      Awaited<ReturnType<AttendanceService['resolveShiftConfig']>>
+    >();
+    const getShiftConfig = async (orgId: string, userId: string) => {
+      const cacheKey = `${orgId}|${userId}`;
+      if (!shiftConfigCache.has(cacheKey)) {
+        shiftConfigCache.set(
+          cacheKey,
+          await this.resolveShiftConfig(orgId, userId),
+        );
       }
-      return settingsCache.get(orgId)!;
+      return shiftConfigCache.get(cacheKey)!;
     };
 
     const holidays = await this.holidayRepo.find({
@@ -1185,8 +1260,10 @@ export class AttendanceService {
       };
 
       const orgId = organizationId !== 'UNKNOWN' ? organizationId : undefined;
-      const settings = orgId ? await getSettings(orgId) : null;
-      const isWorking = settings ? this.isWorkingDayForDate(start, settings) : true;
+      const shiftConfig = orgId ? await getShiftConfig(orgId, userId) : null;
+      const isWorking = shiftConfig
+        ? this.isWorkingDayForDate(start, shiftConfig)
+        : true;
       const isHoliday = holidaySet.has(attendanceDate);
 
       // 💼 If on leave
@@ -1211,17 +1288,23 @@ export class AttendanceService {
         const workingMinutes = Math.floor(
           (+outLog.timestamp - +inLog.timestamp) / 60000,
         );
+        const hasClockOut = sortedLogs.length > 1;
 
         Object.assign(baseData, {
           inTime: inLog.timestamp,
           outTime: outLog.timestamp,
           workingMinutes,
-          status:
-            workingMinutes < 160
-              ? 'absent'
-              : workingMinutes >= 480
-                ? 'present'
-                : 'half-day',
+          status: shiftConfig
+            ? this.determineAttendanceStatus(
+                workingMinutes,
+                hasClockOut,
+                shiftConfig,
+              )
+            : workingMinutes >= 480
+              ? 'present'
+              : workingMinutes >= 160
+                ? 'half-day'
+                : 'absent',
           inPhotoUrl: inLog.photoUrl,
           inLatitude: inLog.latitude,
           inLongitude: inLog.longitude,
@@ -1308,6 +1391,7 @@ async getAttendanceReport(
   attendanceQuery = attendanceQuery
     .addSelect([
       'emp.employee_code AS "employeeCode"',
+      'emp.branch_id AS "branchId"',
       'dept.name AS "departmentName"',
       'desg.name AS "designationName"',
       // FIXED: Use managerUser fields for concatenation
@@ -1330,8 +1414,19 @@ async getAttendanceReport(
     holidays.map((h) => formatDateLocal(new Date(h.date))),
   );
 
-    const settings = await this.getOrCreateAttendanceSettings(organizationId);
-    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, settings);
+  const settings = await this.getOrCreateAttendanceSettings(organizationId);
+  const activeBranches = await this.branchRepo.find({
+    where: { organizationId, isActive: true },
+  });
+  const activeBranchMap = new Map(activeBranches.map((branch) => [branch.id, branch]));
+  const resolveWorkingDaySource = (branchId?: string | null): WorkingDayRuleSource => {
+    if (branchId && activeBranchMap.has(branchId)) {
+      return activeBranchMap.get(branchId)!;
+    }
+    return settings;
+  };
+  const isWorkingDayForBranch = (date: Date, branchId?: string | null) =>
+    this.isWorkingDayForDate(date, resolveWorkingDaySource(branchId));
 
   // Generate all dates for the month
   const allDates: string[] = [];
@@ -1344,8 +1439,8 @@ async getAttendanceReport(
   }
 
   // Calculate working days (excluding non-working days and holidays)
-  const workingDays = allDates.filter((date) => {
-    return isWorkingDay(new Date(date)) && !holidaySet.has(date);
+  const organizationWorkingDays = allDates.filter((date) => {
+    return isWorkingDayForBranch(new Date(date), null) && !holidaySet.has(date);
   }).length;
 
   // Group attendance records by user
@@ -1356,6 +1451,7 @@ async getAttendanceReport(
     const userId = entry.user.id;
     const rawData = rawResults.raw[index];
     const empCode = rawData?.employeeCode || 'N/A';
+    const branchId = (rawData?.branchId as string | null | undefined) || null;
     const departmentName = rawData?.departmentName || '';
     const designationName = rawData?.designationName || '';
     
@@ -1375,10 +1471,12 @@ async getAttendanceReport(
           .join(' '),
         email: entry.user.email,
         employeeCode: empCode,
+        branchId,
         department: departmentName,
         designation: designationName,
         reportingTo: managerName,
         dailyRecords: [],
+        totalWorkingDays: 0,
         presentDays: 0,
         absentDays: 0,
         halfDays: 0,
@@ -1413,7 +1511,7 @@ async getAttendanceReport(
       outTime: formatTime(entry.outTime),
       workingHours: Math.round(workingHours * 100) / 100,
       isHoliday: holidaySet.has(entry.attendanceDate),
-      isSunday: !isWorkingDay(new Date(entry.attendanceDate)),
+      isSunday: !isWorkingDayForBranch(new Date(entry.attendanceDate), userData.branchId),
     });
 
     // Count status types
@@ -1447,6 +1545,7 @@ async getAttendanceReport(
       .addSelect('user.last_name', 'lastName')
       .addSelect('user.email', 'email')
       .addSelect('emp.employee_code', 'employeeCode')
+      .addSelect('emp.branch_id', 'branchId')
       .addSelect('dept.name', 'departmentName')
       .addSelect('desg.name', 'designationName')
       .addSelect('CONCAT_WS(\' \', NULLIF(managerUser.first_name, \'\'), NULLIF(managerUser.middle_name, \'\'), NULLIF(managerUser.last_name, \'\')) AS "managerFullName"')
@@ -1473,6 +1572,7 @@ async getAttendanceReport(
       .addGroupBy('user.last_name')
       .addGroupBy('user.email')
       .addGroupBy('emp.employee_code')
+      .addGroupBy('emp.branch_id')
       .addGroupBy('dept.name')
       .addGroupBy('desg.name')
       .addGroupBy('managerUser.first_name')
@@ -1492,10 +1592,12 @@ async getAttendanceReport(
             .join(' '),
           email: user.email,
           employeeCode: user.employeeCode || 'N/A',
+          branchId: user.branchId || null,
           department: user.departmentName || '',
           designation: user.designationName || '',
           reportingTo: managerName,
           dailyRecords: [],
+          totalWorkingDays: 0,
           presentDays: 0,
           absentDays: 0,
           halfDays: 0,
@@ -1508,12 +1610,15 @@ async getAttendanceReport(
 
   // Fill in missing dates for all users (rest of the method remains the same)
   userAttendanceMap.forEach((userData) => {
+    userData.totalWorkingDays = allDates.filter((date) => {
+      return !holidaySet.has(date) && isWorkingDayForBranch(new Date(date), userData.branchId);
+    }).length;
     const existingDates = new Set(userData.dailyRecords.map((r) => r.date));
 
     allDates.forEach((date) => {
       if (!existingDates.has(date)) {
         const isHoliday = holidaySet.has(date);
-        const isSunday = !isWorkingDay(new Date(date));
+        const isSunday = !isWorkingDayForBranch(new Date(date), userData.branchId);
         const isPending = new Date(date) > new Date();
 
         let status = 'absent';
@@ -1547,7 +1652,9 @@ async getAttendanceReport(
     const totalWorkingHours = userData.totalWorkingMinutes / 60;
     const attendedDays = userData.presentDays + userData.halfDays;
     const attendancePercentage =
-      workingDays > 0 ? (attendedDays / workingDays) * 100 : 0;
+      userData.totalWorkingDays > 0
+        ? (attendedDays / userData.totalWorkingDays) * 100
+        : 0;
 
     return {
       userId: userData.userId,
@@ -1557,7 +1664,7 @@ async getAttendanceReport(
       department: userData.department,
       designation: userData.designation,
       reportingTo: userData.reportingTo,
-      totalWorkingDays: workingDays,
+      totalWorkingDays: userData.totalWorkingDays,
       presentDays: userData.presentDays,
       absentDays: userData.absentDays,
       halfDays: userData.halfDays,
@@ -1579,7 +1686,7 @@ async getAttendanceReport(
       period: `${new Date(year, month - 1).toLocaleString('default', {
         month: 'long',
       })} ${year}`,
-      workingDays,
+      workingDays: organizationWorkingDays,
       holidays: holidays.length,
     },
   };
@@ -1587,14 +1694,75 @@ async getAttendanceReport(
 
   // ===== Branch Methods =====
   async createBranch(dto: CreateBranchDto): Promise<Branch> {
-    const branch = this.branchRepo.create(dto);
+    const normalizedName = this.normalizeBranchName(dto.name);
+    if (!normalizedName) {
+      throw new BadRequestException('Branch name is required');
+    }
+
+    const existingBranches = await this.branchRepo.find({
+      where: { organizationId: dto.organizationId },
+      select: ['id', 'name'],
+    });
+    if (
+      existingBranches.some(
+        (branch) =>
+          this.canonicalBranchName(branch.name) ===
+          this.canonicalBranchName(normalizedName),
+      )
+    ) {
+      throw new BadRequestException(`Branch "${normalizedName}" already exists`);
+    }
+
+    const orgSettings = await this.getOrCreateAttendanceSettings(dto.organizationId);
+    const branch = this.branchRepo.create({
+      ...dto,
+      name: normalizedName,
+      workStartTime: dto.workStartTime ?? orgSettings.workStartTime ?? '09:00:00',
+      workEndTime: dto.workEndTime ?? orgSettings.workEndTime ?? '18:00:00',
+      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes ?? 15,
+      lateThresholdMinutes: dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes ?? 30,
+      halfDayCutoffTime: dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime ?? '14:00:00',
+      workingDays:
+        Array.isArray(dto.workingDays) && dto.workingDays.length
+          ? dto.workingDays
+          : orgSettings.workingDays,
+      weekdayOffRules: dto.weekdayOffRules ?? orgSettings.weekdayOffRules ?? {},
+      officeLatitude: dto.officeLatitude ?? orgSettings.officeLatitude ?? null,
+      officeLongitude: dto.officeLongitude ?? orgSettings.officeLongitude ?? null,
+      allowedRadiusMeters: dto.allowedRadiusMeters ?? orgSettings.allowedRadiusMeters ?? 100,
+      altLocations: dto.altLocations ?? [],
+      isActive: dto.isActive ?? true,
+    });
     return this.branchRepo.save(branch);
   }
 
   async listBranches(organizationId: string): Promise<Branch[]> {
-    return this.branchRepo.find({
+    const branches = await this.branchRepo.find({
       where: { organizationId },
-      order: { createdAt: 'DESC' },
+      order: { updatedAt: 'DESC', createdAt: 'DESC' },
+    });
+    const deduped = new Map<string, Branch>();
+    for (const branch of branches) {
+      const key = this.canonicalBranchName(branch.name);
+      const existing = deduped.get(key);
+      if (!existing) {
+        deduped.set(key, branch);
+        continue;
+      }
+      const existingUpdated = existing.updatedAt
+        ? new Date(existing.updatedAt).getTime()
+        : 0;
+      const incomingUpdated = branch.updatedAt
+        ? new Date(branch.updatedAt).getTime()
+        : 0;
+      if (incomingUpdated >= existingUpdated) {
+        deduped.set(key, branch);
+      }
+    }
+    return Array.from(deduped.values()).sort((a, b) => {
+      const aUpdated = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bUpdated = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bUpdated - aUpdated;
     });
   }
 
@@ -1602,6 +1770,31 @@ async getAttendanceReport(
     const branch = await this.branchRepo.findOne({ where: { id } });
     if (!branch) {
       throw new NotFoundException(`Branch with ID ${id} not found`);
+    }
+    if (dto.name !== undefined) {
+      const normalizedName = this.normalizeBranchName(dto.name);
+      if (!normalizedName) {
+        throw new BadRequestException('Branch name is required');
+      }
+      const targetCanonicalName = this.canonicalBranchName(normalizedName);
+      const currentCanonicalName = this.canonicalBranchName(branch.name);
+
+      // Allow timing/rule updates even when legacy duplicate names exist, as long as name is unchanged.
+      if (targetCanonicalName !== currentCanonicalName) {
+        const existingBranches = await this.branchRepo.find({
+          where: { organizationId: branch.organizationId },
+          select: ['id', 'name'],
+        });
+        const hasDuplicate = existingBranches.some(
+          (item) =>
+            item.id !== id &&
+            this.canonicalBranchName(item.name) === targetCanonicalName,
+        );
+        if (hasDuplicate) {
+          throw new BadRequestException(`Branch "${normalizedName}" already exists`);
+        }
+      }
+      dto.name = normalizedName;
     }
     Object.assign(branch, dto);
     return this.branchRepo.save(branch);
@@ -1644,29 +1837,53 @@ async getAttendanceReport(
     return settings;
   }
 
-  private resolveWorkingDays(settings?: AttendanceSettings): number[] {
-    const days = settings?.workingDays;
-    if (Array.isArray(days) && days.length) return days;
+  private resolveWorkingDays(source?: WorkingDayRuleSource): number[] {
+    const days = source?.workingDays;
+    if (Array.isArray(days) && days.length) {
+      return Array.from(
+        new Set(
+          days.filter(
+            (day): day is number =>
+              Number.isInteger(day) && day >= 0 && day <= 6,
+          ),
+        ),
+      );
+    }
     return [1, 2, 3, 4, 5, 6];
   }
 
   private resolveWeekdayOffRules(
-    settings?: AttendanceSettings,
+    source?: WorkingDayRuleSource,
   ): Record<string, number[]> {
-    const rules = settings?.weekdayOffRules;
-    if (rules && typeof rules === 'object') return rules;
-    return {};
+    const rules = source?.weekdayOffRules;
+    if (!rules || typeof rules !== 'object') return {};
+    const normalized: Record<string, number[]> = {};
+    Object.entries(rules).forEach(([day, weeks]) => {
+      const validDay = Number(day);
+      if (!Number.isInteger(validDay) || validDay < 0 || validDay > 6) return;
+      if (!Array.isArray(weeks)) return;
+      const cleanWeeks = Array.from(
+        new Set(
+          weeks.filter(
+            (week): week is number =>
+              Number.isInteger(week) && week >= 1 && week <= 5,
+          ),
+        ),
+      ).sort((a, b) => a - b);
+      if (cleanWeeks.length) normalized[String(validDay)] = cleanWeeks;
+    });
+    return normalized;
   }
 
   private weekOfMonth(d: Date): number {
     return Math.ceil(d.getDate() / 7);
   }
 
-  private isWorkingDayForDate(d: Date, settings: AttendanceSettings): boolean {
-    const workingDaySet = new Set(this.resolveWorkingDays(settings));
+  private isWorkingDayForDate(d: Date, source: WorkingDayRuleSource): boolean {
+    const workingDaySet = new Set(this.resolveWorkingDays(source));
     if (!workingDaySet.has(d.getDay())) return false;
     const week = this.weekOfMonth(d);
-    const weekdayRules = this.resolveWeekdayOffRules(settings);
+    const weekdayRules = this.resolveWeekdayOffRules(source);
     const ruleWeeks = weekdayRules[String(d.getDay())] || [];
     if (ruleWeeks.includes(week)) return false;
     return true;

@@ -20,6 +20,9 @@ export class Organization {
   @Column({ name: 'email', type: 'varchar', nullable: true })
   email?: string;
 
+  @Column({ name: 'hr_mail', type: 'varchar', nullable: true })
+  hrMail?: string;
+
   @Column({ name: 'phone', type: 'varchar', nullable: true })
   phone?: string;
 
@@ -34,6 +37,15 @@ export class Organization {
 
   @Column({ name: 'landing_link', type: 'text', nullable: true })
   landingLink?: string;
+
+  @Column({ name: 'resignation_policy', type: 'text', nullable: true })
+  resignationPolicy?: string;
+
+  @Column({ name: 'resignation_notice_period_days', type: 'int', default: 30 })
+  resignationNoticePeriodDays: number;
+
+  @Column({ name: 'allow_early_relieving_by_admin', type: 'boolean', default: false })
+  allowEarlyRelievingByAdmin: boolean;
 
   @Column({ name: 'enable_gps_validation', type: 'boolean', default: true })
   enableGpsValidation: boolean;

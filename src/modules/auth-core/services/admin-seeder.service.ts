@@ -90,20 +90,20 @@ export class AdminSeederService implements OnModuleInit {
     }
 
     // 4. Create admin user
-    const hashedPassword = await bcrypt.hash('admin@123', 12);
+    const hashedPassword = await bcrypt.hash('password', 12);
     const adminUser = await this.userRepo.save(
       this.userRepo.create({
-        userName: 'admin',
+        userName: 'avinya_hrms',
         email: 'admin@avinya.com',
         password: hashedPassword,
-        firstName: 'System',
+        firstName: 'Admin',
         middleName: '',
-        lastName: 'Admin',
+        lastName: '',
         dob: new Date('1990-01-01'),
         gender: 'MALE',
         organization: org,
         isActive: true,
-        mustChangePassword: false,
+        mustChangePassword: true,
       }),
     );
     this.logger.log(`Created admin user: ${adminUser.id}`);
@@ -117,6 +117,6 @@ export class AdminSeederService implements OnModuleInit {
       }),
     );
     this.logger.log('Admin role assigned. Seed complete!');
-    this.logger.log('Default admin credentials -> userName: "admin", password: "admin@123"');
+    this.logger.log('Default admin credentials -> userName: "avinya_hrms", password: "password"');
   }
 }

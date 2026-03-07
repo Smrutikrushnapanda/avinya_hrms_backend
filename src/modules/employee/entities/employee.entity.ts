@@ -30,7 +30,7 @@ export class Employee {
   @Column({ name: 'designation_id', nullable: true })
   designationId: string;
 
-  @Column({ name: 'branch_id', nullable: true })
+  @Column({ type: 'uuid', name: 'branch_id', nullable: true })
   branchId: string | null;
 
   @Column({ name: 'reporting_to', nullable: true })

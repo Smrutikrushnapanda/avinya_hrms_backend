@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Meeting } from '../../meeting/entities/meeting.entity';
 
 @Entity('notices')
 export class Notice {
@@ -28,6 +31,13 @@ export class Notice {
 
   @Column({ type: 'timestamptz' })
   end_at: Date;
+
+  @ManyToOne(() => Meeting, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'meeting_id' })
+  meeting?: Meeting;
+
+  @Column({ name: 'meeting_id', nullable: true })
+  meetingId?: string;
 
   @CreateDateColumn()
   created_at: Date;

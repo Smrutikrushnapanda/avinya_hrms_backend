@@ -7,11 +7,12 @@ dotenv.config({ path: '.env' });
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    console.error(process.env); // debug
     throw new Error(`Environment variable ${name} is missing.`);
   }
   return value;
 }
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 const dataSource = new DataSource({
   type: 'postgres',
@@ -27,16 +28,19 @@ const dataSource = new DataSource({
 
   synchronize: true,
 
-  ssl: {
-    rejectUnauthorized: false,
-  },
-
-  extra: {
-    ssl: {
-      rejectUnauthorized: false,
+  // Production (Supabase): SSL + pgBouncer pool constraints
+  // Local: no SSL, normal pool
+  ...(isProduction && {
+    poolSize: 1,
+    ssl: { rejectUnauthorized: false },
+    extra: {
+      ssl: { rejectUnauthorized: false },
+      options: '-c search_path=public,extensions',
+      max: 1,
+      idleTimeoutMillis: 600000,
+      connectionTimeoutMillis: 30000,
     },
-    options: '-c search_path=public,extensions',
-  },
+  }),
 
   logging: false,
 });
