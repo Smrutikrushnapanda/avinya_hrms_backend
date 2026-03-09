@@ -44,7 +44,6 @@ const dataSource = new DataSource({
     ...(useSsl && { ssl: { rejectUnauthorized: false } }),
     extra: {
       ...(useSsl && { ssl: { rejectUnauthorized: false } }),
-      options: '-c search_path=public,extensions',
       max: 1,
       idleTimeoutMillis: 600000,
       connectionTimeoutMillis: 30000,
