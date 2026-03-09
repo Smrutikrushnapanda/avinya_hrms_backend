@@ -19,6 +19,8 @@ import { AdminSeederService } from './services/admin-seeder.service';
 import { StorageService } from '../attendance/storage.service';
 
 import { Organization } from './entities/organization.entity';
+import { OrganizationMobileHeaderSettings } from './entities/organization-mobile-header-settings.entity';
+import { OrganizationResignationSettings } from './entities/organization-resignation-settings.entity';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
@@ -39,6 +41,8 @@ import { AttendanceModule } from '../attendance/attendance.module';
   imports: [
     TypeOrmModule.forFeature([
       Organization,
+      OrganizationMobileHeaderSettings,
+      OrganizationResignationSettings,
       OrganizationRole,
       User,
       Role,

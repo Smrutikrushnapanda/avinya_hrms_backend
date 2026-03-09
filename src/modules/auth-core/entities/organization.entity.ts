@@ -3,11 +3,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
+  OneToOne,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { OrganizationFeature } from './organization-feature.entity';
+import { OrganizationMobileHeaderSettings } from './organization-mobile-header-settings.entity';
+import { OrganizationResignationSettings } from './organization-resignation-settings.entity';
 
 @Entity({ name: 'organizations' })
 export class Organization {
@@ -38,15 +41,6 @@ export class Organization {
   @Column({ name: 'landing_link', type: 'text', nullable: true })
   landingLink?: string;
 
-  @Column({ name: 'resignation_policy', type: 'text', nullable: true })
-  resignationPolicy?: string;
-
-  @Column({ name: 'resignation_notice_period_days', type: 'int', default: 30 })
-  resignationNoticePeriodDays: number;
-
-  @Column({ name: 'allow_early_relieving_by_admin', type: 'boolean', default: false })
-  allowEarlyRelievingByAdmin: boolean;
-
   @Column({ name: 'enable_gps_validation', type: 'boolean', default: true })
   enableGpsValidation: boolean;
 
@@ -76,4 +70,14 @@ export class Organization {
 
   @OneToMany(() => OrganizationFeature, (of) => of.organization)
   organizationFeatures: OrganizationFeature[];
+
+  @OneToOne(() => OrganizationMobileHeaderSettings, (settings) => settings.organization, {
+    eager: true,
+  })
+  mobileHeaderSettings?: OrganizationMobileHeaderSettings;
+
+  @OneToOne(() => OrganizationResignationSettings, (settings) => settings.organization, {
+    eager: true,
+  })
+  resignationSettings?: OrganizationResignationSettings;
 }

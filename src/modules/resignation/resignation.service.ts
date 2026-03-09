@@ -112,8 +112,8 @@ export class ResignationService {
       employeeEmail,
       message: request.message,
       proposedLastWorkingDay: request.proposedLastWorkingDay,
-      resignationPolicy: organization.resignationPolicy || undefined,
-      noticePeriodDays: organization.resignationNoticePeriodDays || 30,
+      resignationPolicy: organization.resignationSettings?.policy || undefined,
+      noticePeriodDays: organization.resignationSettings?.noticePeriodDays || 30,
     });
 
     return this.getRequestById(request.id);
@@ -177,9 +177,11 @@ export class ResignationService {
     if (nextStatus === ResignationStatus.APPROVED) {
       const fallbackDate = new Date();
       fallbackDate.setDate(
-        fallbackDate.getDate() + (request.organization?.resignationNoticePeriodDays || 30),
+        fallbackDate.getDate() + (request.organization?.resignationSettings?.noticePeriodDays || 30),
       );
-      const canAllowEarly = Boolean(request.organization?.allowEarlyRelievingByAdmin);
+      const canAllowEarly = Boolean(
+        request.organization?.resignationSettings?.allowEarlyRelievingByAdmin,
+      );
       if (dto.allowEarlyRelieving && !canAllowEarly) {
         throw new BadRequestException(
           'Early relieving is disabled in organization resignation policy',
@@ -211,7 +213,7 @@ export class ResignationService {
         reviewerName: reviewer
           ? [reviewer.firstName, reviewer.lastName].filter(Boolean).join(' ').trim() || reviewer.userName
           : undefined,
-        resignationPolicy: request.organization?.resignationPolicy || undefined,
+        resignationPolicy: request.organization?.resignationSettings?.policy || undefined,
       });
     }
 

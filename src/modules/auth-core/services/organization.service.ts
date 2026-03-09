@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../entities/organization.entity';
+import { OrganizationMobileHeaderSettings } from '../entities/organization-mobile-header-settings.entity';
+import { OrganizationResignationSettings } from '../entities/organization-resignation-settings.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
@@ -14,6 +16,10 @@ export class OrganizationService {
   constructor(
     @InjectRepository(Organization)
     private readonly orgRepo: Repository<Organization>,
+    @InjectRepository(OrganizationMobileHeaderSettings)
+    private readonly mobileHeaderSettingsRepo: Repository<OrganizationMobileHeaderSettings>,
+    @InjectRepository(OrganizationResignationSettings)
+    private readonly resignationSettingsRepo: Repository<OrganizationResignationSettings>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(Role)
@@ -25,6 +31,25 @@ export class OrganizationService {
   async create(data: CreateOrganizationDto, createdBy: string) {
     const org = await this.orgRepo.save(
       this.orgRepo.create({ ...data, createdBy, updatedBy: createdBy }),
+    );
+
+    const mobileHeaderSettings = new OrganizationMobileHeaderSettings();
+    mobileHeaderSettings.organizationId = org.id;
+    mobileHeaderSettings.backgroundColor = data.homeHeaderBackgroundColor || undefined;
+    mobileHeaderSettings.mediaUrl = data.homeHeaderMediaUrl || undefined;
+    mobileHeaderSettings.mediaStartDate = data.homeHeaderMediaStartDate || undefined;
+    mobileHeaderSettings.mediaEndDate = data.homeHeaderMediaEndDate || undefined;
+    await this.mobileHeaderSettingsRepo.save(
+      mobileHeaderSettings,
+    );
+
+    const resignationSettings = new OrganizationResignationSettings();
+    resignationSettings.organizationId = org.id;
+    resignationSettings.policy = data.resignationPolicy || undefined;
+    resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays ?? 30) || 30;
+    resignationSettings.allowEarlyRelievingByAdmin = Boolean(data.allowEarlyRelievingByAdmin);
+    await this.resignationSettingsRepo.save(
+      resignationSettings,
     );
 
     // Ensure ADMIN role exists for this org
@@ -79,22 +104,55 @@ export class OrganizationService {
     const org = await this.orgRepo.findOne({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
 
+    let mobileHeaderSettings = await this.mobileHeaderSettingsRepo.findOne({
+      where: { organizationId: id },
+    });
+    if (!mobileHeaderSettings) {
+      mobileHeaderSettings = new OrganizationMobileHeaderSettings();
+      mobileHeaderSettings.organizationId = id;
+    }
+
+    let resignationSettings = await this.resignationSettingsRepo.findOne({
+      where: { organizationId: id },
+    });
+    if (!resignationSettings) {
+      resignationSettings = new OrganizationResignationSettings();
+      resignationSettings.organizationId = id;
+    }
+
     if (data.name) data.organizationName = data.name;
     if (data.email !== undefined) org.email = data.email;
     if (data.hrMail !== undefined) org.hrMail = data.hrMail;
     if (data.phone !== undefined) org.phone = data.phone;
     if (data.address !== undefined) org.address = data.address;
     if (data.logoUrl !== undefined) org.logoUrl = data.logoUrl;
-    if (data.resignationPolicy !== undefined) org.resignationPolicy = data.resignationPolicy;
+    if (data.homeHeaderBackgroundColor !== undefined) {
+      mobileHeaderSettings.backgroundColor = data.homeHeaderBackgroundColor || undefined;
+    }
+    if (data.homeHeaderMediaUrl !== undefined) {
+      mobileHeaderSettings.mediaUrl = data.homeHeaderMediaUrl || undefined;
+    }
+    if (data.homeHeaderMediaStartDate !== undefined) {
+      mobileHeaderSettings.mediaStartDate = data.homeHeaderMediaStartDate || undefined;
+    }
+    if (data.homeHeaderMediaEndDate !== undefined) {
+      mobileHeaderSettings.mediaEndDate = data.homeHeaderMediaEndDate || undefined;
+    }
+    if (data.resignationPolicy !== undefined) {
+      resignationSettings.policy = data.resignationPolicy || undefined;
+    }
     if (data.resignationNoticePeriodDays !== undefined) {
-      org.resignationNoticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
+      resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
     }
     if (data.allowEarlyRelievingByAdmin !== undefined) {
-      org.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
+      resignationSettings.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
     }
 
     Object.assign(org, data, { updatedBy });
-    return this.orgRepo.save(org);
+    await this.orgRepo.save(org);
+    await this.mobileHeaderSettingsRepo.save(mobileHeaderSettings);
+    await this.resignationSettingsRepo.save(resignationSettings);
+    return this.findOne(id);
   }
 
   async changeCredentials(orgId: string, adminUserId: string, dto: ChangeCredentialsDto) {
@@ -125,7 +183,8 @@ export class OrganizationService {
   }
 
   async findAll() {
-    return this.orgRepo.find();
+    const organizations = await this.orgRepo.find();
+    return organizations.map((org) => this.mapOrganizationResponse(org));
   }
 
   async findOne(id: string) {
@@ -134,6 +193,21 @@ export class OrganizationService {
       relations: ['users', 'organizationFeatures'],
     });
     if (!org) throw new NotFoundException('Organization not found');
-    return { ...org, name: org.organizationName };
+    return this.mapOrganizationResponse(org);
+  }
+
+  private mapOrganizationResponse(org: Organization) {
+    return {
+      ...org,
+      name: org.organizationName,
+      homeHeaderBackgroundColor: org.mobileHeaderSettings?.backgroundColor || null,
+      homeHeaderMediaUrl: org.mobileHeaderSettings?.mediaUrl || null,
+      homeHeaderMediaStartDate: org.mobileHeaderSettings?.mediaStartDate || null,
+      homeHeaderMediaEndDate: org.mobileHeaderSettings?.mediaEndDate || null,
+      resignationPolicy: org.resignationSettings?.policy || null,
+      resignationNoticePeriodDays: org.resignationSettings?.noticePeriodDays ?? 30,
+      allowEarlyRelievingByAdmin:
+        org.resignationSettings?.allowEarlyRelievingByAdmin ?? false,
+    };
   }
 }

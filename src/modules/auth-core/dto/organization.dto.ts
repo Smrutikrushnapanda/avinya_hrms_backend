@@ -25,6 +25,22 @@ export class CreateOrganizationDto {
   logoUrl?: string;
 
   @IsOptional()
+  @IsString()
+  homeHeaderBackgroundColor?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaStartDate?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaEndDate?: string;
+
+  @IsOptional()
   @IsUrl()
   siteUrl?: string;
 
@@ -103,6 +119,22 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsUrl()
   logoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderBackgroundColor?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaStartDate?: string;
+
+  @IsOptional()
+  @IsString()
+  homeHeaderMediaEndDate?: string;
 
   @IsOptional()
   @IsUrl()
