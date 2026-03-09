@@ -6,6 +6,7 @@ import { PayrollSettings } from './entities/payroll-settings.entity';
 import { PayrollNotification } from './entities/payroll-notification.entity';
 import { CreatePayrollRecordDto, UpdatePayrollRecordDto, UpdatePayrollSettingsDto } from './dto/payroll.dto';
 import { Employee } from '../employee/entities/employee.entity';
+import { Organization } from '../auth-core/entities/organization.entity';
 import { MailService } from './mail.service';
 import * as puppeteer from 'puppeteer';
 
@@ -22,6 +23,8 @@ export class PayrollService {
     private readonly employeeRepo: Repository<Employee>,
     @InjectRepository(PayrollNotification)
     private readonly notificationRepo: Repository<PayrollNotification>,
+    @InjectRepository(Organization)
+    private readonly organizationRepo: Repository<Organization>,
     private readonly mailService: MailService,
   ) {}
 
@@ -156,6 +159,16 @@ export class PayrollService {
       settings = this.settingsRepo.create({ organizationId });
       settings = await this.settingsRepo.save(settings);
     }
+
+    // Fetch organization data and merge with settings
+    const organization = await this.organizationRepo.findOne({ where: { id: organizationId } });
+    if (organization) {
+      // Use organization data if settings don't have custom values
+      settings.companyName = settings.companyName || organization.organizationName;
+      settings.logoUrl = settings.logoUrl || organization.logoUrl;
+      settings.address = settings.address || organization.address;
+    }
+
     return settings;
   }
 
