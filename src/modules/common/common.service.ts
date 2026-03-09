@@ -1,14 +1,15 @@
-import { Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
-import { supabase } from '../../shared/supabase';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
+import { posix as pathPosix } from 'path';
 
 @Injectable()
-export class Common implements OnModuleInit {
+export class Common {
   private readonly logger = new Logger(Common.name);
-  private readonly bucket = process.env.COMMON_UPLOADS_BUCKET || 'common-uploads';
-  private readonly signedUrlTtlSeconds = 60 * 60; // 1 hour
+  private readonly baseFolder = 'hrms/common';
 
-  async onModuleInit() {
-    await this.ensureBucketExists();
+  constructor(private readonly configService: ConfigService) {
+    this.initializeCloudinary();
   }
 
   async uploadFile(
@@ -17,49 +18,73 @@ export class Common implements OnModuleInit {
     contentType: string,
     isPublic = true,
   ): Promise<string> {
-    const { error } = await supabase.storage
-      .from(this.bucket)
-      .upload(destination, fileBuffer, {
-        contentType,
-        cacheControl: '3600',
-        upsert: true,
+    if (!isPublic) {
+      this.logger.warn('Private uploads are not supported in Common service with Cloudinary; uploading as public');
+    }
+
+    const normalizedDestination = destination
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .join('/');
+    const parsedPath = pathPosix.parse(normalizedDestination);
+    const folder = [this.baseFolder, parsedPath.dir].filter(Boolean).join('/');
+    const publicId = parsedPath.name;
+
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder,
+            public_id: publicId,
+            overwrite: true,
+            resource_type: 'auto',
+            use_filename: false,
+            unique_filename: false,
+          },
+          (error, uploadResult) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            if (!uploadResult) {
+              reject(new Error('No upload result returned from Cloudinary'));
+              return;
+            }
+
+            resolve(uploadResult);
+          },
+        );
+
+        stream.end(fileBuffer);
       });
 
-    if (error) {
-      this.logger.error(`Supabase upload failed: ${error.message}`);
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown upload error';
+      this.logger.error(`Cloudinary upload failed: ${message}`);
       throw new InternalServerErrorException('File upload failed');
     }
-
-    if (isPublic) {
-      const { data } = supabase.storage.from(this.bucket).getPublicUrl(destination);
-      return data.publicUrl;
-    }
-
-    const { data, error: signError } = await supabase.storage
-      .from(this.bucket)
-      .createSignedUrl(destination, this.signedUrlTtlSeconds);
-
-    if (signError || !data?.signedUrl) {
-      this.logger.error(`Failed to create signed URL: ${signError?.message}`);
-      throw new InternalServerErrorException('File upload failed');
-    }
-
-    return data.signedUrl;
   }
 
-  private async ensureBucketExists() {
-    const { data, error } = await supabase.storage.getBucket(this.bucket);
-    if (data && !error) return;
+  private initializeCloudinary(): void {
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
 
-    const { error: createError } = await supabase.storage.createBucket(this.bucket, {
-      public: true,
-      fileSizeLimit: 10 * 1024 * 1024, // 10 MB
-    });
-
-    if (createError && createError.message !== 'The resource already exists') {
-      this.logger.error(`Failed to create bucket "${this.bucket}": ${createError.message}`);
-    } else {
-      this.logger.log(`Supabase bucket "${this.bucket}" ensured.`);
+    if (!cloudName || !apiKey || !apiSecret) {
+      this.logger.error('Cloudinary credentials are missing in environment variables');
+      throw new Error(
+        'Cloudinary credentials are missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+      );
     }
+
+    cloudinary.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
+    });
   }
 }

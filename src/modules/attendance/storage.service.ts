@@ -3,30 +3,31 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as Sharp from 'sharp';
 import { subMonths } from 'date-fns';
-import { supabase } from '../../shared/supabase';
+import {
+  UploadApiResponse,
+  v2 as cloudinary,
+} from 'cloudinary';
 import { AttendancePhotoType } from './dto/upload-attendance-photo.dto';
 
 interface StoredObject {
-  path: string;
+  publicId: string;
   createdAt?: Date;
 }
 
 @Injectable()
-export class StorageService implements OnModuleInit {
-  private readonly bucket =
-    process.env.SUPABASE_ATTENDANCE_BUCKET || 'attendance-photos';
+export class StorageService {
   private readonly logger = new Logger(StorageService.name);
-  private readonly signedUrlTtlSeconds =
-    Number(process.env.SUPABASE_SIGNED_URL_TTL_SECONDS) ||
-    60 * 60 * 24 * 180; // default 6 months
+  private readonly cloudinaryBaseFolder = 'hrms/attendance';
   private readonly hardFileSizeBytes = 5 * 1024 * 1024; // 5 MB
   private readonly targetMaxBytes = 400 * 1024; // 400 KB cap after compression
 
-  constructor() {
+  constructor(private readonly configService: ConfigService) {
+    this.initializeCloudinary();
+
     const sweepHours = Number(process.env.ATTENDANCE_PHOTO_SWEEP_HOURS || 24);
     const sweepEnabled = process.env.DISABLE_ATTENDANCE_PHOTO_SWEEP !== 'true';
 
@@ -37,10 +38,6 @@ export class StorageService implements OnModuleInit {
           .catch((error) => this.logger.error(`Cleanup failed: ${error.message}`)),
       sweepHours * 60 * 60 * 1000);
     }
-  }
-
-  async onModuleInit() {
-    await this.ensureBucketExists();
   }
 
   async uploadAttendancePhoto(
@@ -67,9 +64,7 @@ export class StorageService implements OnModuleInit {
       );
     }
 
-    const { buffer, extension, mimeType } = await this.compressToJpegUnderLimit(
-      file.buffer,
-    );
+    const { buffer, mimeType } = await this.compressToJpegUnderLimit(file.buffer);
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -78,23 +73,46 @@ export class StorageService implements OnModuleInit {
 
     const safeCompanyId = companyId.trim();
     const safeUserId = userId.trim();
+    const folder =
+      `${this.cloudinaryBaseFolder}/${safeCompanyId}/${safeUserId}/${year}/${month}/${day}`;
+    const publicId = `${type}-${Date.now()}`;
 
-    const key = `${safeCompanyId}/${safeUserId}/${year}/${month}/${day}/${type}.${extension}`;
+    try {
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder,
+            public_id: publicId,
+            overwrite: false,
+            resource_type: 'image',
+            format: 'jpg',
+            use_filename: false,
+            unique_filename: false,
+          },
+          (error, uploadResult) => {
+            if (error) {
+              reject(error);
+              return;
+            }
 
-    const { error } = await supabase.storage
-      .from(this.bucket)
-      .upload(key, buffer, {
-        contentType: mimeType,
-        cacheControl: '3600',
-        upsert: false,
+            if (!uploadResult) {
+              reject(new Error('No upload result returned from Cloudinary'));
+              return;
+            }
+
+            resolve(uploadResult);
+          },
+        );
+
+        stream.end(buffer);
       });
 
-    if (error) {
-      this.logger.error(`Supabase upload failed: ${error.message}`);
+      return result.secure_url;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown upload error';
+      this.logger.error(`Cloudinary attendance upload failed: ${message}`);
       throw new InternalServerErrorException('Could not store attendance photo');
     }
-
-    return key;
   }
 
   async getSignedUrl(key: string): Promise<string> {
@@ -102,54 +120,48 @@ export class StorageService implements OnModuleInit {
       throw new BadRequestException('Storage key is required');
     }
 
-    // If a full URL or data URI is passed, return as-is to avoid oversized signed-url requests
     if (/^(https?:)?\/\//i.test(key) || key.startsWith('data:')) {
       return key;
     }
 
-    const { data, error } = await supabase.storage
-      .from(this.bucket)
-      .createSignedUrl(key, this.signedUrlTtlSeconds);
-
-    if (error || !data?.signedUrl) {
-      this.logger.error(`Failed to create signed URL: ${error?.message}`);
-      throw new InternalServerErrorException('Could not generate signed URL');
+    const legacyStorageBaseUrl = this.configService.get<string>('LEGACY_STORAGE_BASE_URL');
+    if (legacyStorageBaseUrl) {
+      return `${legacyStorageBaseUrl.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}`;
     }
 
-    return data.signedUrl;
+    this.logger.warn(
+      `Received legacy storage key without a public base URL configured: ${key}`,
+    );
+    return key;
   }
 
   async deletePhotosOlderThanMonths(months = 6): Promise<void> {
     const threshold = subMonths(new Date(), months);
-    const objects = await this.listFilesRecursively();
+    const objects = await this.listCloudinaryResources();
 
-    const expiredKeys = objects
-      .filter(({ createdAt, path }) => {
-        const created = createdAt || this.extractDateFromPath(path);
-        return created ? created < threshold : false;
-      })
-      .map((item) => item.path);
+    const expiredPublicIds = objects
+      .filter(({ createdAt }) => (createdAt ? createdAt < threshold : false))
+      .map((item) => item.publicId);
 
-    if (!expiredKeys.length) {
+    if (!expiredPublicIds.length) {
       return;
     }
 
-    const { error } = await supabase.storage
-      .from(this.bucket)
-      .remove(expiredKeys);
-
-    if (error) {
-      this.logger.error(`Failed to delete expired photos: ${error.message}`);
+    try {
+      await cloudinary.api.delete_resources(expiredPublicIds, {
+        resource_type: 'image',
+      });
+      this.logger.log(`Deleted ${expiredPublicIds.length} expired attendance photos`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown delete error';
+      this.logger.error(`Failed to delete expired Cloudinary photos: ${message}`);
       throw new InternalServerErrorException('Photo cleanup failed');
     }
-
-    this.logger.log(`Deleted ${expiredKeys.length} expired attendance photos`);
   }
 
   private async compressToJpegUnderLimit(input: Buffer): Promise<{
     buffer: Buffer;
     mimeType: string;
-    extension: string;
   }> {
     const qualitySteps = [80, 72, 64, 56];
 
@@ -166,7 +178,7 @@ export class StorageService implements OnModuleInit {
         .toBuffer();
 
       if (output.byteLength <= this.targetMaxBytes) {
-        return { buffer: output, mimeType: 'image/jpeg', extension: 'jpg' };
+        return { buffer: output, mimeType: 'image/jpeg' };
       }
     }
 
@@ -175,96 +187,59 @@ export class StorageService implements OnModuleInit {
     );
   }
 
-  private async ensureBucketExists() {
-    const { data, error } = await supabase.storage.getBucket(this.bucket);
-    if (data && !error) {
-      return;
+  private initializeCloudinary(): void {
+    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      this.logger.error('Cloudinary credentials are missing in environment variables');
+      throw new Error(
+        'Cloudinary credentials are missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+      );
     }
 
-    const createResult = await supabase.storage.createBucket(this.bucket, {
-      public: false,
-      fileSizeLimit: `${this.hardFileSizeBytes}`, // 5MB limit server-side
+    cloudinary.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
     });
-
-    if (createResult.error && createResult.error.message !== 'The resource already exists') {
-      this.logger.error(`Failed to ensure bucket "${this.bucket}": ${createResult.error.message}`);
-      throw new InternalServerErrorException('Unable to initialize storage bucket');
-    }
-
-    this.logger.log(`Ensured Supabase bucket "${this.bucket}" exists (private).`);
   }
 
-  private async listFilesRecursively(prefix = ''): Promise<StoredObject[]> {
-    const stack: string[] = [prefix];
+  private async listCloudinaryResources(): Promise<StoredObject[]> {
     const files: StoredObject[] = [];
-    const pageSize = 100;
+    let nextCursor: string | undefined;
 
-    while (stack.length) {
-      const currentPrefix = stack.pop() as string;
-      let offset = 0;
-
-      while (true) {
-        const { data, error } = await supabase.storage
-          .from(this.bucket)
-          .list(currentPrefix, {
-            limit: pageSize,
-            offset,
-            sortBy: { column: 'name', order: 'asc' },
-          });
-
-        if (error) {
-          this.logger.error(
-            `Failed to list objects for prefix ${currentPrefix}: ${error.message}`,
-          );
-          throw new InternalServerErrorException('Unable to list storage objects');
-        }
-
-        if (!data || data.length === 0) {
-          break;
-        }
-
-        for (const entry of data) {
-          const path = currentPrefix
-            ? `${currentPrefix}/${entry.name}`
-            : entry.name;
-
-          // Folders have empty metadata; files carry metadata with size/mimetype
-          const isFolder = !entry.metadata;
-
-          if (isFolder) {
-            stack.push(path);
-          } else {
-            files.push({
-              path,
-              createdAt: entry.created_at ? new Date(entry.created_at) : undefined,
-            });
-          }
-        }
-
-        if (data.length < pageSize) {
-          break;
-        }
-
-        offset += pageSize;
+    do {
+      let response: {
+        resources?: Array<{ public_id: string; created_at?: string }>;
+        next_cursor?: string;
+      };
+      try {
+        response = await cloudinary.api.resources({
+          type: 'upload',
+          resource_type: 'image',
+          prefix: `${this.cloudinaryBaseFolder}/`,
+          max_results: 500,
+          next_cursor: nextCursor,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown list error';
+        this.logger.error(`Failed to list Cloudinary resources: ${message}`);
+        throw new InternalServerErrorException('Unable to list storage objects');
       }
-    }
+
+      for (const resource of response.resources || []) {
+        files.push({
+          publicId: resource.public_id,
+          createdAt: resource.created_at ? new Date(resource.created_at) : undefined,
+        });
+      }
+
+      nextCursor = response.next_cursor;
+    } while (nextCursor);
 
     return files;
-  }
-
-  private extractDateFromPath(path: string): Date | undefined {
-    // Expected format: companyId/userId/YYYY/MM/DD/type.jpg
-    const segments = path.split('/');
-    if (segments.length < 6) {
-      return undefined;
-    }
-
-    const [companyId, userId, year, month, day] = segments;
-    if (!companyId || !userId || !year || !month || !day) {
-      return undefined;
-    }
-
-    const parsed = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
-    return isNaN(parsed.getTime()) ? undefined : parsed;
   }
 }

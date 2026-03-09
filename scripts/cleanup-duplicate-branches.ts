@@ -2,15 +2,21 @@ import { DataSource } from 'typeorm';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
+const databaseUrl = process.env.DATABASE_URL;
+const useSsl = Boolean(databaseUrl) || process.env.DB_SSL === 'true';
 
 const AppDataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: process.env.DB_SSL === 'true',
+  ...(databaseUrl
+    ? { url: databaseUrl }
+    : {
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT || '5432'),
+        username: process.env.DB_USERNAME,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+      }),
+  ...(useSsl && { ssl: { rejectUnauthorized: false } }),
 });
 
 const normalizeBranchName = (name: string): string => {

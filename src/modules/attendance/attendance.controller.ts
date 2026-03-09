@@ -66,7 +66,7 @@ export class AttendanceController {
   }
 
   @Post('upload')
-  @ApiOperation({ summary: 'Upload attendance photo to Supabase Storage' })
+  @ApiOperation({ summary: 'Upload attendance photo to configured storage' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description:

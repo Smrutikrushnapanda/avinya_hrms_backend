@@ -32,6 +32,7 @@ import { MeetingModule } from './modules/meeting/meeting.module';
 import { MailModule } from './modules/mail/mail.module';
 import { ResignationModule } from './modules/resignation/resignation.module';
 import { PostsModule } from './modules/posts/posts.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
 
@@ -69,6 +70,7 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
     MailModule,
     ResignationModule,
     PostsModule,
+    UploadModule,
   ],
   controllers: [AppController],
   providers: [

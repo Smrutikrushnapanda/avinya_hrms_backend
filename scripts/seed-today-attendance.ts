@@ -4,15 +4,21 @@ import { config } from 'dotenv';
 config();
 
 const ORG_ID = '4750a13d-c530-4583-aa8b-36733d06ec22';
+const databaseUrl = process.env.DATABASE_URL;
+const useSsl = Boolean(databaseUrl) || process.env.DB_SSL === 'true';
 
 const dataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: process.env.DB_SSL === 'true',
+  ...(databaseUrl
+    ? { url: databaseUrl }
+    : {
+        host: process.env.DB_HOST,
+        port: parseInt(process.env.DB_PORT || '5432'),
+        username: process.env.DB_USERNAME,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+      }),
+  ...(useSsl && { ssl: { rejectUnauthorized: false } }),
 });
 
 async function seedTodayAttendance() {

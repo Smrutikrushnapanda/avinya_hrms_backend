@@ -12,15 +12,25 @@ function requireEnv(name: string): string {
   return value;
 }
 
-const isProduction = process.env.NODE_ENV === 'production';
+const databaseUrl = process.env.DATABASE_URL;
+const hostedConnection = Boolean(databaseUrl) || process.env.NODE_ENV === 'production';
+const useSsl = hostedConnection || process.env.DB_SSL === 'true';
+
+const connectionOptions = databaseUrl
+  ? {
+      url: databaseUrl,
+    }
+  : {
+      host: requireEnv('DB_HOST'),
+      port: parseInt(requireEnv('DB_PORT')),
+      username: requireEnv('DB_USERNAME'),
+      password: requireEnv('DB_PASSWORD'),
+      database: requireEnv('DB_NAME'),
+    };
 
 const dataSource = new DataSource({
   type: 'postgres',
-  host: requireEnv('DB_HOST'),
-  port: parseInt(requireEnv('DB_PORT')),
-  username: requireEnv('DB_USERNAME'),
-  password: requireEnv('DB_PASSWORD'),
-  database: requireEnv('DB_NAME'),
+  ...connectionOptions,
   schema: 'public',
 
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
@@ -28,19 +38,20 @@ const dataSource = new DataSource({
 
   synchronize: true,
 
-  // Production (Supabase): SSL + pgBouncer pool constraints
-  // Local: no SSL, normal pool
-  ...(isProduction && {
+  // Hosted Postgres needs SSL and conservative pool sizing.
+  ...(hostedConnection && {
     poolSize: 1,
-    ssl: { rejectUnauthorized: false },
+    ...(useSsl && { ssl: { rejectUnauthorized: false } }),
     extra: {
-      ssl: { rejectUnauthorized: false },
+      ...(useSsl && { ssl: { rejectUnauthorized: false } }),
       options: '-c search_path=public,extensions',
       max: 1,
       idleTimeoutMillis: 600000,
       connectionTimeoutMillis: 30000,
     },
   }),
+
+  ...(!hostedConnection && useSsl && { ssl: { rejectUnauthorized: false } }),
 
   logging: false,
 });
