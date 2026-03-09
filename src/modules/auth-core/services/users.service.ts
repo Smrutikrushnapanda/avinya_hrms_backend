@@ -14,12 +14,24 @@ import { CreateRegisterDto } from '../dto/register.dto';
 import { RolesService } from './roles.service';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
+import { UserRole } from '../entities/user-role.entity';
+import { LeaveRequest } from 'src/modules/leave/entities/leave-request.entity';
+import { WfhRequest } from 'src/modules/wfh/entities/wfh-request.entity';
+import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(UserRole)
+    private readonly userRoleRepository: Repository<UserRole>,
+    @InjectRepository(LeaveRequest)
+    private readonly leaveRequestRepository: Repository<LeaveRequest>,
+    @InjectRepository(WfhRequest)
+    private readonly wfhRequestRepository: Repository<WfhRequest>,
+    @InjectRepository(Attendance)
+    private readonly attendanceRepository: Repository<Attendance>,
     private readonly userActivitiesService: UserActivitiesService,
     private rolesService: RolesService,
   ) {}
@@ -187,10 +199,38 @@ export class UsersService {
   }
 
   async remove(userId: string): Promise<{ message: string }> {
-    const result = await this.userRepository.delete(userId);
-    if (result.affected === 0) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
-    return { message: `User with ID ${userId} deleted successfully` };
+
+    try {
+      // Delete all leave requests
+      await this.leaveRequestRepository.delete({ user: { id: userId } });
+
+      // Delete all wfh requests
+      await this.wfhRequestRepository.delete({ user: { id: userId } });
+
+      // Delete all attendance records
+      await this.attendanceRepository.delete({ user: { id: userId } });
+
+      // Delete all user roles
+      await this.userRoleRepository.delete({ user: { id: userId } });
+      
+      // Delete all user activities
+      await this.userActivitiesService.remove(userId);
+
+      // Finally, delete the user
+      await this.userRepository.remove(user);
+
+      return { message: `User with ID ${userId} deleted successfully` };
+    } catch (error) {
+      if (error instanceof QueryFailedError) {
+        throw new ConflictException(
+          'Cannot delete this user because they are referenced by other records.',
+        );
+      }
+      throw error;
+    }
   }
 }

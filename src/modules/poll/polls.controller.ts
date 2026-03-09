@@ -7,6 +7,8 @@ import {
   HttpException,
   HttpStatus,
   Query,
+  Delete,
+  Patch,
 } from '@nestjs/common';
 import { PollsService } from './polls.service';
 import { CreatePollDto } from './dto/create-poll.dto';
@@ -56,6 +58,22 @@ export class PollsController {
   @ApiResponse({ status: 201, description: 'Poll created successfully' })
   create(@Body() createPollDto: CreatePollDto) {
     return this.pollsService.createPoll(createPollDto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a poll' })
+  @ApiParam({ name: 'id', description: 'Poll ID' })
+  @ApiResponse({ status: 200, description: 'Poll deleted successfully' })
+  deletePoll(@Param('id') id: string) {
+    return this.pollsService.deletePoll(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a poll partially' })
+  @ApiParam({ name: 'id', description: 'Poll ID' })
+  @ApiResponse({ status: 200, description: 'Poll updated successfully' })
+  updatePoll(@Param('id') id: string, @Body() updateData: any) {
+    return this.pollsService.updatePoll(id, updateData);
   }
 
   @Get('active')

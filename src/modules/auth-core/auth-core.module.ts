@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
@@ -31,6 +31,9 @@ import { Employee } from '../employee/entities/employee.entity';
 import { LeaveApprovalAssignment } from '../leave/entities/leave-approval-assignment.entity';
 import { WfhApprovalAssignment } from '../wfh/entities/wfh-approval-assignment.entity';
 import { LogReportModule } from '../log-report/log-report.module';
+import { LeaveModule } from '../leave/leave.module';
+import { WfhModule } from '../wfh/wfh.module';
+import { AttendanceModule } from '../attendance/attendance.module';
 
 @Module({
   imports: [
@@ -54,6 +57,9 @@ import { LogReportModule } from '../log-report/log-report.module';
       secret: process.env.JWT_SECRET_KEY,
       signOptions: { expiresIn: '7d' },
     }),
+    forwardRef(() => LeaveModule),
+    forwardRef(() => WfhModule),
+    forwardRef(() => AttendanceModule),
   ],
   controllers: [
     OrganizationController,

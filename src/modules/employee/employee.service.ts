@@ -1,7 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
+import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
+import { EmployeeProfile } from './entities/employee-profile.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UserRole } from '../auth-core/entities/user-role.entity';
@@ -15,12 +18,27 @@ import { WfhService } from '../wfh/wfh.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from '../attendance/entities/branch.entity';
 import { StorageService } from '../attendance/storage.service';
+import { ResignationRequest } from '../resignation/entities/resignation-request.entity';
+import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.entity';
+import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
+import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
+
+// Cache key constants
+const CACHE_KEYS = {
+  EMPLOYEES: 'employees',
+  EMPLOYEE: 'employee',
+  DASHBOARD_STATS: 'dashboard-stats',
+  ANALYTICS: 'employee-analytics',
+  BIRTHDAYS: 'employee-birthdays',
+};
 
 @Injectable()
 export class EmployeeService {
   constructor(
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
+    @InjectRepository(EmployeeProfile)
+    private readonly employeeProfileRepository: Repository<EmployeeProfile>,
     @InjectRepository(Branch)
     private readonly branchRepository: Repository<Branch>,
 
@@ -32,6 +50,21 @@ export class EmployeeService {
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+
+    @InjectRepository(ResignationRequest)
+    private readonly resignationRepository: Repository<ResignationRequest>,
+
+    @InjectRepository(WorkflowAssignment)
+    private readonly workflowAssignmentRepository: Repository<WorkflowAssignment>,
+
+    @InjectRepository(Timesheet)
+    private readonly timesheetRepository: Repository<Timesheet>,
+
+    @InjectRepository(Timeslip)
+    private readonly timeslipRepository: Repository<Timeslip>,
+
+    @Inject(CACHE_MANAGER)
+    private readonly cacheManager: Cache,
 
     private readonly userService: UsersService,
     private readonly entityManager: EntityManager,
@@ -103,6 +136,10 @@ export class EmployeeService {
             savedEmployee.employmentType,
           );
         }
+        
+        // Invalidate cache after creating employee
+        await this.invalidateEmployeeCache(dto.organizationId);
+        
         return this.findOne(savedEmployee.id);
       }
 
@@ -127,6 +164,10 @@ export class EmployeeService {
           savedEmployee.employmentType,
         );
       }
+      
+      // Invalidate cache after creating employee
+      await this.invalidateEmployeeCache(dto.organizationId);
+      
       return this.findOne(savedEmployee.id);
     } catch (error) {
       if (error instanceof QueryFailedError && (error as any).code === '23505') {
@@ -169,16 +210,43 @@ export class EmployeeService {
   }
 
   findAll(organizationId: string) {
-    return this.employeeRepository
-      .find({
+    const cacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
+    
+    return this.cacheManager.get(cacheKey).then(async (cached) => {
+      if (cached) {
+        console.log('📦 Returning cached employees for org:', organizationId);
+        return cached;
+      }
+      
+      const emps = await this.employeeRepository.find({
         where: { organizationId },
         relations: ['department', 'designation', 'manager', 'user', 'branch'],
         order: { firstName: 'ASC' },
-      })
-      .then((emps) => Promise.all(emps.map((e) => this.addSignedProfilePhoto(e))));
+      });
+      
+      // Use Promise.all for parallel photo signing
+      const employees = await Promise.all(
+        emps.map((e) => this.addSignedProfilePhoto(e))
+      );
+      
+      // Cache for 5 minutes
+      await this.cacheManager.set(cacheKey, employees, 300);
+      console.log('💾 Cached employees for org:', organizationId);
+      
+      return employees;
+    });
   }
 
   async findOne(id: string) {
+    const cacheKey = `${CACHE_KEYS.EMPLOYEE}:${id}`;
+    
+    // Check cache first
+    const cached = await this.cacheManager.get(cacheKey);
+    if (cached) {
+      console.log('📦 Returning cached employee:', id);
+      return cached;
+    }
+    
     const employee = await this.employeeRepository.findOne({
       where: { id },
       relations: ['department', 'designation', 'manager', 'user', 'branch'],
@@ -186,14 +254,17 @@ export class EmployeeService {
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
-    const photoUrl = await this.signIfNeeded(this.getProfilePhotoKey(employee));
-    const managerPhotoUrl = await this.signIfNeeded(
-      this.getProfilePhotoKey(employee.manager as any),
-    );
-    const userRoles = await this.getUserRolesMap([employee.userId]);
+    
+    // Parallel photo signing for better performance
+    const [photoUrl, managerPhotoUrl, userRoles] = await Promise.all([
+      this.signIfNeeded(this.getProfilePhotoKey(employee)),
+      this.signIfNeeded(this.getProfilePhotoKey(employee.manager as any)),
+      this.getUserRolesMap([employee.userId]),
+    ]);
+    
     const roles = userRoles.get(employee.userId) || [];
 
-    return {
+    const result = {
       ...(employee as any),
       userName: (employee as any)?.user?.userName,
       roles,
@@ -204,6 +275,11 @@ export class EmployeeService {
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
     };
+    
+    // Cache for 10 minutes
+    await this.cacheManager.set(cacheKey, result, 600);
+    
+    return result;
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
@@ -250,6 +326,9 @@ export class EmployeeService {
       await this.setUserPrimaryRole(employee.userId, selectedRole);
     }
 
+    // Invalidate cache after update
+    await this.invalidateEmployeeCache(employee.organizationId, id);
+
     return this.findOne(id);
   }
 
@@ -260,7 +339,61 @@ export class EmployeeService {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
 
-    return this.employeeRepository.remove(employee);
+    try {
+      // Find employees who report to this employee
+      const reportingEmployees = await this.employeeRepository.find({ where: { reportingTo: id } });
+
+      // Set their manager to null and save them
+      for (const reportingEmployee of reportingEmployees) {
+        reportingEmployee.reportingTo = null;
+        await this.employeeRepository.save(reportingEmployee);
+      }
+
+      // Clean up related records before deleting the employee
+      
+      // 1. Delete resignation requests for this employee
+      await this.resignationRepository.delete({ employeeId: id });
+      await this.resignationRepository.delete({ employeeUserId: employee.userId });
+      
+      // 2. Delete workflow assignments for this employee
+      await this.workflowAssignmentRepository.delete({ employeeId: id });
+      // Also clear approver_id where this employee is set as approver
+      await this.workflowAssignmentRepository
+        .createQueryBuilder()
+        .update(WorkflowAssignment)
+        .set({ approverId: null })
+        .where('approverId = :employeeId', { employeeId: id })
+        .execute();
+      
+      // 3. Delete timesheets for this employee
+      await this.timesheetRepository.delete({ employeeId: id });
+      
+      // 4. Delete timeslips for this employee (use query builder since no direct employeeId column)
+      await this.timeslipRepository
+        .createQueryBuilder()
+        .delete()
+        .from(Timeslip)
+        .where('employee_id = :employeeId', { employeeId: id })
+        .execute();
+
+      // Now, it should be safe to remove the employee
+      await this.employeeRepository.remove(employee);
+      
+      if (employee.userId) {
+        await this.userService.remove(employee.userId);
+      }
+
+      // Invalidate cache after deletion
+      await this.invalidateEmployeeCache(employee.organizationId, id);
+
+    } catch (error) {
+      if (error instanceof QueryFailedError) {
+        throw new ConflictException(
+          'Cannot delete this employee because they are referenced by other records.',
+        );
+      }
+      throw error;
+    }
   }
 
   // --- ENHANCED DASHBOARD STATS ---
@@ -986,6 +1119,31 @@ export class EmployeeService {
     }
 
     return this.checkCircularReporting(employeeId, manager.reportingTo);
+  }
+
+  // --- CACHE INVALIDATION HELPER ---
+  private async invalidateEmployeeCache(organizationId: string, employeeId?: string) {
+    try {
+      // Invalidate employee list cache for the organization
+      const orgCacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
+      await this.cacheManager.del(orgCacheKey);
+      console.log('🗑️ Invalidated employee list cache for org:', organizationId);
+
+      // Invalidate specific employee cache if provided
+      if (employeeId) {
+        const empCacheKey = `${CACHE_KEYS.EMPLOYEE}:${employeeId}`;
+        await this.cacheManager.del(empCacheKey);
+        console.log('🗑️ Invalidated employee cache:', employeeId);
+      }
+
+      // Invalidate dashboard stats cache
+      const statsCacheKey = `${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`;
+      await this.cacheManager.del(statsCacheKey);
+      console.log('🗑️ Invalidated dashboard stats cache for org:', organizationId);
+    } catch (error) {
+      console.error('❌ Error invalidating cache:', error);
+      // Don't throw - cache invalidation failure shouldn't break the operation
+    }
   }
 
   private async signIfNeeded(key?: string | null): Promise<string | null> {

@@ -91,6 +91,31 @@ export class PollsService {
     return { message: 'Poll created successfully', pollId: poll.id };
   }
 
+  async deletePoll(id: string) {
+    const poll = await this.pollRepo.findOne({ where: { id } });
+    if (!poll) throw new NotFoundException('Poll not found');
+    await this.pollRepo.remove(poll);
+    return { message: 'Poll deleted successfully' };
+  }
+
+  async updatePoll(id: string, updateData: Partial<CreatePollDto>) {
+    const poll = await this.pollRepo.findOne({ where: { id } });
+    if (!poll) throw new NotFoundException('Poll not found');
+
+    if (updateData.title !== undefined) poll.title = updateData.title;
+    if (updateData.description !== undefined) poll.description = updateData.description;
+    if (updateData.isAnonymous !== undefined) poll.is_anonymous = updateData.isAnonymous;
+    if (updateData.startTime !== undefined) {
+      poll.start_time = DateTime.fromISO(updateData.startTime, { zone: 'Asia/Kolkata' }).toUTC().toJSDate();
+    }
+    if (updateData.endTime !== undefined) {
+      poll.end_time = DateTime.fromISO(updateData.endTime, { zone: 'Asia/Kolkata' }).toUTC().toJSDate();
+    }
+
+    await this.pollRepo.save(poll);
+    return { message: 'Poll updated successfully', poll };
+  }
+
   async getActivePoll(userId?: string): Promise<{
     poll: Poll;
     responses: PollResponse[];

@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "ts-node seed.ts",
     "seed:demo": "node scripts/seed-demo-data.js",
+    "seed:attendance": "ts-node scripts/seed-today-attendance.ts",
     "clear:demo": "node scripts/clear-demo-data.js",
     "clear:all": "node scripts/clear-demo-data.js"
   },

@@ -66,4 +66,8 @@ export class UserActivitiesService {
 
     return { data, total };
   }
+
+  async remove(userId: string): Promise<any> {
+    return this.userActivityRepo.delete({ userId });
+  }
 }

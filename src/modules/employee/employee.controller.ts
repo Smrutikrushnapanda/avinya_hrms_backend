@@ -8,7 +8,9 @@ import {
   Delete,
   Query,
   UseGuards, // <-- 1. Import UseGuards
+  UseInterceptors, // Import UseInterceptors from @nestjs/common
 } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -20,12 +22,14 @@ import { User } from '../auth-core/entities/user.entity'; // <-- 4. Import User 
 
 @ApiTags('Employees')
 @Controller('employees')
+@UseInterceptors(CacheInterceptor) // Apply caching to all routes in this controller
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
 
   // --- NEW DASHBOARD ENDPOINT ---
   @Get('dashboard-stats')
   @UseGuards(JwtAuthGuard)
+  @CacheTTL(120) // 2 minutes cache for dashboard stats
   @ApiOperation({ summary: 'Get dashboard stats for the organization' })
   @ApiResponse({ status: 200, description: 'Return dashboard stats.' })
   async getDashboardStats(@GetUser() user: User) {
@@ -47,7 +51,9 @@ export class EmployeeController {
     }
   }
   // -----------------------------
+
 @Get('birthdays/upcoming')
+@CacheTTL(3600) // 1 hour cache for birthdays (they don't change frequently)
 @ApiOperation({ summary: 'Get upcoming employee birthdays' })
 @ApiQuery({ name: 'organizationId', type: 'string', required: true })
 @ApiQuery({ name: 'days', type: 'number', required: false, description: 'Days ahead to look (default: 30)' })
@@ -105,6 +111,7 @@ async getUpcomingBirthdays(
   }
 
   @Get()
+  @CacheTTL(300) // 5 minutes cache for employee list
   @ApiOperation({ summary: 'Get all employees by organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   findAll(@Query('organizationId') organizationId: string) {
@@ -112,6 +119,7 @@ async getUpcomingBirthdays(
   }
 
   @Get(':id')
+  @CacheTTL(600) // 10 minutes cache for single employee
   @ApiOperation({ summary: 'Get employee by employee ID' })
   @ApiParam({ name: 'id', type: 'string' })
   findOne(@Param('id') id: string) {
@@ -119,6 +127,7 @@ async getUpcomingBirthdays(
   }
 
   @Get('by-user/:userId')
+  @CacheTTL(600) // 10 minutes cache for user lookup
   @ApiOperation({ summary: 'Get employee by user ID' })
   @ApiParam({ name: 'userId', type: 'string' })
   async findByUserId(@Param('userId') userId: string) {

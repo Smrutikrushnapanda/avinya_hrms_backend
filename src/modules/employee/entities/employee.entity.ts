@@ -34,7 +34,7 @@ export class Employee {
   branchId: string | null;
 
   @Column({ name: 'reporting_to', nullable: true })
-  reportingTo: string;
+  reportingTo: string | null;
 
   @Column({ name: 'employee_code', length: 20, unique: true })
   employeeCode: string;

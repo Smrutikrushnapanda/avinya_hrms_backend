@@ -1737,32 +1737,9 @@ async getAttendanceReport(
   }
 
   async listBranches(organizationId: string): Promise<Branch[]> {
-    const branches = await this.branchRepo.find({
+    return this.branchRepo.find({
       where: { organizationId },
-      order: { updatedAt: 'DESC', createdAt: 'DESC' },
-    });
-    const deduped = new Map<string, Branch>();
-    for (const branch of branches) {
-      const key = this.canonicalBranchName(branch.name);
-      const existing = deduped.get(key);
-      if (!existing) {
-        deduped.set(key, branch);
-        continue;
-      }
-      const existingUpdated = existing.updatedAt
-        ? new Date(existing.updatedAt).getTime()
-        : 0;
-      const incomingUpdated = branch.updatedAt
-        ? new Date(branch.updatedAt).getTime()
-        : 0;
-      if (incomingUpdated >= existingUpdated) {
-        deduped.set(key, branch);
-      }
-    }
-    return Array.from(deduped.values()).sort((a, b) => {
-      const aUpdated = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const bUpdated = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return bUpdated - aUpdated;
+      order: { createdAt: 'DESC' },
     });
   }
 
@@ -1771,6 +1748,8 @@ async getAttendanceReport(
     if (!branch) {
       throw new NotFoundException(`Branch with ID ${id} not found`);
     }
+    
+    // Only validate name if it's being changed
     if (dto.name !== undefined) {
       const normalizedName = this.normalizeBranchName(dto.name);
       if (!normalizedName) {
@@ -1779,7 +1758,7 @@ async getAttendanceReport(
       const targetCanonicalName = this.canonicalBranchName(normalizedName);
       const currentCanonicalName = this.canonicalBranchName(branch.name);
 
-      // Allow timing/rule updates even when legacy duplicate names exist, as long as name is unchanged.
+      // Only check for duplicates if the name is actually changing
       if (targetCanonicalName !== currentCanonicalName) {
         const existingBranches = await this.branchRepo.find({
           where: { organizationId: branch.organizationId },
@@ -1796,6 +1775,7 @@ async getAttendanceReport(
       }
       dto.name = normalizedName;
     }
+    
     Object.assign(branch, dto);
     return this.branchRepo.save(branch);
   }

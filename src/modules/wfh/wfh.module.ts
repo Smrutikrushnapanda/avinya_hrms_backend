@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WfhController } from './wfh.controller';
 import { WfhService } from './wfh.service';
@@ -24,10 +24,10 @@ import { Organization } from '../auth-core/entities/organization.entity';
       Organization,
     ]),
     MessageModule,
-    AuthCoreModule,
+    forwardRef(() => AuthCoreModule),
   ],
   controllers: [WfhController],
   providers: [WfhService],
-  exports: [WfhService],
+  exports: [WfhService, TypeOrmModule],
 })
 export class WfhModule {}

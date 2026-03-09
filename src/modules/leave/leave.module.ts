@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeaveController } from './leave.controller';
 import { LeaveService } from './leave.service';
@@ -31,10 +31,10 @@ import {
       Holiday,
     ]),
     MessageModule,
-    AuthCoreModule,
+    forwardRef(() => AuthCoreModule),
   ],
   controllers: [LeaveController],
   providers: [LeaveService],
-  exports: [LeaveService],
+  exports: [LeaveService, TypeOrmModule],
 })
 export class LeaveModule {}

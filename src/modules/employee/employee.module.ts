@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CacheModule } from '@nestjs/cache-manager';
 import { Employee } from './entities/employee.entity';
+import { EmployeeProfile } from './entities/employee-profile.entity';
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
 import { EmployeeService } from './employee.service';
@@ -18,11 +20,20 @@ import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
 import { Branch } from '../attendance/entities/branch.entity';
 import { StorageService } from '../attendance/storage.service';
+import { ResignationRequest } from '../resignation/entities/resignation-request.entity';
+import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.entity';
+import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
+import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 
 @Module({
   imports: [
+    CacheModule.register({
+      ttl: 300, // 5 minutes default TTL
+      max: 1000, // maximum number of items in cache
+    }),
     TypeOrmModule.forFeature([
       Employee,
+      EmployeeProfile,
       Department,
       Designation,
       Attendance,
@@ -30,6 +41,10 @@ import { StorageService } from '../attendance/storage.service';
       UserRole,
       Role,
       Branch,
+      ResignationRequest,
+      WorkflowAssignment,
+      Timesheet,
+      Timeslip,
     ]),
     AuthCoreModule,
     LeaveModule,
