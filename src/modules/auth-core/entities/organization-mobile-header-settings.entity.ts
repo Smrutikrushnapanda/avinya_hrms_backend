@@ -26,16 +26,16 @@ export class OrganizationMobileHeaderSettings {
   organization: Organization;
 
   @Column({ name: 'background_color', type: 'varchar', length: 20, nullable: true })
-  backgroundColor?: string;
+  backgroundColor?: string | null;
 
   @Column({ name: 'media_url', type: 'text', nullable: true })
-  mediaUrl?: string;
+  mediaUrl?: string | null;
 
   @Column({ name: 'media_start_date', type: 'date', nullable: true })
-  mediaStartDate?: string;
+  mediaStartDate?: string | null;
 
   @Column({ name: 'media_end_date', type: 'date', nullable: true })
-  mediaEndDate?: string;
+  mediaEndDate?: string | null;
 
   @CreateDateColumn({ name: 'created_on', type: 'timestamptz' })
   createdOn: Date;

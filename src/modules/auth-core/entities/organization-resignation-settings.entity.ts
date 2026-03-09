@@ -26,7 +26,7 @@ export class OrganizationResignationSettings {
   organization: Organization;
 
   @Column({ name: 'policy', type: 'text', nullable: true })
-  policy?: string;
+  policy?: string | null;
 
   @Column({ name: 'notice_period_days', type: 'int', default: 30 })
   noticePeriodDays: number;

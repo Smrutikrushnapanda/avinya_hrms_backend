@@ -28,6 +28,12 @@ export class OrganizationService {
     private readonly userRoleRepo: Repository<UserRole>,
   ) {}
 
+  private normalizeNullableText(value?: string | null): string | null {
+    if (value === undefined) return null;
+    const normalized = String(value).trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
   async create(data: CreateOrganizationDto, createdBy: string) {
     const org = await this.orgRepo.save(
       this.orgRepo.create({ ...data, createdBy, updatedBy: createdBy }),
@@ -35,17 +41,17 @@ export class OrganizationService {
 
     const mobileHeaderSettings = new OrganizationMobileHeaderSettings();
     mobileHeaderSettings.organizationId = org.id;
-    mobileHeaderSettings.backgroundColor = data.homeHeaderBackgroundColor || undefined;
-    mobileHeaderSettings.mediaUrl = data.homeHeaderMediaUrl || undefined;
-    mobileHeaderSettings.mediaStartDate = data.homeHeaderMediaStartDate || undefined;
-    mobileHeaderSettings.mediaEndDate = data.homeHeaderMediaEndDate || undefined;
+    mobileHeaderSettings.backgroundColor = this.normalizeNullableText(data.homeHeaderBackgroundColor);
+    mobileHeaderSettings.mediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
+    mobileHeaderSettings.mediaStartDate = this.normalizeNullableText(data.homeHeaderMediaStartDate);
+    mobileHeaderSettings.mediaEndDate = this.normalizeNullableText(data.homeHeaderMediaEndDate);
     await this.mobileHeaderSettingsRepo.save(
       mobileHeaderSettings,
     );
 
     const resignationSettings = new OrganizationResignationSettings();
     resignationSettings.organizationId = org.id;
-    resignationSettings.policy = data.resignationPolicy || undefined;
+    resignationSettings.policy = this.normalizeNullableText(data.resignationPolicy);
     resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays ?? 30) || 30;
     resignationSettings.allowEarlyRelievingByAdmin = Boolean(data.allowEarlyRelievingByAdmin);
     await this.resignationSettingsRepo.save(
@@ -127,19 +133,25 @@ export class OrganizationService {
     if (data.address !== undefined) org.address = data.address;
     if (data.logoUrl !== undefined) org.logoUrl = data.logoUrl;
     if (data.homeHeaderBackgroundColor !== undefined) {
-      mobileHeaderSettings.backgroundColor = data.homeHeaderBackgroundColor || undefined;
+      mobileHeaderSettings.backgroundColor = this.normalizeNullableText(
+        data.homeHeaderBackgroundColor,
+      );
     }
     if (data.homeHeaderMediaUrl !== undefined) {
-      mobileHeaderSettings.mediaUrl = data.homeHeaderMediaUrl || undefined;
+      mobileHeaderSettings.mediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
     }
     if (data.homeHeaderMediaStartDate !== undefined) {
-      mobileHeaderSettings.mediaStartDate = data.homeHeaderMediaStartDate || undefined;
+      mobileHeaderSettings.mediaStartDate = this.normalizeNullableText(
+        data.homeHeaderMediaStartDate,
+      );
     }
     if (data.homeHeaderMediaEndDate !== undefined) {
-      mobileHeaderSettings.mediaEndDate = data.homeHeaderMediaEndDate || undefined;
+      mobileHeaderSettings.mediaEndDate = this.normalizeNullableText(
+        data.homeHeaderMediaEndDate,
+      );
     }
     if (data.resignationPolicy !== undefined) {
-      resignationSettings.policy = data.resignationPolicy || undefined;
+      resignationSettings.policy = this.normalizeNullableText(data.resignationPolicy);
     }
     if (data.resignationNoticePeriodDays !== undefined) {
       resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
