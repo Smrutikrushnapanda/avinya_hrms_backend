@@ -405,6 +405,7 @@ export class EmployeeService {
       const todayStr = today.toISOString().split('T')[0];
       const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
       const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+      const thisMonthPayPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
       // Single consolidated query — uses only 1 connection instead of 9
       const [row] = await this.entityManager.query(`
@@ -434,14 +435,23 @@ export class EmployeeService {
             FROM leave_requests lr
             JOIN users u ON u.user_id = lr.user_id
             WHERE u.organization_id = $1
+          ),
+          payroll_stats AS (
+            SELECT
+              COALESCE(SUM(net_pay), 0) AS payroll_paid
+            FROM payroll_records
+            WHERE organization_id = $1
+              AND pay_period = $5
+              AND status IN ('paid', 'PAID')
           )
         SELECT
           e.total_employees, e.active_employees, e.new_this_month, e.new_last_month,
           e.dept_count, e.desig_count,
           a.present_today, a.half_day_today,
-          l.on_leave_today, l.pending_leaves
-        FROM emp_stats e, attendance_stats a, leave_stats l
-      `, [organizationId, thisMonthStart, lastMonthStart, todayStr]);
+          l.on_leave_today, l.pending_leaves,
+          p.payroll_paid
+        FROM emp_stats e, attendance_stats a, leave_stats l, payroll_stats p
+      `, [organizationId, thisMonthStart, lastMonthStart, todayStr, thisMonthPayPeriod]);
 
       const totalEmployees = parseInt(row.total_employees) || 0;
       const activeEmployees = parseInt(row.active_employees) || 0;
@@ -453,6 +463,7 @@ export class EmployeeService {
       const pendingLeaveRequests = parseInt(row.pending_leaves) || 0;
       const deptCount = parseInt(row.dept_count) || 0;
       const desigCount = parseInt(row.desig_count) || 0;
+      const payrollDue = parseFloat(row.payroll_paid) || 0;
 
       const absent = Math.max(0, activeEmployees - presentToday - halfDay - onLeaveToday);
       const newJoinersChange = newJoinersLastMonth > 0
@@ -465,6 +476,7 @@ export class EmployeeService {
         presentToday: { value: presentToday, change: 0 },
         onLeaveToday: { value: onLeaveToday, change: 0 },
         pendingLeaveRequests: { value: pendingLeaveRequests, change: 0 },
+        payrollDue: { value: payrollDue, change: 0 },
         newJoinersThisMonth: { value: newJoinersThisMonth, change: newJoinersChange },
         departments: { value: deptCount, change: 0 },
         designations: { value: desigCount, change: 0 },

@@ -1,20 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as sgMail from '@sendgrid/mail';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private isConfigured = false;
+  private readonly transporter: nodemailer.Transporter;
+  private readonly isConfigured: boolean;
 
   constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get<string>('SENDGRID_API_KEY');
-    if (apiKey && !apiKey.includes('xxxxxxxxx')) {
-      sgMail.setApiKey(apiKey);
-      this.isConfigured = true;
-    } else {
-      this.logger.warn('SendGrid API key not configured. Email sending disabled.');
-    }
+    const host = this.configService.get<string>('BREVO_SMTP_HOST', 'smtp-relay.brevo.com');
+    const port = Number(this.configService.get<number | string>('BREVO_SMTP_PORT', 587));
+    const user = this.configService.get<string>('BREVO_SMTP_USER');
+    const pass = this.configService.get<string>('BREVO_SMTP_PASSWORD');
+    this.isConfigured = Boolean(host && port && user && pass);
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: user && pass ? { user, pass } : undefined,
+    });
+    if (!this.isConfigured) this.logger.warn('Brevo SMTP not configured. Email sending disabled.');
   }
 
   async sendPayslipEmail(params: {
@@ -26,15 +32,16 @@ export class MailService {
     companyName?: string;
   }): Promise<boolean> {
     if (!this.isConfigured) {
-      this.logger.warn('Email not sent - SendGrid not configured');
+      this.logger.warn('Email not sent - Brevo SMTP not configured');
       return false;
     }
 
-    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 'noreply@yourdomain.com';
+    const fromName = this.configService.get<string>('MAIL_FROM_NAME', 'HRMS Notifications');
+    const fromEmail = this.configService.get<string>('MAIL_FROM_EMAIL') || this.configService.get<string>('BREVO_SMTP_USER') || 'noreply@yourdomain.com';
 
-    const msg = {
+    const msg: nodemailer.SendMailOptions = {
       to: params.to,
-      from: fromEmail,
+      from: `"${fromName}" <${fromEmail}>`,
       subject: `Salary Slip - ${params.payPeriod} | ${params.companyName || 'Your Company'}`,
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -63,16 +70,15 @@ export class MailService {
       `,
       attachments: [
         {
-          content: params.pdfBuffer.toString('base64'),
+          content: params.pdfBuffer,
           filename: `salary-slip-${params.payPeriod}.pdf`,
-          type: 'application/pdf',
-          disposition: 'attachment' as const,
+          contentType: 'application/pdf',
         },
       ],
     };
 
     try {
-      await sgMail.send(msg);
+      await this.transporter.sendMail(msg);
       this.logger.log(`Payslip email sent to ${params.to}`);
       return true;
     } catch (error) {

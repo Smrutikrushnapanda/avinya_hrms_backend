@@ -13,6 +13,62 @@ import * as puppeteer from 'puppeteer';
 @Injectable()
 export class PayrollService {
   private readonly logger = new Logger(PayrollService.name);
+  private readonly defaultFontStack = `'Segoe UI', 'Helvetica Neue', Arial, sans-serif`;
+
+  private toWords(num: number): string {
+    const n = Math.floor(Math.abs(Number(num || 0)));
+    if (n === 0) return 'Zero';
+
+    const ones = [
+      '',
+      'One',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+      'Six',
+      'Seven',
+      'Eight',
+      'Nine',
+      'Ten',
+      'Eleven',
+      'Twelve',
+      'Thirteen',
+      'Fourteen',
+      'Fifteen',
+      'Sixteen',
+      'Seventeen',
+      'Eighteen',
+      'Nineteen',
+    ];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    const twoDigit = (x: number) => (x < 20 ? ones[x] : `${tens[Math.floor(x / 10)]}${x % 10 ? ` ${ones[x % 10]}` : ''}`);
+    const threeDigit = (x: number) => {
+      const h = Math.floor(x / 100);
+      const r = x % 100;
+      const hPart = h ? `${ones[h]} Hundred` : '';
+      const rPart = r ? twoDigit(r) : '';
+      return [hPart, rPart].filter(Boolean).join(' ');
+    };
+
+    let x = n;
+    const parts: string[] = [];
+    const crore = Math.floor(x / 10000000);
+    x %= 10000000;
+    const lakh = Math.floor(x / 100000);
+    x %= 100000;
+    const thousand = Math.floor(x / 1000);
+    x %= 1000;
+    const rest = x;
+
+    if (crore) parts.push(`${threeDigit(crore)} Crore`);
+    if (lakh) parts.push(`${threeDigit(lakh)} Lakh`);
+    if (thousand) parts.push(`${threeDigit(thousand)} Thousand`);
+    if (rest) parts.push(threeDigit(rest));
+
+    return parts.join(' ').trim();
+  }
 
   constructor(
     @InjectRepository(PayrollRecord)
@@ -169,6 +225,10 @@ export class PayrollService {
       settings.address = settings.address || organization.address;
     }
 
+    if (!Array.isArray(settings.customFields)) {
+      settings.customFields = [];
+    }
+
     return settings;
   }
 
@@ -179,6 +239,14 @@ export class PayrollService {
     } else {
       Object.assign(settings, dto);
     }
+    settings.customFields = Array.isArray(dto.customFields)
+      ? dto.customFields
+          .filter((field) => field?.label?.trim())
+          .map((field) => ({
+            label: field.label.trim(),
+            value: field.value?.trim() || '',
+          }))
+      : settings.customFields || [];
     return this.settingsRepo.save(settings);
   }
 
@@ -192,306 +260,281 @@ export class PayrollService {
 
     const employee = await this.employeeRepo.findOne({
       where: { id: record.employeeId },
-      relations: ['department'],
+      relations: ['department', 'designation'],
     });
     if (!employee) throw new NotFoundException('Employee not found');
-    const color = settings.primaryColor || '#1e40af';
+    const color = settings.primaryColor || '#2f3640';
     const periodStart = new Date(record.periodStart as any);
     const periodEnd = new Date(record.periodEnd as any);
     const fmt = (n: number) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmtDate = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const totalWorkingDays = Math.max(1, Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1);
+    const actualPayableDays = totalWorkingDays;
+    const lossOfPayDays = 0;
+    const payableDays = actualPayableDays - lossOfPayDays;
+    const netWords = `${this.toWords(Number(record.netPay))} only`;
+    const headerPeriod = periodStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
 
     const html = `
       <html>
         <head>
           <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+            @page { size: A4; margin: 10mm; }
             * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #1e293b; padding: 0; margin: 0; background: #ffffff; -webkit-print-color-adjust: exact; }
-
-            .page { padding: 40px 48px; }
-
-            /* Header banner */
-            .header-banner {
-              background: linear-gradient(135deg, ${color}, ${color}dd);
-              border-radius: 16px;
-              padding: 28px 32px;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              color: #ffffff;
-              margin-bottom: 28px;
-            }
-            .header-banner .logo-area { display: flex; align-items: center; gap: 16px; }
-            .header-banner .logo-area img { height: 56px; object-fit: contain; border-radius: 8px; background: rgba(255,255,255,0.15); padding: 4px; }
-            .header-banner .company-name { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
-            .header-banner .company-address { font-size: 11px; opacity: 0.85; margin-top: 2px; max-width: 280px; line-height: 1.4; }
-            .header-right { text-align: right; }
-            .header-right .slip-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-            .header-right .slip-period { font-size: 13px; opacity: 0.85; margin-top: 4px; }
-            .badge {
-              display: inline-block;
-              font-size: 10px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              padding: 4px 14px;
-              border-radius: 999px;
-              background: rgba(255,255,255,0.2);
-              border: 1px solid rgba(255,255,255,0.35);
-              margin-top: 8px;
-            }
-
-            /* Employee info */
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 16px;
-              margin-bottom: 28px;
-            }
-            .info-card {
-              border: 1px solid #e2e8f0;
-              border-radius: 12px;
-              padding: 18px 20px;
-              background: #f8fafc;
-            }
-            .info-card-title {
-              font-size: 10px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 1.2px;
-              color: ${color};
-              margin-bottom: 12px;
-              padding-bottom: 8px;
-              border-bottom: 2px solid ${color}20;
-            }
-            .info-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
-            .info-label { color: #64748b; font-weight: 500; }
-            .info-value { font-weight: 600; color: #1e293b; }
-
-            /* Earnings & Deductions */
-            .section-title {
-              font-size: 10px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 1.2px;
-              color: ${color};
-              margin-bottom: 12px;
-            }
-            .table-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 20px;
-              margin-bottom: 24px;
-            }
-            .table-card {
-              border: 1px solid #e2e8f0;
-              border-radius: 12px;
-              overflow: hidden;
-            }
-            .table-card table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            .table-card th {
-              background: #f1f5f9;
-              padding: 10px 16px;
-              text-align: left;
-              font-weight: 700;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #475569;
+            body { font-family: ${this.defaultFontStack}; color: #0f172a; background: #ffffff; font-size: 11px; -webkit-print-color-adjust: exact; }
+            .page { min-height: 276mm; border: 1px solid #d7dde8; border-radius: 10px; overflow: hidden; }
+            .top-accent { height: 5px; background: ${color}; }
+            .header {
+              padding: 16px 18px;
+              background: #ffffff;
               border-bottom: 1px solid #e2e8f0;
-            }
-            .table-card th:last-child { text-align: right; }
-            .table-card td { padding: 10px 16px; border-bottom: 1px solid #f1f5f9; }
-            .table-card td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-            .table-card tr:last-child td { border-bottom: none; }
-            .table-card .total-row { background: #f8fafc; }
-            .table-card .total-row td { font-weight: 700; font-size: 13px; border-top: 2px solid #e2e8f0; }
-            .earnings-total td { color: #16a34a; }
-            .deductions-total td { color: #dc2626; }
-
-            /* Net Pay banner */
-            .net-pay-banner {
-              background: linear-gradient(135deg, ${color}08, ${color}15);
-              border: 2px solid ${color}30;
-              border-radius: 14px;
-              padding: 22px 28px;
               display: flex;
               justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+            }
+            .brand { display: flex; align-items: center; gap: 10px; }
+            .logo-box {
+              width: 54px;
+              height: 54px;
+              border-radius: 12px;
+              border: 1px solid ${color}55;
+              background: #ffffff;
+              display: flex;
               align-items: center;
-              margin-bottom: 24px;
-            }
-            .net-pay-label {
-              font-size: 11px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 1.2px;
-              color: ${color};
-            }
-            .net-pay-sublabel { font-size: 11px; color: #64748b; margin-top: 2px; }
-            .net-pay-amount {
-              font-size: 32px;
+              justify-content: center;
+              overflow: hidden;
               font-weight: 800;
               color: ${color};
-              letter-spacing: -1px;
-              font-variant-numeric: tabular-nums;
+              box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
             }
-            .net-pay-currency { font-size: 18px; font-weight: 600; }
-
-            /* Summary cards */
-            .summary-strip {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 12px;
-              margin-bottom: 28px;
-            }
-            .summary-item {
-              text-align: center;
-              padding: 14px;
-              border-radius: 10px;
-              border: 1px solid #e2e8f0;
-            }
-            .summary-item.earnings { background: #f0fdf4; border-color: #bbf7d0; }
-            .summary-item.deductions { background: #fef2f2; border-color: #fecaca; }
-            .summary-item.net { background: ${color}08; border-color: ${color}30; }
-            .summary-item-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #64748b; }
-            .summary-item-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
-            .summary-item.earnings .summary-item-value { color: #16a34a; }
-            .summary-item.deductions .summary-item-value { color: #dc2626; }
-            .summary-item.net .summary-item-value { color: ${color}; }
-
-            /* Footer */
-            .footer {
-              border-top: 1px solid #e2e8f0;
-              padding-top: 16px;
+            .logo-box img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+            .company-name { font-size: 15px; font-weight: 800; color: #0f172a; }
+            .company-address { margin-top: 2px; color: #64748b; font-size: 10px; max-width: 380px; line-height: 1.4; }
+            .slip-title { text-align: right; }
+            .slip-title .label { font-size: 10px; color: ${color}; letter-spacing: 0.8px; font-weight: 800; text-transform: uppercase; }
+            .slip-title .value { font-size: 20px; font-weight: 800; margin-top: 2px; color: #0f172a; }
+            .slip-title .period { margin-top: 2px; font-size: 11px; color: #64748b; }
+            .content { padding: 14px 18px 12px; }
+            .employee-row {
               display: flex;
               justify-content: space-between;
-              align-items: flex-end;
+              align-items: center;
+              margin-bottom: 10px;
             }
-            .footer-note { font-size: 10px; color: #94a3b8; line-height: 1.5; max-width: 360px; }
-            .footer-meta { font-size: 10px; color: #94a3b8; text-align: right; }
-            .footer-disclaimer {
+            .employee-name { font-size: 17px; font-weight: 700; }
+            .status-badge {
               font-size: 9px;
-              color: #94a3b8;
-              text-align: center;
-              margin-top: 12px;
-              font-style: italic;
+              font-weight: 700;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              padding: 4px 8px;
+              border-radius: 999px;
+              border: 1px solid ${color}33;
+              color: ${color};
+              background: ${color}12;
+            }
+            .meta-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              overflow: hidden;
+              margin-bottom: 10px;
+            }
+            .meta-item {
+              padding: 8px 10px;
+              border-right: 1px solid #e2e8f0;
+              border-bottom: 1px solid #e2e8f0;
+              min-height: 48px;
+            }
+            .meta-item:nth-child(4n) { border-right: none; }
+            .meta-item:nth-last-child(-n + 4) { border-bottom: none; }
+            .meta-k { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; }
+            .meta-v { margin-top: 3px; font-size: 11px; font-weight: 600; color: #0f172a; }
+            .section-title {
+              margin-top: 8px;
+              margin-bottom: 6px;
+              font-size: 10px;
+              font-weight: 800;
+              letter-spacing: 0.7px;
+              color: ${color};
+            }
+            .days-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 8px;
+              margin-bottom: 10px;
+            }
+            .day-card {
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              padding: 8px 9px;
+              background: #f8fafc;
+            }
+            .day-k { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; }
+            .day-v { margin-top: 4px; font-size: 13px; font-weight: 700; color: #0f172a; }
+            .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .table-wrap { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+            table.amounts { width: 100%; border-collapse: collapse; font-size: 11px; }
+            table.amounts thead th {
+              text-align: left;
+              background: ${color}10;
+              border-bottom: 1px solid #e2e8f0;
+              padding: 7px 8px;
+              font-size: 9px;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+              color: ${color};
+            }
+            table.amounts thead th:last-child, table.amounts tbody td:last-child { text-align: right; }
+            table.amounts tbody td {
+              padding: 7px 8px;
+              border-bottom: 1px solid #eef2f7;
+            }
+            table.amounts tbody tr:last-child td { border-bottom: none; }
+            table.amounts tbody tr.total td {
+              font-weight: 800;
+              background: #f8fafc;
+              border-top: 1px solid #dbe5f0;
+            }
+            .summary {
+              margin-top: 10px;
+              border: 1px solid #dbe5f0;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            .summary-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 9px 10px;
+              border-bottom: 1px solid #e7edf5;
+            }
+            .summary-row:last-child { border-bottom: none; }
+            .summary-row.net { background: ${color}10; font-size: 13px; font-weight: 800; }
+            .summary-row.words { font-size: 10px; color: #334155; align-items: flex-start; gap: 16px; }
+            .summary-row.words span:last-child { text-align: right; font-weight: 700; color: #0f172a; }
+            .footer-note {
+              margin-top: 8px;
+              font-size: 9.5px;
+              color: #64748b;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
             }
           </style>
         </head>
         <body>
           <div class="page">
-            <!-- Header Banner -->
-            <div class="header-banner">
-              <div class="logo-area">
-                ${settings.logoUrl ? `<img src="${settings.logoUrl}" alt="logo"/>` : ''}
+            <div class="top-accent"></div>
+            <div class="header">
+              <div class="brand">
+                <div class="logo-box">
+                  ${settings.logoUrl
+                    ? `<img src="${settings.logoUrl}" alt="logo" />`
+                    : (settings.companyName || 'C').trim().charAt(0).toUpperCase()}
+                </div>
                 <div>
                   <div class="company-name">${settings.companyName || 'Company'}</div>
-                  ${settings.address ? `<div class="company-address">${settings.address}</div>` : ''}
+                  <div class="company-address">${settings.address || '-'}</div>
                 </div>
               </div>
-              <div class="header-right">
-                <div class="slip-title">Salary Slip</div>
-                <div class="slip-period">${fmtDate(periodStart)} - ${fmtDate(periodEnd)}</div>
-                <div class="badge">${record.status.toUpperCase()}</div>
+              <div class="slip-title">
+                <div class="label">PROVISIONAL PAYSLIP</div>
+                <div class="value">${headerPeriod}</div>
+                <div class="period">${fmtDate(periodStart)} - ${fmtDate(periodEnd)}</div>
               </div>
             </div>
 
-            <!-- Employee & Pay Info -->
-            <div class="info-grid">
-              <div class="info-card">
-                <div class="info-card-title">Employee Details</div>
-                <div class="info-row"><span class="info-label">Name</span><span class="info-value">${employee.firstName} ${employee.lastName || ''}</span></div>
-                <div class="info-row"><span class="info-label">Employee Code</span><span class="info-value">${employee.employeeCode || '-'}</span></div>
-                <div class="info-row"><span class="info-label">Department</span><span class="info-value">${employee.department?.name || '-'}</span></div>
-                <div class="info-row"><span class="info-label">Email</span><span class="info-value">${employee.workEmail || '-'}</span></div>
+            <div class="content">
+              <div class="employee-row">
+                <div class="employee-name">${`${employee.firstName} ${employee.lastName || ''}`.trim()}</div>
+                <div class="status-badge">${record.status}</div>
               </div>
-              <div class="info-card">
-                <div class="info-card-title">Pay Information</div>
-                <div class="info-row"><span class="info-label">Pay Period</span><span class="info-value">${record.payPeriod}</span></div>
-                <div class="info-row"><span class="info-label">Period Start</span><span class="info-value">${fmtDate(periodStart)}</span></div>
-                <div class="info-row"><span class="info-label">Period End</span><span class="info-value">${fmtDate(periodEnd)}</span></div>
-                <div class="info-row"><span class="info-label">Generated On</span><span class="info-value">${fmtDate(new Date())}</span></div>
-              </div>
-            </div>
 
-            <!-- Earnings & Deductions Tables -->
-            <div class="table-grid">
-              <div class="table-card">
-                <table>
-                  <thead><tr><th>Earnings</th><th>Amount (&#8377;)</th></tr></thead>
-                  <tbody>
-                    <tr><td>Basic Salary</td><td>${fmt(record.basic)}</td></tr>
-                    <tr><td>House Rent Allowance</td><td>${fmt(record.hra)}</td></tr>
-                    <tr><td>Conveyance Allowance</td><td>${fmt(record.conveyance)}</td></tr>
-                    <tr><td>Other Allowances</td><td>${fmt(record.otherAllowances)}</td></tr>
-                    <tr class="total-row earnings-total"><td>Total Earnings</td><td>${fmt(record.totalEarnings)}</td></tr>
-                  </tbody>
-                </table>
+              <div class="meta-grid">
+                <div class="meta-item"><div class="meta-k">Employee Number</div><div class="meta-v">${employee.employeeCode || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Date Joined</div><div class="meta-v">${employee.dateOfJoining ? fmtDate(new Date(employee.dateOfJoining as any)) : '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Department</div><div class="meta-v">${employee.department?.name || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Designation</div><div class="meta-v">${employee.designation?.name || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">PAN</div><div class="meta-v">${settings.panNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">UAN / PF No</div><div class="meta-v">${settings.pfRegistrationNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Work Email</div><div class="meta-v">${employee.workEmail || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Pay Period</div><div class="meta-v">${record.payPeriod}</div></div>
               </div>
-              <div class="table-card">
-                <table>
-                  <thead><tr><th>Deductions</th><th>Amount (&#8377;)</th></tr></thead>
-                  <tbody>
-                    <tr><td>Provident Fund (PF)</td><td>${fmt(record.pf)}</td></tr>
-                    <tr><td>Tax Deducted at Source (TDS)</td><td>${fmt(record.tds)}</td></tr>
-                    <tr><td></td><td></td></tr>
-                    <tr><td></td><td></td></tr>
-                    <tr class="total-row deductions-total"><td>Total Deductions</td><td>${fmt(record.totalDeductions)}</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
 
-            <!-- Summary Strip -->
-            <div class="summary-strip">
-              <div class="summary-item earnings">
-                <div class="summary-item-label">Total Earnings</div>
-                <div class="summary-item-value">&#8377; ${fmt(record.totalEarnings)}</div>
+              <div class="section-title">SALARY DETAILS</div>
+              <div class="days-grid">
+                <div class="day-card"><div class="day-k">Actual Payable Days</div><div class="day-v">${actualPayableDays.toFixed(1)}</div></div>
+                <div class="day-card"><div class="day-k">Total Working Days</div><div class="day-v">${totalWorkingDays.toFixed(1)}</div></div>
+                <div class="day-card"><div class="day-k">Loss Of Pay Days</div><div class="day-v">${lossOfPayDays.toFixed(1)}</div></div>
+                <div class="day-card"><div class="day-k">Days Payable</div><div class="day-v">${payableDays}</div></div>
               </div>
-              <div class="summary-item deductions">
-                <div class="summary-item-label">Total Deductions</div>
-                <div class="summary-item-value">&#8377; ${fmt(record.totalDeductions)}</div>
-              </div>
-              <div class="summary-item net">
-                <div class="summary-item-label">Net Pay</div>
-                <div class="summary-item-value">&#8377; ${fmt(record.netPay)}</div>
-              </div>
-            </div>
 
-            <!-- Net Pay Banner -->
-            <div class="net-pay-banner">
-              <div>
-                <div class="net-pay-label">Net Payable Amount</div>
-                <div class="net-pay-sublabel">Total Earnings minus Total Deductions</div>
-              </div>
-              <div class="net-pay-amount"><span class="net-pay-currency">&#8377;</span> ${fmt(record.netPay)}</div>
-            </div>
+              <div class="split">
+                <div class="table-wrap">
+                  <table class="amounts">
+                    <thead><tr><th>Earnings</th><th>Amount (INR)</th></tr></thead>
+                    <tbody>
+                      <tr><td>Basic</td><td>${fmt(record.basic)}</td></tr>
+                      <tr><td>House Rent Allowance (HRA)</td><td>${fmt(record.hra)}</td></tr>
+                      <tr><td>Conveyance Allowance</td><td>${fmt(record.conveyance)}</td></tr>
+                      <tr><td>Other Allowances</td><td>${fmt(record.otherAllowances)}</td></tr>
+                      <tr class="total"><td>Total Earnings (A)</td><td>${fmt(record.totalEarnings)}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
 
-            <!-- Footer -->
-            <div class="footer">
+                <div class="table-wrap">
+                  <table class="amounts">
+                    <thead><tr><th>Deductions</th><th>Amount (INR)</th></tr></thead>
+                    <tbody>
+                      <tr><td>Provident Fund (PF)</td><td>${fmt(record.pf)}</td></tr>
+                      <tr><td>Tax Deducted at Source (TDS)</td><td>${fmt(record.tds)}</td></tr>
+                      <tr><td>-</td><td>-</td></tr>
+                      <tr><td>-</td><td>-</td></tr>
+                      <tr class="total"><td>Total Deductions (B)</td><td>${fmt(record.totalDeductions)}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="summary">
+                <div class="summary-row net">
+                  <span>Net Salary Payable (A - B)</span>
+                  <span>${fmt(record.netPay)}</span>
+                </div>
+                <div class="summary-row words">
+                  <span>Net Salary in words</span>
+                  <span>${netWords}</span>
+                </div>
+              </div>
+
               <div class="footer-note">
-                ${settings.footerNote || 'This is a computer-generated document and does not require a signature.'}
-              </div>
-              <div class="footer-meta">
-                <div>${settings.companyName || 'Company'}</div>
-                <div>Generated: ${fmtDate(new Date())}</div>
+                <span>Note: All amounts displayed in this payslip are in INR.</span>
+                <span>${settings.footerNote || 'System-generated payslip.'}</span>
               </div>
             </div>
-            <div class="footer-disclaimer">This is a system-generated salary slip. For any discrepancies, please contact your HR department.</div>
           </div>
         </body>
       </html>
     `;
-
-    const browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-    return Buffer.from(pdf);
+    let browser: puppeteer.Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      return Buffer.from(pdf);
+    } catch (error) {
+      this.logger.error(`Failed to generate salary slip PDF for payroll ${id}`, error);
+      throw error;
+    } finally {
+      if (browser) await browser.close();
+    }
   }
 
   async sendPayslip(id: string, method: 'email' | 'in_app' | 'both' = 'both') {
@@ -508,20 +551,26 @@ export class PayrollService {
       Number(n).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
     let emailSent = false;
+    let inAppNotification = false;
 
     // Send email
     if (method === 'email' || method === 'both') {
       const email = employee.workEmail || employee.personalEmail;
       if (email) {
-        const pdfBuffer = await this.generateSlipPdf(id);
-        emailSent = await this.mailService.sendPayslipEmail({
-          to: email,
-          employeeName: `${employee.firstName} ${employee.lastName || ''}`.trim(),
-          payPeriod: record.payPeriod,
-          netPay: fmt(record.netPay),
-          pdfBuffer,
-          companyName: settings.companyName,
-        });
+        try {
+          const pdfBuffer = await this.generateSlipPdf(id);
+          emailSent = await this.mailService.sendPayslipEmail({
+            to: email,
+            employeeName: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+            payPeriod: record.payPeriod,
+            netPay: fmt(record.netPay),
+            pdfBuffer,
+            companyName: settings.companyName,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to generate or send payslip email for payroll ${id}`, error);
+          emailSent = false;
+        }
       } else {
         this.logger.warn(`No email found for employee ${employee.id}`);
       }
@@ -529,40 +578,49 @@ export class PayrollService {
 
     // Create in-app notification
     if (method === 'in_app' || method === 'both') {
-      const notification = this.notificationRepo.create({
-        employeeId: employee.id,
-        payrollRecordId: record.id,
-        title: `Salary Slip - ${record.payPeriod}`,
-        message: `Your salary slip for ${record.payPeriod} is ready. Net pay: ${fmt(record.netPay)}`,
-        sentVia: method,
-        emailSent,
-      });
-      await this.notificationRepo.save(notification);
+      try {
+        const notification = this.notificationRepo.create({
+          employeeId: employee.id,
+          payrollRecordId: record.id,
+          title: `Salary Slip - ${record.payPeriod}`,
+          message: `Your salary slip for ${record.payPeriod} is ready. Net pay: ${fmt(record.netPay)}`,
+          sentVia: method,
+          emailSent,
+        });
+        await this.notificationRepo.save(notification);
+        inAppNotification = true;
+      } catch (error) {
+        this.logger.error(`Failed to create in-app payslip notification for payroll ${id}`, error);
+      }
     }
 
     // Update status to paid
-    record.status = 'paid';
-    await this.payrollRepo.save(record);
+    try {
+      record.status = 'paid';
+      await this.payrollRepo.save(record);
+    } catch (error) {
+      this.logger.error(`Failed to update payroll status to paid for payroll ${id}`, error);
+    }
 
     return {
       success: true,
       emailSent,
-      inAppNotification: method === 'in_app' || method === 'both',
-      message: this.buildResultMessage(method, emailSent),
+      inAppNotification,
+      message: this.buildResultMessage(method, emailSent, inAppNotification),
     };
   }
 
-  private buildResultMessage(method: string, emailSent: boolean): string {
+  private buildResultMessage(method: string, emailSent: boolean, inAppNotification: boolean): string {
     if (method === 'email') {
-      return emailSent ? 'Payslip sent via email' : 'Email sending failed - check SendGrid configuration';
+      return emailSent ? 'Payslip sent via email' : 'Email sending failed - check Brevo SMTP configuration';
     }
     if (method === 'in_app') {
-      return 'Payslip notification sent to employee app';
+      return inAppNotification ? 'Payslip notification sent to employee app' : 'Failed to send payslip notification in app';
     }
     // both
     const parts: string[] = [];
     parts.push(emailSent ? 'Email sent' : 'Email failed');
-    parts.push('In-app notification created');
+    parts.push(inAppNotification ? 'In-app notification created' : 'In-app notification failed');
     return parts.join('. ');
   }
 

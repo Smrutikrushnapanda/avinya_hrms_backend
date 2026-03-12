@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, IsNumber } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID, IsNumber, ValidateNested } from 'class-validator';
 import { PayrollStatus } from '../entities/payroll-record.entity';
 
 export class CreatePayrollRecordDto {
@@ -104,4 +105,43 @@ export class UpdatePayrollSettingsDto {
   @IsOptional()
   @IsString()
   footerNote?: string;
+
+  @IsOptional()
+  @IsString()
+  cinNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  panNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  tanNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  gstinNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  pfRegistrationNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  esiRegistrationNumber?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PayrollCustomFieldDto)
+  customFields?: PayrollCustomFieldDto[];
+}
+
+export class PayrollCustomFieldDto {
+  @IsString()
+  label: string;
+
+  @IsOptional()
+  @IsString()
+  value?: string;
 }
