@@ -112,8 +112,8 @@ export class ResignationService {
       employeeEmail,
       message: request.message,
       proposedLastWorkingDay: request.proposedLastWorkingDay,
-      resignationPolicy: organization.resignationSettings?.policy || undefined,
-      noticePeriodDays: organization.resignationSettings?.noticePeriodDays || 30,
+      resignationPolicy: organization.settings?.resignationPolicy || undefined,
+      noticePeriodDays: organization.settings?.resignationNoticePeriodDays || 30,
     });
 
     return this.getRequestById(request.id);
@@ -177,10 +177,10 @@ export class ResignationService {
     if (nextStatus === ResignationStatus.APPROVED) {
       const fallbackDate = new Date();
       fallbackDate.setDate(
-        fallbackDate.getDate() + (request.organization?.resignationSettings?.noticePeriodDays || 30),
+        fallbackDate.getDate() + (request.organization?.settings?.resignationNoticePeriodDays || 30),
       );
       const canAllowEarly = Boolean(
-        request.organization?.resignationSettings?.allowEarlyRelievingByAdmin,
+        request.organization?.settings?.allowEarlyRelievingByAdmin,
       );
       if (dto.allowEarlyRelieving && !canAllowEarly) {
         throw new BadRequestException(
@@ -213,7 +213,7 @@ export class ResignationService {
         reviewerName: reviewer
           ? [reviewer.firstName, reviewer.lastName].filter(Boolean).join(' ').trim() || reviewer.userName
           : undefined,
-        resignationPolicy: request.organization?.resignationSettings?.policy || undefined,
+        resignationPolicy: request.organization?.settings?.resignationPolicy || undefined,
       });
     }
 

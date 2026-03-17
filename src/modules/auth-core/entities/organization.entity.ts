@@ -9,8 +9,7 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 import { OrganizationFeature } from './organization-feature.entity';
-import { OrganizationMobileHeaderSettings } from './organization-mobile-header-settings.entity';
-import { OrganizationResignationSettings } from './organization-resignation-settings.entity';
+import { OrganizationSettings } from './organization-settings.entity';
 
 @Entity({ name: 'organizations' })
 export class Organization {
@@ -71,13 +70,8 @@ export class Organization {
   @OneToMany(() => OrganizationFeature, (of) => of.organization)
   organizationFeatures: OrganizationFeature[];
 
-  @OneToOne(() => OrganizationMobileHeaderSettings, (settings) => settings.organization, {
+  @OneToOne(() => OrganizationSettings, (settings) => settings.organization, {
     eager: true,
   })
-  mobileHeaderSettings?: OrganizationMobileHeaderSettings;
-
-  @OneToOne(() => OrganizationResignationSettings, (settings) => settings.organization, {
-    eager: true,
-  })
-  resignationSettings?: OrganizationResignationSettings;
+  settings?: OrganizationSettings;
 }

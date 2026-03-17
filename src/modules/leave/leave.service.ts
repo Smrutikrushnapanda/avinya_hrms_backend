@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -229,6 +228,76 @@ export class LeaveService {
     }
   }
 
+  async rolloverOrganizationBalances(
+    organizationId: string,
+    carryForwardEnabled: boolean,
+  ): Promise<{ updated: number }> {
+    const employees = await this.employeeRepo.find({
+      where: { organizationId },
+      select: ['userId', 'employmentType'],
+    });
+    if (!employees.length) return { updated: 0 };
+
+    const templates = await this.templateRepo.find({
+      where: { organization: { id: organizationId } },
+      relations: ['leaveType'],
+    });
+    if (!templates.length) return { updated: 0 };
+
+    const templatesByEmploymentType = templates.reduce((acc, t) => {
+      const key = t.employmentType || '';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(t);
+      return acc;
+    }, {} as Record<string, LeaveBalanceTemplate[]>);
+
+    let updated = 0;
+
+    for (const emp of employees) {
+      const empType = emp.employmentType || '';
+      const empTemplates = templatesByEmploymentType[empType] || [];
+      for (const template of empTemplates) {
+        const existing = await this.balanceRepo.findOne({
+          where: {
+            user: { id: emp.userId },
+            leaveType: { id: template.leaveType.id },
+          },
+        });
+
+        const carry = carryForwardEnabled
+          ? Math.max(0, Number(existing?.closingBalance ?? 0))
+          : 0;
+        const opening = Number(template.openingBalance || 0) + carry;
+
+        if (existing) {
+          existing.openingBalance = opening;
+          existing.carriedForward = carry;
+          existing.accrued = 0;
+          existing.consumed = 0;
+          existing.encashed = 0;
+          existing.closingBalance = opening;
+          await this.balanceRepo.save(existing);
+        } else {
+          await this.balanceRepo.save(
+            this.balanceRepo.create({
+              user: { id: emp.userId } as any,
+              leaveType: { id: template.leaveType.id } as any,
+              openingBalance: opening,
+              carriedForward: carry,
+              accrued: 0,
+              consumed: 0,
+              encashed: 0,
+              closingBalance: opening,
+            }),
+          );
+        }
+        updated += 1;
+      }
+    }
+
+    return { updated };
+  }
+
   // ─── Leave Application ───
 
   async applyForLeave(
@@ -244,12 +313,25 @@ export class LeaveService {
     if (!leaveType) throw new NotFoundException('Invalid leave type');
 
     const numberOfDays = this.calculateBusinessDays(startDate, endDate);
-    const balance = await this.balanceRepo.findOne({
+    let balance = await this.balanceRepo.findOne({
       where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
     });
 
-    if (!balance || balance.closingBalance < numberOfDays) {
-      throw new BadRequestException('Insufficient leave balance');
+    // Allow leave applications even when balance is exhausted (unpaid/negative flow).
+    // If no balance row exists yet, create one at zero so approval can deduct into minus.
+    if (!balance) {
+      balance = await this.balanceRepo.save(
+        this.balanceRepo.create({
+          user: { id: userId } as any,
+          leaveType: { id: leaveTypeId } as any,
+          openingBalance: 0,
+          accrued: 0,
+          consumed: 0,
+          carriedForward: 0,
+          encashed: 0,
+          closingBalance: 0,
+        }),
+      );
     }
 
     const request = await this.requestRepo.save({
@@ -413,7 +495,7 @@ export class LeaveService {
       await this.requestRepo.save(request);
 
       // Deduct leave balance
-      const balance = await this.balanceRepo.findOne({
+      let balance = await this.balanceRepo.findOne({
         where: {
           user: { id: request.user.id },
           leaveType: { id: request.leaveType.id },
@@ -508,7 +590,7 @@ export class LeaveService {
       request.status = 'APPROVED';
       await this.requestRepo.save(request);
 
-      const balance = await this.balanceRepo.findOne({
+      let balance = await this.balanceRepo.findOne({
         where: {
           user: { id: request.user.id },
           leaveType: { id: request.leaveType.id },
@@ -516,7 +598,18 @@ export class LeaveService {
       });
 
       if (!balance) {
-        throw new NotFoundException('Leave balance not found');
+        balance = await this.balanceRepo.save(
+          this.balanceRepo.create({
+            user: { id: request.user.id } as any,
+            leaveType: { id: request.leaveType.id } as any,
+            openingBalance: 0,
+            accrued: 0,
+            consumed: 0,
+            carriedForward: 0,
+            encashed: 0,
+            closingBalance: 0,
+          }),
+        );
       }
 
       const daysToDeduct = Math.max(1, request.numberOfDays || 0);

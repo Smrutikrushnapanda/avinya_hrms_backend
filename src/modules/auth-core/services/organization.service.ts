@@ -1,14 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../entities/organization.entity';
-import { OrganizationMobileHeaderSettings } from '../entities/organization-mobile-header-settings.entity';
-import { OrganizationResignationSettings } from '../entities/organization-resignation-settings.entity';
+import { OrganizationSettings } from '../entities/organization-settings.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
 import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto } from '../dto/organization.dto';
 import { RoleType } from '../enums/role-type.enum';
+import { LeaveService } from '../../leave/leave.service';
+import { WfhService } from '../../wfh/wfh.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -16,16 +17,18 @@ export class OrganizationService {
   constructor(
     @InjectRepository(Organization)
     private readonly orgRepo: Repository<Organization>,
-    @InjectRepository(OrganizationMobileHeaderSettings)
-    private readonly mobileHeaderSettingsRepo: Repository<OrganizationMobileHeaderSettings>,
-    @InjectRepository(OrganizationResignationSettings)
-    private readonly resignationSettingsRepo: Repository<OrganizationResignationSettings>,
+    @InjectRepository(OrganizationSettings)
+    private readonly orgSettingsRepo: Repository<OrganizationSettings>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(Role)
     private readonly roleRepo: Repository<Role>,
     @InjectRepository(UserRole)
     private readonly userRoleRepo: Repository<UserRole>,
+    @Inject(forwardRef(() => LeaveService))
+    private readonly leaveService: LeaveService,
+    @Inject(forwardRef(() => WfhService))
+    private readonly wfhService: WfhService,
   ) {}
 
   private normalizeNullableText(value?: string | null): string | null {
@@ -36,27 +39,37 @@ export class OrganizationService {
 
   async create(data: CreateOrganizationDto, createdBy: string) {
     const org = await this.orgRepo.save(
-      this.orgRepo.create({ ...data, createdBy, updatedBy: createdBy }),
+      this.orgRepo.create({
+        organizationName: data.organizationName,
+        email: data.email,
+        hrMail: data.hrMail,
+        phone: data.phone,
+        address: data.address,
+        logoUrl: data.logoUrl,
+        siteUrl: data.siteUrl,
+        landingLink: data.landingLink,
+        enableGpsValidation: data.enableGpsValidation,
+        enableWifiValidation: data.enableWifiValidation,
+        wfhApprovalMode: data.wfhApprovalMode,
+        isActive: data.isActive,
+        createdBy,
+        updatedBy: createdBy,
+      }),
     );
 
-    const mobileHeaderSettings = new OrganizationMobileHeaderSettings();
-    mobileHeaderSettings.organizationId = org.id;
-    mobileHeaderSettings.backgroundColor = this.normalizeNullableText(data.homeHeaderBackgroundColor);
-    mobileHeaderSettings.mediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
-    mobileHeaderSettings.mediaStartDate = this.normalizeNullableText(data.homeHeaderMediaStartDate);
-    mobileHeaderSettings.mediaEndDate = this.normalizeNullableText(data.homeHeaderMediaEndDate);
-    await this.mobileHeaderSettingsRepo.save(
-      mobileHeaderSettings,
-    );
-
-    const resignationSettings = new OrganizationResignationSettings();
-    resignationSettings.organizationId = org.id;
-    resignationSettings.policy = this.normalizeNullableText(data.resignationPolicy);
-    resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays ?? 30) || 30;
-    resignationSettings.allowEarlyRelievingByAdmin = Boolean(data.allowEarlyRelievingByAdmin);
-    await this.resignationSettingsRepo.save(
-      resignationSettings,
-    );
+    const settings = new OrganizationSettings();
+    settings.organizationId = org.id;
+    settings.homeHeaderBackgroundColor = this.normalizeNullableText(data.homeHeaderBackgroundColor);
+    settings.homeHeaderMediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
+    settings.homeHeaderMediaStartDate = this.normalizeNullableText(data.homeHeaderMediaStartDate);
+    settings.homeHeaderMediaEndDate = this.normalizeNullableText(data.homeHeaderMediaEndDate);
+    settings.resignationPolicy = this.normalizeNullableText(data.resignationPolicy);
+    settings.resignationNoticePeriodDays = Number(data.resignationNoticePeriodDays ?? 30) || 30;
+    settings.allowEarlyRelievingByAdmin = Boolean(data.allowEarlyRelievingByAdmin);
+    settings.sessionStartMonth = Number(data.sessionStartMonth ?? 4) || 4;
+    settings.leaveCarryForwardEnabled = Boolean(data.leaveCarryForwardEnabled);
+    settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
+    await this.orgSettingsRepo.save(settings);
 
     // Ensure ADMIN role exists for this org
     let adminRole = await this.roleRepo.findOne({ where: { roleName: 'ADMIN' } });
@@ -109,22 +122,18 @@ export class OrganizationService {
   async update(id: string, data: UpdateOrganizationDto, updatedBy: string) {
     const org = await this.orgRepo.findOne({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
-
-    let mobileHeaderSettings = await this.mobileHeaderSettingsRepo.findOne({
+    let settings = await this.orgSettingsRepo.findOne({
       where: { organizationId: id },
     });
-    if (!mobileHeaderSettings) {
-      mobileHeaderSettings = new OrganizationMobileHeaderSettings();
-      mobileHeaderSettings.organizationId = id;
+    if (!settings) {
+      settings = new OrganizationSettings();
+      settings.organizationId = id;
+      settings.resignationNoticePeriodDays = 30;
+      settings.sessionStartMonth = 4;
+      settings.leaveCarryForwardEnabled = false;
+      settings.wfhCarryForwardEnabled = false;
     }
-
-    let resignationSettings = await this.resignationSettingsRepo.findOne({
-      where: { organizationId: id },
-    });
-    if (!resignationSettings) {
-      resignationSettings = new OrganizationResignationSettings();
-      resignationSettings.organizationId = id;
-    }
+    const previousSessionStartMonth = Number(settings.sessionStartMonth || 4);
 
     if (data.name) data.organizationName = data.name;
     if (data.email !== undefined) org.email = data.email;
@@ -133,37 +142,62 @@ export class OrganizationService {
     if (data.address !== undefined) org.address = data.address;
     if (data.logoUrl !== undefined) org.logoUrl = data.logoUrl;
     if (data.homeHeaderBackgroundColor !== undefined) {
-      mobileHeaderSettings.backgroundColor = this.normalizeNullableText(
+      settings.homeHeaderBackgroundColor = this.normalizeNullableText(
         data.homeHeaderBackgroundColor,
       );
     }
     if (data.homeHeaderMediaUrl !== undefined) {
-      mobileHeaderSettings.mediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
+      settings.homeHeaderMediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
     }
     if (data.homeHeaderMediaStartDate !== undefined) {
-      mobileHeaderSettings.mediaStartDate = this.normalizeNullableText(
+      settings.homeHeaderMediaStartDate = this.normalizeNullableText(
         data.homeHeaderMediaStartDate,
       );
     }
     if (data.homeHeaderMediaEndDate !== undefined) {
-      mobileHeaderSettings.mediaEndDate = this.normalizeNullableText(
+      settings.homeHeaderMediaEndDate = this.normalizeNullableText(
         data.homeHeaderMediaEndDate,
       );
     }
     if (data.resignationPolicy !== undefined) {
-      resignationSettings.policy = this.normalizeNullableText(data.resignationPolicy);
+      settings.resignationPolicy = this.normalizeNullableText(data.resignationPolicy);
     }
     if (data.resignationNoticePeriodDays !== undefined) {
-      resignationSettings.noticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
+      settings.resignationNoticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
     }
     if (data.allowEarlyRelievingByAdmin !== undefined) {
-      resignationSettings.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
+      settings.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
     }
 
-    Object.assign(org, data, { updatedBy });
+    if (data.sessionStartMonth !== undefined) {
+      settings.sessionStartMonth = Number(data.sessionStartMonth);
+    }
+    if (data.leaveCarryForwardEnabled !== undefined) {
+      settings.leaveCarryForwardEnabled = Boolean(data.leaveCarryForwardEnabled);
+    }
+    if (data.wfhCarryForwardEnabled !== undefined) {
+      settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
+    }
+
+    org.updatedBy = updatedBy;
     await this.orgRepo.save(org);
-    await this.mobileHeaderSettingsRepo.save(mobileHeaderSettings);
-    await this.resignationSettingsRepo.save(resignationSettings);
+    await this.orgSettingsRepo.save(settings);
+
+    // When session start month changes, rollover leave/WFH balances automatically.
+    if (
+      data.sessionStartMonth !== undefined &&
+      Number(data.sessionStartMonth) !== Number(previousSessionStartMonth)
+    ) {
+      await this.leaveService.rolloverOrganizationBalances(
+        id,
+        Boolean(settings.leaveCarryForwardEnabled),
+      );
+      await this.wfhService.rolloverOrganizationBalances(
+        id,
+        Boolean(settings.wfhCarryForwardEnabled),
+      );
+    }
+
     return this.findOne(id);
   }
 
@@ -212,14 +246,17 @@ export class OrganizationService {
     return {
       ...org,
       name: org.organizationName,
-      homeHeaderBackgroundColor: org.mobileHeaderSettings?.backgroundColor || null,
-      homeHeaderMediaUrl: org.mobileHeaderSettings?.mediaUrl || null,
-      homeHeaderMediaStartDate: org.mobileHeaderSettings?.mediaStartDate || null,
-      homeHeaderMediaEndDate: org.mobileHeaderSettings?.mediaEndDate || null,
-      resignationPolicy: org.resignationSettings?.policy || null,
-      resignationNoticePeriodDays: org.resignationSettings?.noticePeriodDays ?? 30,
+      homeHeaderBackgroundColor: org.settings?.homeHeaderBackgroundColor || null,
+      homeHeaderMediaUrl: org.settings?.homeHeaderMediaUrl || null,
+      homeHeaderMediaStartDate: org.settings?.homeHeaderMediaStartDate || null,
+      homeHeaderMediaEndDate: org.settings?.homeHeaderMediaEndDate || null,
+      resignationPolicy: org.settings?.resignationPolicy || null,
+      resignationNoticePeriodDays: org.settings?.resignationNoticePeriodDays ?? 30,
       allowEarlyRelievingByAdmin:
-        org.resignationSettings?.allowEarlyRelievingByAdmin ?? false,
+        org.settings?.allowEarlyRelievingByAdmin ?? false,
+      sessionStartMonth: Number(org.settings?.sessionStartMonth || 4),
+      leaveCarryForwardEnabled: Boolean(org.settings?.leaveCarryForwardEnabled),
+      wfhCarryForwardEnabled: Boolean(org.settings?.wfhCarryForwardEnabled),
     };
   }
 }

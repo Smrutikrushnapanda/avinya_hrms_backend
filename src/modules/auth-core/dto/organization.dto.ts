@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Max, Min } from 'class-validator';
 
 export class CreateOrganizationDto {
   @IsString()
@@ -72,6 +72,20 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   wfhApprovalMode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  sessionStartMonth?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  leaveCarryForwardEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  wfhCarryForwardEnabled?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -168,6 +182,20 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
   wfhApprovalMode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  sessionStartMonth?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  leaveCarryForwardEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  wfhCarryForwardEnabled?: boolean;
 
   @IsOptional()
   @IsBoolean()

@@ -498,6 +498,62 @@ export class WfhService {
     });
   }
 
+  async rolloverOrganizationBalances(
+    organizationId: string,
+    carryForwardEnabled: boolean,
+  ): Promise<{ updated: number }> {
+    const employees = await this.employeeRepo.find({
+      where: { organizationId },
+      select: ['userId', 'employmentType'],
+    });
+    if (!employees.length) return { updated: 0 };
+
+    const templates = await this.wfhBalanceTemplateRepo.find({
+      where: { organization: { id: organizationId } },
+    });
+    if (!templates.length) return { updated: 0 };
+
+    const templateByEmploymentType = templates.reduce((acc, t) => {
+      if (!acc[t.employmentType]) acc[t.employmentType] = t;
+      return acc;
+    }, {} as Record<string, WfhBalanceTemplate>);
+
+    let updated = 0;
+
+    for (const emp of employees) {
+      const empType = emp.employmentType || '';
+      const template = templateByEmploymentType[empType];
+      if (!template) continue;
+
+      const existing = await this.wfhBalanceRepo.findOne({
+        where: { user: { id: emp.userId } },
+      });
+      const carry = carryForwardEnabled
+        ? Math.max(0, Number(existing?.closingBalance ?? 0))
+        : 0;
+      const opening = Number(template.openingBalance || 0) + carry;
+
+      if (existing) {
+        existing.openingBalance = opening;
+        existing.consumed = 0;
+        existing.closingBalance = opening;
+        await this.wfhBalanceRepo.save(existing);
+      } else {
+        await this.wfhBalanceRepo.save(
+          this.wfhBalanceRepo.create({
+            user: { id: emp.userId } as any,
+            openingBalance: opening,
+            consumed: 0,
+            closingBalance: opening,
+          }),
+        );
+      }
+      updated += 1;
+    }
+
+    return { updated };
+  }
+
   private async findHrUserIdInOrg(
     orgId: string,
     branchId?: string | null,
