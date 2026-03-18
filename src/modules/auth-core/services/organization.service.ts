@@ -224,7 +224,39 @@ export class OrganizationService {
   async delete(id: string) {
     const org = await this.orgRepo.findOne({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
-    await this.orgRepo.remove(org);
+
+    try {
+      await this.orgRepo.manager.transaction(async (manager) => {
+        // Delete all rows from organization-scoped tables first to avoid FK violations.
+        const orgScopedTables: Array<{ table_schema: string; table_name: string }> =
+          await manager.query(
+            `
+              SELECT table_schema, table_name
+              FROM information_schema.columns
+              WHERE column_name = 'organization_id'
+                AND table_schema = 'public'
+                AND table_name <> 'organizations'
+            `,
+          );
+
+        for (const { table_schema, table_name } of orgScopedTables) {
+          await manager.query(
+            `DELETE FROM "${table_schema}"."${table_name}" WHERE organization_id = $1`,
+            [id],
+          );
+        }
+
+        await manager.query(
+          `DELETE FROM "public"."organizations" WHERE organization_id = $1`,
+          [id],
+        );
+      });
+    } catch (error: any) {
+      throw new BadRequestException(
+        `Unable to delete organization due to linked records: ${error?.message || 'unknown error'}`,
+      );
+    }
+
     return { message: 'Organization deleted successfully' };
   }
 
