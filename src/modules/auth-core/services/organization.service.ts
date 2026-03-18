@@ -84,6 +84,19 @@ export class OrganizationService {
       );
     }
 
+    // Ensure HR role exists
+    let hrRole = await this.roleRepo.findOne({ where: { roleName: 'HR' } });
+    if (!hrRole) {
+      await this.roleRepo.save(
+        this.roleRepo.create({
+          roleName: 'HR',
+          type: RoleType.DEFAULT,
+          description: 'Human resources role',
+          organizationId: org.id,
+        }),
+      );
+    }
+
     // Ensure EMPLOYEE role exists
     let employeeRole = await this.roleRepo.findOne({ where: { roleName: 'EMPLOYEE' } });
     if (!employeeRole) {

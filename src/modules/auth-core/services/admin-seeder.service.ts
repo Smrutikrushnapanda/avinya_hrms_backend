@@ -73,7 +73,23 @@ export class AdminSeederService implements OnModuleInit {
       this.logger.log(`Created ADMIN role: ${adminRole.id}`);
     }
 
-    // 3. Ensure EMPLOYEE role exists (needed for other flows)
+    // 3. Ensure HR role exists
+    let hrRole = await this.roleRepo.findOne({
+      where: { roleName: 'HR' },
+    });
+    if (!hrRole) {
+      hrRole = await this.roleRepo.save(
+        this.roleRepo.create({
+          roleName: 'HR',
+          type: RoleType.DEFAULT,
+          description: 'Human resources role',
+          organizationId: org.id,
+        }),
+      );
+      this.logger.log(`Created HR role: ${hrRole.id}`);
+    }
+
+    // 4. Ensure EMPLOYEE role exists (needed for other flows)
     let employeeRole = await this.roleRepo.findOne({
       where: { roleName: 'EMPLOYEE' },
     });
@@ -89,7 +105,7 @@ export class AdminSeederService implements OnModuleInit {
       this.logger.log(`Created EMPLOYEE role: ${employeeRole.id}`);
     }
 
-    // 4. Create admin user
+    // 5. Create admin user
     const hashedPassword = await bcrypt.hash('password', 12);
     const adminUser = await this.userRepo.save(
       this.userRepo.create({
@@ -108,7 +124,7 @@ export class AdminSeederService implements OnModuleInit {
     );
     this.logger.log(`Created admin user: ${adminUser.id}`);
 
-    // 5. Assign ADMIN role to admin user
+    // 6. Assign ADMIN role to admin user
     await this.userRoleRepo.save(
       this.userRoleRepo.create({
         user: adminUser,

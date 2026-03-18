@@ -19,6 +19,15 @@ import { OrganizationRole } from '../entities/organization-role.entity';
 
 @Injectable()
 export class RolesService {
+  private static readonly DEFAULT_ORG_ROLES: Array<{
+    roleName: string;
+    description: string;
+  }> = [
+    { roleName: 'ADMIN', description: 'System administrator' },
+    { roleName: 'HR', description: 'Human resources role' },
+    { roleName: 'EMPLOYEE', description: 'Default employee role' },
+  ];
+
   constructor(
     @InjectRepository(Role)
     private readonly roleRepo: Repository<Role>,
@@ -138,6 +147,8 @@ export class RolesService {
   }
 
   async findAllForOrg(orgId: string): Promise<Role[]> {
+    await this.ensureDefaultRolesForOrganization(orgId);
+
     const defaultAssignments = await this.organizationRoleRepo.find({
       where: { organizationId: orgId },
       relations: [
@@ -154,7 +165,40 @@ export class RolesService {
       relations: ['rolePermissions', 'rolePermissions.permission'],
     });
 
-    return [...defaultRoles, ...customRoles];
+    return [...defaultRoles, ...customRoles].sort((a, b) => {
+      const aTime = a.createdOn ? new Date(a.createdOn).getTime() : 0;
+      const bTime = b.createdOn ? new Date(b.createdOn).getTime() : 0;
+      if (aTime !== bTime) return aTime - bTime;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  private async ensureDefaultRolesForOrganization(orgId: string): Promise<void> {
+    const defaultRoleNames = RolesService.DEFAULT_ORG_ROLES.map((role) => role.roleName);
+    const existingRoles = await this.roleRepo.find({
+      where: { organizationId: orgId, roleName: In(defaultRoleNames) },
+      select: ['roleName'],
+    });
+
+    const existingNames = new Set(existingRoles.map((role) => role.roleName));
+    const missingDefaults = RolesService.DEFAULT_ORG_ROLES.filter(
+      (role) => !existingNames.has(role.roleName),
+    );
+
+    if (!missingDefaults.length) {
+      return;
+    }
+
+    await this.roleRepo.save(
+      missingDefaults.map((role) =>
+        this.roleRepo.create({
+          roleName: role.roleName,
+          description: role.description,
+          type: RoleType.DEFAULT,
+          organizationId: orgId,
+        }),
+      ),
+    );
   }
 
   async updateRole(id: string, dto: { roleName?: string; description?: string }): Promise<Role> {
