@@ -39,7 +39,10 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    TypeOrmModule.forRoot(dataSource.options),
+    TypeOrmModule.forRoot({
+      ...dataSource.options,
+      autoLoadEntities: true,
+    }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
       serveRoot: '/static', // makes your files accessible at /static/*
@@ -79,4 +82,3 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
   ],
 })
 export class AppModule {}
-

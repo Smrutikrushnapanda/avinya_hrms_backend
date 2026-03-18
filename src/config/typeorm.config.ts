@@ -13,8 +13,14 @@ function requireEnv(name: string): string {
 }
 
 const databaseUrl = process.env.DATABASE_URL;
+const dbSchema = process.env.DB_SCHEMA || 'public';
 const hostedConnection = Boolean(databaseUrl) || process.env.NODE_ENV === 'production';
-const useSsl = hostedConnection || process.env.DB_SSL === 'true';
+const dbSslFlag = (process.env.DB_SSL || '').toLowerCase();
+const useSsl =
+  dbSslFlag === 'true' ||
+  dbSslFlag === '1' ||
+  dbSslFlag === 'yes' ||
+  /sslmode=require/i.test(databaseUrl || '');
 
 const connectionOptions = databaseUrl
   ? {
@@ -31,7 +37,7 @@ const connectionOptions = databaseUrl
 const dataSource = new DataSource({
   type: 'postgres',
   ...connectionOptions,
-  schema: 'public',
+  schema: dbSchema,
 
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
   migrations: [path.join(__dirname, '/../database/migrations/*{.ts,.js}')],

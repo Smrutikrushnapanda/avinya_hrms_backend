@@ -19,12 +19,21 @@ export class ProjectsService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // Ensure new columns exist to prevent runtime errors on older databases
+    // Ensure compatibility columns exist for older databases.
+    // Use active schema (not hardcoded public) to avoid boot failures.
+    const [{ schema }] = await this.projectRepo.query(
+      'SELECT current_schema() AS schema',
+    );
+    const [{ exists }] = await this.projectRepo.query(
+      `SELECT to_regclass('${schema}.client_projects') IS NOT NULL AS exists`,
+    );
+    if (!exists) return;
+
     await this.projectRepo.query(
-      'ALTER TABLE client_projects ADD COLUMN IF NOT EXISTS manager_id uuid',
+      `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS manager_id uuid`,
     );
     await this.projectRepo.query(
-      'ALTER TABLE client_projects ADD COLUMN IF NOT EXISTS completion_percent integer DEFAULT 0',
+      `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS completion_percent integer DEFAULT 0`,
     );
   }
 
