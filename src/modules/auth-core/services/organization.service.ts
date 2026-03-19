@@ -240,6 +240,8 @@ export class OrganizationService {
 
     try {
       await this.orgRepo.manager.transaction(async (manager) => {
+        const [{ schema }] = await manager.query('SELECT current_schema() AS schema');
+
         // Delete all rows from organization-scoped tables first to avoid FK violations.
         const orgScopedTables: Array<{ table_schema: string; table_name: string }> =
           await manager.query(
@@ -247,9 +249,10 @@ export class OrganizationService {
               SELECT table_schema, table_name
               FROM information_schema.columns
               WHERE column_name = 'organization_id'
-                AND table_schema = 'public'
+                AND table_schema = $1
                 AND table_name <> 'organizations'
             `,
+            [schema],
           );
 
         for (const { table_schema, table_name } of orgScopedTables) {
@@ -260,7 +263,7 @@ export class OrganizationService {
         }
 
         await manager.query(
-          `DELETE FROM "public"."organizations" WHERE organization_id = $1`,
+          `DELETE FROM "${schema}"."organizations" WHERE organization_id = $1`,
           [id],
         );
       });

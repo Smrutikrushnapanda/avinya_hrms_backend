@@ -143,8 +143,10 @@ export class AuthService {
     const { raw, entities } = await this.userRepository
       .createQueryBuilder('user')
       .leftJoin('user.organization', 'organization')
-      .leftJoin('user_roles', 'userRole', 'userRole.user_id = user.id')
-      .leftJoin('roles', 'role', 'role.role_id = userRole.role_id')
+      .leftJoin('user.userRoles', 'userRole', 'userRole.isActive = :isActive', {
+        isActive: true,
+      })
+      .leftJoin('userRole.role', 'role')
       .addSelect(['organization.id'])
       .addSelect(['role.id', 'role.roleName'])
       .where('user.userName = :userName', { userName })
