@@ -28,10 +28,12 @@ async function bootstrap() {
   // Enable cookie parser
   app.use(cookieParser());
 
-  // ✅ Allow ALL origins
+  // Allow all origins (wildcard CORS)
   app.enableCors({
-    origin: true, // allows all origins
-    credentials: true,
+    origin: '*',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type, Authorization',
+    credentials: false,
   });
 
   // Global validation pipe
