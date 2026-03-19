@@ -76,6 +76,18 @@ export class WfhController {
     return this.wfhService.getRequestsByUser(userId);
   }
 
+  @Delete('requests/:requestId/:userId')
+  @ApiOperation({ summary: 'Delete a pending WFH request before start date' })
+  @ApiParam({ name: 'requestId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async deleteRequestByUser(
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    await this.wfhService.deleteRequestByUser(requestId, userId);
+    return { message: 'WFH request deleted successfully' };
+  }
+
   @Get('all/:orgId')
   @ApiOperation({ summary: 'Get all WFH requests for an organization' })
   @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })

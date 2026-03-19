@@ -169,6 +169,18 @@ export class LeaveController {
     return this.leaveService.getLeaveRequestsByUser(userId);
   }
 
+  @Delete('requests/:requestId/:userId')
+  @ApiOperation({ summary: 'Delete a pending leave request before leave start date' })
+  @ApiParam({ name: 'requestId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async deleteLeaveRequest(
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    await this.leaveService.deleteLeaveRequestByUser(requestId, userId);
+    return { message: 'Leave request deleted successfully' };
+  }
+
   @Get('all/:orgId')
   @ApiOperation({ summary: 'Get all leave requests for an organization' })
   @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })

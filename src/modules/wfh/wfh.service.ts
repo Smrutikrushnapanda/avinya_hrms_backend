@@ -359,6 +359,36 @@ export class WfhService {
     });
   }
 
+  async deleteRequestByUser(requestId: string, userId: string): Promise<void> {
+    const request = await this.requestRepo.findOne({
+      where: { id: requestId },
+      relations: ['user'],
+    });
+    if (!request) {
+      throw new NotFoundException('WFH request not found');
+    }
+
+    if (request.user?.id !== userId) {
+      throw new ForbiddenException('You can only delete your own WFH request');
+    }
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Only pending WFH requests can be deleted');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(`${request.date}T00:00:00`);
+    if (startDate <= today) {
+      throw new BadRequestException(
+        'WFH request can only be deleted before the start date',
+      );
+    }
+
+    await this.approvalRepo.delete({ wfhRequest: { id: requestId } as WfhRequest });
+    await this.requestRepo.delete(requestId);
+  }
+
   async getRequestsByOrg(orgId: string): Promise<WfhRequest[]> {
     return this.requestRepo
       .createQueryBuilder('wfh')

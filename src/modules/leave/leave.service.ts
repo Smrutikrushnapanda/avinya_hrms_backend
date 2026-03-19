@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -673,6 +674,36 @@ export class LeaveService {
       relations: ['leaveType', 'approvals', 'approvals.approver'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async deleteLeaveRequestByUser(requestId: string, userId: string): Promise<void> {
+    const request = await this.requestRepo.findOne({
+      where: { id: requestId },
+      relations: ['user'],
+    });
+    if (!request) {
+      throw new NotFoundException('Leave request not found');
+    }
+
+    if (request.user?.id !== userId) {
+      throw new ForbiddenException('You can only delete your own leave request');
+    }
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Only pending leave requests can be deleted');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(`${request.startDate}T00:00:00`);
+    if (startDate <= today) {
+      throw new BadRequestException(
+        'Leave request can only be deleted before the start date',
+      );
+    }
+
+    await this.approvalRepo.delete({ leaveRequest: { id: requestId } as LeaveRequest });
+    await this.requestRepo.delete(requestId);
   }
 
   async getLeaveRequestsByOrg(orgId: string): Promise<LeaveRequest[]> {
