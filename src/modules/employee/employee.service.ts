@@ -22,6 +22,7 @@ import { ResignationRequest } from '../resignation/entities/resignation-request.
 import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.entity';
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
+import { MailService } from '../mail/mail.service';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -71,6 +72,7 @@ export class EmployeeService {
     private readonly leaveService: LeaveService,
     private readonly wfhService: WfhService,
     private readonly storageService: StorageService,
+    private readonly mailService: MailService,
   ) {}
 
   async create(dto: CreateEmployeeDto) {
@@ -108,6 +110,18 @@ export class EmployeeService {
       };
 
       if (existingUser) {
+        const existingByUserName = await this.userRepository.findOne({
+          where: { userName: loginUserName },
+        });
+        if (existingByUserName && existingByUserName.id !== existingUser.id) {
+          throw new ConflictException('Username already in use');
+        }
+
+        existingUser.userName = loginUserName;
+        existingUser.password = await bcrypt.hash(loginPassword, 12);
+        existingUser.mustChangePassword = true;
+        await this.userRepository.save(existingUser);
+
         const existingEmployee = await this.employeeRepository.findOne({
           where: { userId: existingUser.id },
         });
@@ -139,6 +153,15 @@ export class EmployeeService {
         
         // Invalidate cache after creating employee
         await this.invalidateEmployeeCache(dto.organizationId);
+
+        await this.sendCredentialsEmailSafely({
+          organizationId: dto.organizationId,
+          employeeEmail: dto.workEmail,
+          employeeName: [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() || dto.firstName,
+          userName: loginUserName,
+          password: loginPassword,
+          reason: 'created',
+        });
         
         return this.findOne(savedEmployee.id);
       }
@@ -167,6 +190,15 @@ export class EmployeeService {
       
       // Invalidate cache after creating employee
       await this.invalidateEmployeeCache(dto.organizationId);
+
+      await this.sendCredentialsEmailSafely({
+        organizationId: dto.organizationId,
+        employeeEmail: dto.workEmail,
+        employeeName: [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() || dto.firstName,
+        userName: loginUserName,
+        password: loginPassword,
+        reason: 'created',
+      });
       
       return this.findOne(savedEmployee.id);
     } catch (error) {
@@ -291,6 +323,9 @@ export class EmployeeService {
     }
     const employee = await this.findOne(id);
 
+    let credentialsUpdated = false;
+    let effectiveUserName = '';
+
     if (loginUserName || loginPassword) {
       const user = await this.userRepository.findOne({ where: { id: employee.userId } });
       if (!user) {
@@ -309,13 +344,19 @@ export class EmployeeService {
           throw new ConflictException('Username already in use');
         }
         user.userName = normalizedUserName;
+        credentialsUpdated = true;
       }
 
       if (loginPassword) {
         user.password = await bcrypt.hash(loginPassword, 12);
+        user.mustChangePassword = true;
+        credentialsUpdated = true;
       }
 
       await this.userRepository.save(user);
+      effectiveUserName = user.userName;
+    } else {
+      effectiveUserName = employee?.userName || '';
     }
 
     if (roleId) {
@@ -329,7 +370,49 @@ export class EmployeeService {
     // Invalidate cache after update
     await this.invalidateEmployeeCache(employee.organizationId, id);
 
+    if (credentialsUpdated && loginPassword) {
+      const employeeName =
+        [employee.firstName, employee.lastName].filter(Boolean).join(' ').trim() ||
+        employee.firstName ||
+        'Employee';
+
+      await this.sendCredentialsEmailSafely({
+        organizationId: employee.organizationId,
+        employeeEmail: employee.workEmail,
+        employeeName,
+        userName: effectiveUserName,
+        password: loginPassword,
+        reason: 'password_reset',
+      });
+    }
+
     return this.findOne(id);
+  }
+
+  private async sendCredentialsEmailSafely(params: {
+    organizationId: string;
+    employeeEmail?: string | null;
+    employeeName: string;
+    userName: string;
+    password: string;
+    reason: 'created' | 'password_reset';
+  }): Promise<void> {
+    if (!params.employeeEmail?.trim()) {
+      return;
+    }
+
+    try {
+      await this.mailService.sendEmployeeCredentials({
+        organizationId: params.organizationId,
+        employeeEmail: params.employeeEmail.trim(),
+        employeeName: params.employeeName,
+        userName: params.userName,
+        password: params.password,
+        reason: params.reason,
+      });
+    } catch {
+      // Never fail core employee create/update flow if email delivery fails.
+    }
   }
 
   async remove(id: string) {

@@ -56,6 +56,15 @@ interface ResignationStatusToEmployeeDetails {
   resignationPolicy?: string;
 }
 
+interface EmployeeCredentialsDetails {
+  organizationId: string;
+  employeeEmail: string;
+  employeeName: string;
+  userName: string;
+  password: string;
+  reason: 'created' | 'password_reset';
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -469,6 +478,48 @@ export class MailService {
       to: details.employeeEmail,
       replyTo: orgEmail,
       subject: `Resignation Request ${isApproved ? 'Approved' : 'Rejected'}`,
+      html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
+    });
+  }
+
+  async sendEmployeeCredentials(details: EmployeeCredentialsDetails): Promise<void> {
+    const org = await this.getOrg(details.organizationId);
+    const orgName = org?.organizationName ?? 'Your Organization';
+    const orgEmail = org?.email;
+    const heading =
+      details.reason === 'created'
+        ? 'Your HRMS Account Is Ready'
+        : 'Your HRMS Login Password Was Updated';
+
+    const intro =
+      details.reason === 'created'
+        ? `Hi ${details.employeeName}, your employee account has been created.`
+        : `Hi ${details.employeeName}, your login credentials were updated by HR.`;
+
+    const content = `
+      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">${heading}</h2>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">${intro}</p>
+
+      <div style="background:#f8f9fb;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${this.infoRow('Username', details.userName)}
+          ${this.infoRow('Password', details.password)}
+        </table>
+      </div>
+
+      <p style="margin:0;font-size:14px;color:#6b7280;">
+        Please sign in and change your password immediately after login.
+      </p>
+    `;
+
+    await this.send({
+      from: this.fromAddress,
+      to: details.employeeEmail,
+      replyTo: orgEmail,
+      subject:
+        details.reason === 'created'
+          ? `[${orgName}] Your HRMS login credentials`
+          : `[${orgName}] Updated HRMS login credentials`,
       html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
     });
   }
