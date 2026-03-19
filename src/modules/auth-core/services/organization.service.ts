@@ -149,6 +149,9 @@ export class OrganizationService {
     const previousSessionStartMonth = Number(settings.sessionStartMonth || 4);
 
     if (data.name) data.organizationName = data.name;
+    if (data.organizationName !== undefined) {
+      org.organizationName = data.organizationName;
+    }
     if (data.email !== undefined) org.email = data.email;
     if (data.hrMail !== undefined) org.hrMail = data.hrMail;
     if (data.phone !== undefined) org.phone = data.phone;
