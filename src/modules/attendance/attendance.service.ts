@@ -18,6 +18,7 @@ import {
 } from './entities';
 import {
   CreateAttendanceLogDto,
+  ToggleBreakDto,
   CreateBiometricDeviceDto,
   CreateWifiLocationDto,
   UpdateWifiLocationDto,
@@ -632,6 +633,8 @@ export class AttendanceService {
     logs: AttendanceLog[];
     punchInTime: Date | null;
     lastPunch: Date | null;
+    isOnBreak: boolean;
+    activeBreakSince: Date | null;
   }> {
     const today = new Date();
     const from = new Date(today.setHours(0, 0, 0, 0));
@@ -656,11 +659,192 @@ export class AttendanceService {
     // Prefer corrected inTime/outTime from the Attendance record (set by timeslip approval)
     const punchInTime = attendanceSummary?.inTime ?? (logs.length > 0 ? logs[0].timestamp : null);
     const lastPunch = attendanceSummary?.outTime ?? (logs.length > 0 ? logs[logs.length - 1].timestamp : null);
+    const { isOnBreak, activeBreakSince } = this.deriveBreakState(logs);
 
     return {
       logs,
       punchInTime,
       lastPunch,
+      isOnBreak,
+      activeBreakSince,
+    };
+  }
+
+  async toggleBreakStatus(dto: ToggleBreakDto): Promise<{
+    status: 'success';
+    action: 'break-start' | 'break-end';
+    isOnBreak: boolean;
+    activeBreakSince: Date | null;
+    data: AttendanceLog;
+  }> {
+    const actionTime = dto.timestamp ? new Date(dto.timestamp) : new Date();
+    const shiftConfig = await this.resolveShiftConfig(dto.organizationId, dto.userId);
+    const { windowStart, windowEnd } = this.computeShiftWindow(
+      actionTime,
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+
+    const logs = await this.attendanceLogRepo.find({
+      where: {
+        user: { id: dto.userId },
+        organization: { id: dto.organizationId },
+        timestamp: Between(windowStart, windowEnd),
+        anomalyFlag: false,
+      },
+      order: { timestamp: 'ASC' },
+    });
+
+    const latestCheckIn = [...logs]
+      .reverse()
+      .find((log) => log.type === 'check-in');
+    const latestCheckOut = [...logs]
+      .reverse()
+      .find((log) => log.type === 'check-out');
+
+    if (!latestCheckIn || (latestCheckOut && latestCheckOut.timestamp > latestCheckIn.timestamp)) {
+      throw new BadRequestException(
+        'Please check in first before using break toggle.',
+      );
+    }
+
+    const breakState = this.deriveBreakState(logs);
+    const action: 'break-start' | 'break-end' = breakState.isOnBreak
+      ? 'break-end'
+      : 'break-start';
+
+    const created = this.attendanceLogRepo.create({
+      organization: { id: dto.organizationId },
+      user: { id: dto.userId },
+      timestamp: actionTime,
+      type: action,
+      source: dto.source || 'web',
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      locationAddress: dto.locationAddress,
+      wifiSsid: dto.wifiSsid,
+      wifiBssid: dto.wifiBssid,
+      deviceInfo: dto.deviceInfo,
+      anomalyFlag: false,
+      anomalyReason: null,
+      branch: shiftConfig.branchId ? { id: shiftConfig.branchId } : undefined,
+    });
+    const saved = await this.attendanceLogRepo.save(created);
+
+    return {
+      status: 'success',
+      action,
+      isOnBreak: action === 'break-start',
+      activeBreakSince: action === 'break-start' ? saved.timestamp : null,
+      data: saved,
+    };
+  }
+
+  async getCurrentBreakStatus(organizationId: string, userId: string): Promise<{
+    organizationId: string;
+    userId: string;
+    isOnBreak: boolean;
+    activeBreakSince: Date | null;
+    breakSessionsToday: number;
+    activeBreakMinutes: number;
+  }> {
+    const logsResult = await this.getTodayLogsByUserOrg(organizationId, userId);
+    const logs = logsResult.logs || [];
+    const breakState = this.deriveBreakState(logs);
+
+    return {
+      organizationId,
+      userId,
+      isOnBreak: breakState.isOnBreak,
+      activeBreakSince: breakState.activeBreakSince,
+      breakSessionsToday: logs.filter((log) => log.type === 'break-start').length,
+      activeBreakMinutes:
+        breakState.isOnBreak && breakState.activeBreakSince
+          ? Math.max(
+              0,
+              Math.floor(
+                (Date.now() - new Date(breakState.activeBreakSince).getTime()) /
+                  60000,
+              ),
+            )
+          : 0,
+    };
+  }
+
+  async getLiveBreakOverview(organizationId: string): Promise<{
+    organizationId: string;
+    generatedAt: string;
+    totalOnBreak: number;
+    employees: {
+      userId: string;
+      employeeName: string;
+      email: string;
+      activeBreakSince: Date;
+      breakMinutes: number;
+    }[];
+  }> {
+    const today = new Date();
+    const from = new Date(today);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(today);
+    to.setHours(23, 59, 59, 999);
+
+    const logs = await this.attendanceLogRepo.find({
+      where: {
+        organization: { id: organizationId },
+        timestamp: Between(from, to),
+        anomalyFlag: false,
+      },
+      relations: ['user'],
+      order: { timestamp: 'ASC' },
+    });
+
+    const logsByUser = new Map<string, AttendanceLog[]>();
+    for (const log of logs) {
+      const key = log.user?.id;
+      if (!key) continue;
+      if (!logsByUser.has(key)) logsByUser.set(key, []);
+      logsByUser.get(key)!.push(log);
+    }
+
+    const employees: {
+      userId: string;
+      employeeName: string;
+      email: string;
+      activeBreakSince: Date;
+      breakMinutes: number;
+    }[] = [];
+
+    logsByUser.forEach((userLogs, userId) => {
+      const breakState = this.deriveBreakState(userLogs);
+      if (!breakState.isOnBreak || !breakState.activeBreakSince) return;
+      const user = userLogs[0]?.user;
+      const employeeName = [user?.firstName, user?.middleName, user?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      employees.push({
+        userId,
+        employeeName: employeeName || user?.userName || 'Employee',
+        email: user?.email || '',
+        activeBreakSince: breakState.activeBreakSince,
+        breakMinutes: Math.max(
+          0,
+          Math.floor(
+            (Date.now() - new Date(breakState.activeBreakSince).getTime()) /
+              60000,
+          ),
+        ),
+      });
+    });
+
+    employees.sort((a, b) => b.breakMinutes - a.breakMinutes);
+
+    return {
+      organizationId,
+      generatedAt: new Date().toISOString(),
+      totalOnBreak: employees.length,
+      employees,
     };
   }
 
@@ -977,6 +1161,34 @@ export class AttendanceService {
         // Add any other user fields you need from the User entity
       }
     }));
+  }
+
+  private deriveBreakState(logs: AttendanceLog[]): {
+    isOnBreak: boolean;
+    activeBreakSince: Date | null;
+  } {
+    const sortedLogs = [...logs].sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+
+    let isOnBreak = false;
+    let activeBreakSince: Date | null = null;
+
+    for (const log of sortedLogs) {
+      if (log.type === 'check-out') {
+        isOnBreak = false;
+        activeBreakSince = null;
+      } else if (log.type === 'break-start') {
+        isOnBreak = true;
+        activeBreakSince = log.timestamp;
+      } else if (log.type === 'break-end') {
+        isOnBreak = false;
+        activeBreakSince = null;
+      }
+    }
+
+    return { isOnBreak, activeBreakSince };
   }
 
   private calculateDistance(

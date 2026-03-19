@@ -25,6 +25,7 @@ import {
   UpdateHolidayDto,
   CreateBranchDto,
   UpdateBranchDto,
+  ToggleBreakDto,
 } from './dto';
 import {
   AttendanceLog,
@@ -368,6 +369,8 @@ export class AttendanceController {
         },
         punchInTime: { type: 'string', format: 'date-time' },
         lastPunch: { type: 'string', format: 'date-time' },
+        isOnBreak: { type: 'boolean' },
+        activeBreakSince: { type: 'string', format: 'date-time', nullable: true },
       },
       example: {
         logs: [
@@ -431,6 +434,8 @@ export class AttendanceController {
         ],
         punchInTime: '2025-07-13T09:45:00.000Z',
         lastPunch: '2025-07-13T10:15:00.000Z',
+        isOnBreak: false,
+        activeBreakSince: null,
       },
     },
   })
@@ -439,6 +444,33 @@ export class AttendanceController {
     @Query('userId') userId: string,
   ) {
     return this.attendanceService.getTodayLogsByUserOrg(organizationId, userId);
+  }
+
+  @Post('break/toggle')
+  @ApiOperation({ summary: 'Toggle break state for a checked-in employee' })
+  async toggleBreak(@Body() dto: ToggleBreakDto) {
+    return this.attendanceService.toggleBreakStatus(dto);
+  }
+
+  @Get('break/status')
+  @ApiOperation({ summary: 'Get current break status for a user' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiQuery({ name: 'userId', type: 'string', required: true })
+  async getBreakStatus(
+    @Query('organizationId') organizationId: string,
+    @Query('userId') userId: string,
+  ) {
+    return this.attendanceService.getCurrentBreakStatus(organizationId, userId);
+  }
+
+  @Get('break/live')
+  @ApiOperation({
+    summary:
+      'Get all employees currently on break for live admin dashboard widgets/charts',
+  })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  async getLiveBreakOverview(@Query('organizationId') organizationId: string) {
+    return this.attendanceService.getLiveBreakOverview(organizationId);
   }
 
   // 📅 Get daily attendance summary
