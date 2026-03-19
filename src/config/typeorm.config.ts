@@ -13,7 +13,7 @@ function requireEnv(name: string): string {
 }
 
 const databaseUrl = process.env.DATABASE_URL;
-const dbSchema = process.env.DB_SCHEMA || 'public';
+const dbSchema = process.env.DB_SCHEMA || 'avinya';
 const hostedConnection = Boolean(databaseUrl) || process.env.NODE_ENV === 'production';
 const dbSslFlag = (process.env.DB_SSL || '').toLowerCase();
 const useSsl =

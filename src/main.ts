@@ -8,16 +8,15 @@ import * as cookieParser from 'cookie-parser';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as bodyParser from 'body-parser';
 import * as dotenv from 'dotenv';
+
+
 dotenv.config();
-// Prevent DB connection errors from crashing the entire process
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Do NOT exit — let NestJS handle individual request errors
 });
 
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  // Do NOT exit — keeps the server alive during transient DB pool errors
 });
 
 async function bootstrap() {
