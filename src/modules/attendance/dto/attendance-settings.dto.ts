@@ -12,7 +12,15 @@ import {
   IsInt,
   IsObject,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+const toOptionalNumber = ({ value }: { value: unknown }): unknown => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : value;
+};
 
 export class CreateAttendanceSettingsDto {
   @ApiPropertyOptional({ description: 'Organization UUID' })
@@ -45,11 +53,13 @@ export class CreateAttendanceSettingsDto {
   lateThresholdMinutes?: number;
 
   @ApiPropertyOptional({ example: 20.3494624, description: 'Office latitude' })
+  @Transform(toOptionalNumber)
   @IsNumber()
   @IsOptional()
   officeLatitude?: number;
 
   @ApiPropertyOptional({ example: 85.8078853, description: 'Office longitude' })
+  @Transform(toOptionalNumber)
   @IsNumber()
   @IsOptional()
   officeLongitude?: number;

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -14,6 +15,13 @@ import {
   Max,
   Min,
 } from 'class-validator';
+
+const toOptionalNumber = ({ value }: { value: unknown }): unknown => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : value;
+};
 
 export class CreateBranchDto {
   @ApiProperty({ description: 'Organization UUID' })
@@ -81,11 +89,13 @@ export class CreateBranchDto {
 
   @ApiPropertyOptional({ example: 20.3494624, description: 'Office latitude' })
   @IsOptional()
+  @Transform(toOptionalNumber)
   @IsNumber()
   officeLatitude?: number;
 
   @ApiPropertyOptional({ example: 85.8078853, description: 'Office longitude' })
   @IsOptional()
+  @Transform(toOptionalNumber)
   @IsNumber()
   officeLongitude?: number;
 
