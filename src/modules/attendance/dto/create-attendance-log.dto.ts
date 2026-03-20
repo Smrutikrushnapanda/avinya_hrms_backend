@@ -7,8 +7,19 @@ import {
   IsIn,
   IsDateString,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+const toBoolean = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off', ''].includes(normalized)) return false;
+  }
+  return Boolean(value);
+};
 
 export class CreateAttendanceLogDto {
   @ApiProperty({ description: 'Organization UUID' })
@@ -96,7 +107,7 @@ export class CreateAttendanceLogDto {
     example: true,
   })
   @IsBoolean()
-  @Type(() => Boolean)
+  @Transform(({ value }) => toBoolean(value))
   enableFaceValidation: boolean;
 
   @ApiProperty({
@@ -105,7 +116,7 @@ export class CreateAttendanceLogDto {
     example: true,
   })
   @IsBoolean()
-  @Type(() => Boolean)
+  @Transform(({ value }) => toBoolean(value))
   enableWifiValidation: boolean;
 
   @ApiProperty({
@@ -114,6 +125,6 @@ export class CreateAttendanceLogDto {
     example: true,
   })
   @IsBoolean()
-  @Type(() => Boolean)
+  @Transform(({ value }) => toBoolean(value))
   enableGPSValidation: boolean;
 }

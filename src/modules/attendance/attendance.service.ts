@@ -227,18 +227,23 @@ export class AttendanceService {
     }
 
     // 3c. GPS-only validation against office/branch geofence (primary + alternates)
-    if (enableGPSValidation && latitude != null && longitude != null) {
-      const gpsOk = this.isWithinAllowedLocations(
-        latitude,
-        longitude,
-        shiftConfig.officeLatitude,
-        shiftConfig.officeLongitude,
-        shiftConfig.allowedRadiusMeters,
-        shiftConfig.altLocations ?? [],
-      );
-      if (!gpsOk) {
+    if (enableGPSValidation) {
+      if (latitude == null || longitude == null) {
         anomalyFlag = true;
-        anomalyReasons.push('GPS outside allowed office radius');
+        anomalyReasons.push('GPS location required but not provided');
+      } else {
+        const gpsOk = this.isWithinAllowedLocations(
+          latitude,
+          longitude,
+          shiftConfig.officeLatitude,
+          shiftConfig.officeLongitude,
+          shiftConfig.allowedRadiusMeters,
+          shiftConfig.altLocations ?? [],
+        );
+        if (!gpsOk) {
+          anomalyFlag = true;
+          anomalyReasons.push('GPS outside allowed office radius');
+        }
       }
     }
 
