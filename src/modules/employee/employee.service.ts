@@ -23,6 +23,7 @@ import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.ent
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { MailService } from '../mail/mail.service';
+import { DateTime } from 'luxon';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -484,11 +485,11 @@ export class EmployeeService {
     try {
       console.log('🚀 Getting enhanced dashboard stats for organization:', organizationId);
 
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
-      const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-      const thisMonthPayPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      const nowIst = DateTime.now().setZone('Asia/Kolkata');
+      const todayStr = nowIst.toFormat('yyyy-MM-dd');
+      const lastMonthStart = nowIst.minus({ months: 1 }).startOf('month').toFormat('yyyy-MM-dd');
+      const thisMonthStart = nowIst.startOf('month').toFormat('yyyy-MM-dd');
+      const thisMonthPayPeriod = nowIst.toFormat('yyyy-MM');
 
       // Single consolidated query — uses only 1 connection instead of 9
       const [row] = await this.entityManager.query(`

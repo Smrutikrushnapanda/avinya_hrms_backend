@@ -158,13 +158,20 @@ export class AttendanceService {
       shiftConfig.workStartTime,
       shiftConfig.workEndTime,
     );
+    const isOvernight = this.isOvernightShift(
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const dayBounds = this.getDayBoundsInZone(punchTime);
+    const logsWindowStart = isOvernight ? windowStart : dayBounds.start;
+    const logsWindowEnd = isOvernight ? windowEnd : dayBounds.end;
     const branchId = shiftConfig.branchId || null;
 
     // 1️⃣ Determine punch type
     const existingLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
-        timestamp: Between(windowStart, windowEnd),
+        timestamp: Between(logsWindowStart, logsWindowEnd),
       },
       relations: ['user'],
       order: { timestamp: 'ASC' },
@@ -292,7 +299,7 @@ export class AttendanceService {
       where: {
         user: { id: userId },
         organization: { id: organizationId },
-        timestamp: Between(windowStart, windowEnd),
+        timestamp: Between(logsWindowStart, logsWindowEnd),
       },
       order: { timestamp: 'ASC' },
     });
@@ -636,9 +643,7 @@ export class AttendanceService {
     isOnBreak: boolean;
     activeBreakSince: Date | null;
   }> {
-    const today = new Date();
-    const from = new Date(today.setHours(0, 0, 0, 0));
-    const to = new Date(today.setHours(23, 59, 59, 999));
+    const { start: from, end: to, dateStr } = this.getDayBoundsInZone(new Date());
 
     const logs = await this.attendanceLogRepo.find({
       where: {
@@ -651,7 +656,6 @@ export class AttendanceService {
     });
 
     // Check if the Attendance summary has timeslip-corrected times
-    const dateStr = formatLocal(new Date(), 'yyyy-MM-dd');
     const attendanceSummary = await this.attendanceRepo.findOne({
       where: { user: { id: userId }, attendanceDate: dateStr },
     });
@@ -684,12 +688,19 @@ export class AttendanceService {
       shiftConfig.workStartTime,
       shiftConfig.workEndTime,
     );
+    const isOvernight = this.isOvernightShift(
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const dayBounds = this.getDayBoundsInZone(actionTime);
+    const logsWindowStart = isOvernight ? windowStart : dayBounds.start;
+    const logsWindowEnd = isOvernight ? windowEnd : dayBounds.end;
 
     const logs = await this.attendanceLogRepo.find({
       where: {
         user: { id: dto.userId },
         organization: { id: dto.organizationId },
-        timestamp: Between(windowStart, windowEnd),
+        timestamp: Between(logsWindowStart, logsWindowEnd),
         anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
@@ -783,11 +794,7 @@ export class AttendanceService {
       breakMinutes: number;
     }[];
   }> {
-    const today = new Date();
-    const from = new Date(today);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(today);
-    to.setHours(23, 59, 59, 999);
+    const { start: from, end: to } = this.getDayBoundsInZone(new Date());
 
     const logs = await this.attendanceLogRepo.find({
       where: {
@@ -1267,6 +1274,22 @@ export class AttendanceService {
     const dt = new Date(base);
     dt.setHours(hh || 0, mm || 0, ss || 0, 0);
     return dt;
+  }
+
+  private isOvernightShift(workStartTime: string, workEndTime: string): boolean {
+    return this.parseTimeToMinutes(workEndTime) <= this.parseTimeToMinutes(workStartTime);
+  }
+
+  private getDayBoundsInZone(
+    reference: Date,
+    zone = 'Asia/Kolkata',
+  ): { start: Date; end: Date; dateStr: string } {
+    const zoned = DateTime.fromJSDate(reference).setZone(zone);
+    return {
+      start: zoned.startOf('day').toUTC().toJSDate(),
+      end: zoned.endOf('day').toUTC().toJSDate(),
+      dateStr: zoned.toFormat('yyyy-MM-dd'),
+    };
   }
 
   private computeShiftWindow(
