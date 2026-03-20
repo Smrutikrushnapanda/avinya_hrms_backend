@@ -173,6 +173,7 @@ export class AttendanceService {
     const existingLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
+        organization: { id: organizationId },
         timestamp: Between(logsWindowStart, logsWindowEnd),
       },
       relations: ['user'],
@@ -364,7 +365,11 @@ export class AttendanceService {
       };
 
       const existingAttendance = await this.attendanceRepo.findOne({
-        where: { user: { id: userId }, attendanceDate },
+        where: {
+          user: { id: userId },
+          organization: { id: organizationId },
+          attendanceDate,
+        },
       });
       if (existingAttendance) {
         await this.attendanceRepo.update(existingAttendance.id, baseData);
@@ -397,10 +402,16 @@ export class AttendanceService {
     page = 1,
     limit = 20,
     search?: string,
-    status?: Attendance['status'] | 'all',
+    status?: Attendance['status'] | 'all' | string,
   ) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 20));
+    const normalizedDate = this.normalizeAttendanceDate(date);
+    const normalizedStatus = this.normalizeAttendanceStatus(status);
+
     const query = this.attendanceRepo
       .createQueryBuilder('att')
+      .distinct(true)
       .leftJoinAndSelect('att.user', 'user')
       .leftJoin(
         'employees',
@@ -409,10 +420,10 @@ export class AttendanceService {
         { organizationId },
       ) // join employees table
       .where('att.organization_id = :organizationId', { organizationId })
-      .andWhere('att.attendanceDate = :date', { date });
+      .andWhere('att.attendanceDate = :date', { date: normalizedDate });
 
-    if (status && status !== 'all') {
-      query.andWhere('att.status = :status', { status });
+    if (normalizedStatus && normalizedStatus !== 'all') {
+      query.andWhere('att.status = :status', { status: normalizedStatus });
     }
 
     if (search) {
@@ -422,6 +433,8 @@ export class AttendanceService {
       );
     }
 
+    const total = await query.getCount();
+
     query
       .addSelect([
         'emp.employee_code AS "employeeCode"',
@@ -429,8 +442,8 @@ export class AttendanceService {
         'emp.passport_photo_url AS "passportPhotoUrl"',
       ])
       .orderBy('att.inTime', 'ASC')
-      .skip((page - 1) * limit)
-      .take(limit);
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit);
 
     const rawResults = await query.getRawAndEntities();
     const records = rawResults.entities;
@@ -521,12 +534,60 @@ export class AttendanceService {
     return {
       results,
       pagination: {
-        total: rawResults.entities.length,
-        page,
-        limit,
-        totalPages: Math.ceil(rawResults.entities.length / limit),
+        total,
+        page: safePage,
+        limit: safeLimit,
+        totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
       },
     };
+  }
+
+  private normalizeAttendanceDate(dateInput: string): string {
+    const trimmed = (dateInput || '').trim();
+    if (!trimmed) return trimmed;
+
+    const parsedIso = DateTime.fromISO(trimmed, { zone: 'Asia/Kolkata' });
+    if (parsedIso.isValid) {
+      return parsedIso.toFormat('yyyy-MM-dd');
+    }
+
+    const parsedJsDate = new Date(trimmed);
+    if (!Number.isNaN(parsedJsDate.getTime())) {
+      return DateTime.fromJSDate(parsedJsDate)
+        .setZone('Asia/Kolkata')
+        .toFormat('yyyy-MM-dd');
+    }
+
+    return trimmed;
+  }
+
+  private normalizeAttendanceStatus(
+    status?: Attendance['status'] | 'all' | string,
+  ): Attendance['status'] | 'all' | undefined {
+    if (!status) return undefined;
+
+    const normalized = status.toString().trim().toLowerCase();
+    if (!normalized) return undefined;
+
+    if (normalized === 'all') return 'all';
+
+    const canonical = normalized.replace(/[_\s]+/g, '-');
+    const statusMap: Record<string, Attendance['status']> = {
+      present: 'present',
+      absent: 'absent',
+      late: 'late',
+      holiday: 'holiday',
+      weekend: 'weekend',
+      'half-day': 'half-day',
+      halfday: 'half-day',
+      'on-leave': 'on-leave',
+      onleave: 'on-leave',
+      'work-from-home': 'work-from-home',
+      workfromhome: 'work-from-home',
+      wfh: 'work-from-home',
+    };
+
+    return statusMap[canonical];
   }
 
   async getDailyAttendanceStatsWithComparison(
