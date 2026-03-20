@@ -47,6 +47,8 @@ type ShiftRuleSource = WorkingDayRuleSource & {
   workStartTime: string;
   workEndTime: string;
   halfDayCutoffTime?: string | null;
+  graceMinutes?: number | null;
+  lateThresholdMinutes?: number | null;
 };
 
 @Injectable()
@@ -329,6 +331,7 @@ export class AttendanceService {
         workingMinutes,
         hasClockOut,
         shiftConfig,
+        inLog.timestamp,
       );
 
       const baseData: DeepPartial<Attendance> = {
@@ -539,7 +542,10 @@ export class AttendanceService {
       });
 
       const total_present = attendance.filter(
-        (a) => a.status === 'present' || a.status === 'half-day',
+        (a) =>
+          a.status === 'present' ||
+          a.status === 'late' ||
+          a.status === 'half-day',
       ).length;
 
       const earlyClockIn = attendance.filter((a) => {
@@ -1348,16 +1354,37 @@ export class AttendanceService {
     workingMinutes: number,
     hasClockOut: boolean,
     config: ShiftRuleSource,
+    inTime?: Date | null,
   ): Attendance['status'] {
-    if (!hasClockOut) return 'present';
+    const isLateCheckIn = inTime
+      ? this.isLatePunchIn(new Date(inTime), config)
+      : false;
+    if (!hasClockOut) return isLateCheckIn ? 'late' : 'present';
     const fullShiftMinutes = this.calculateShiftDurationMinutes(
       config.workStartTime,
       config.workEndTime,
     );
     const halfDayThreshold = this.calculateHalfDayThresholdMinutes(config);
-    if (workingMinutes >= fullShiftMinutes) return 'present';
+    if (workingMinutes >= fullShiftMinutes) {
+      return isLateCheckIn ? 'late' : 'present';
+    }
     if (workingMinutes >= halfDayThreshold) return 'half-day';
     return 'absent';
+  }
+
+  private isLatePunchIn(inTime: Date, config: ShiftRuleSource): boolean {
+    const { windowStart } = this.computeShiftWindow(
+      inTime,
+      config.workStartTime,
+      config.workEndTime,
+    );
+    const lateAfterMinutes =
+      Number(config.graceMinutes ?? NaN) ||
+      Number(config.lateThresholdMinutes ?? NaN) ||
+      0;
+    const safeLateAfter = Math.max(0, lateAfterMinutes);
+    const lateCutoff = new Date(windowStart.getTime() + safeLateAfter * 60_000);
+    return inTime.getTime() > lateCutoff.getTime();
   }
 
   private async resolveShiftConfig(organizationId: string, userId: string) {
@@ -1534,6 +1561,7 @@ export class AttendanceService {
                 workingMinutes,
                 hasClockOut,
                 shiftConfig,
+                inLog.timestamp,
               )
             : workingMinutes >= 480
               ? 'present'

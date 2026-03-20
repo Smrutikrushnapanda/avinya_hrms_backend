@@ -507,7 +507,7 @@ export class EmployeeService {
           ),
           attendance_stats AS (
             SELECT
-              COUNT(*) FILTER (WHERE status = 'present') AS present_today,
+              COUNT(*) FILTER (WHERE status IN ('present', 'late')) AS present_today,
               COUNT(*) FILTER (WHERE status = 'half-day') AS half_day_today
             FROM attendance
             WHERE organization_id = $1 AND attendance_date = $4
