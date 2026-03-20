@@ -467,6 +467,10 @@ export class AttendanceService {
 
     const results = await Promise.all(
       records.map(async (att, i) => {
+        const hasBothPunches = Boolean(att.inTime) && Boolean(att.outTime);
+        const workedMinutes = att.workingMinutes ?? 0;
+        const isIncompleteHours =
+          att.status === 'absent' && hasBothPunches && workedMinutes > 0;
         const profileImageKey =
           (raw[i].passportPhotoUrl as string | null) ??
           (raw[i].photoUrl as string | null);
@@ -502,8 +506,9 @@ export class AttendanceService {
           profileImage: profileImageKey,
           profileImageSigned,
 
-          status: att.status,
-          workingMinutes: att.workingMinutes ?? 0,
+          status: isIncompleteHours ? 'incomplete-hours' : att.status,
+          rawStatus: att.status,
+          workingMinutes: workedMinutes,
 
           inTime: formatTime(att.inTime),
           inPhotoUrl: att.inPhotoUrl,
@@ -626,7 +631,22 @@ export class AttendanceService {
       }).length;
 
       const notPresentSummary = {
-        absent: attendance.filter((a) => a.status === 'absent').length,
+        incompleteHours: attendance.filter(
+          (a) =>
+            a.status === 'absent' &&
+            Boolean(a.inTime) &&
+            Boolean(a.outTime) &&
+            Number(a.workingMinutes ?? 0) > 0,
+        ).length,
+        absent: attendance.filter(
+          (a) =>
+            a.status === 'absent' &&
+            !(
+              Boolean(a.inTime) &&
+              Boolean(a.outTime) &&
+              Number(a.workingMinutes ?? 0) > 0
+            ),
+        ).length,
         noClockIn: attendance.filter((a) => !a.inTime).length,
         noClockOut: attendance.filter((a) => !a.outTime).length,
         invalid: attendance.filter((a) => a.anomalyFlag).length,
@@ -673,6 +693,12 @@ export class AttendanceService {
         ),
       },
       notPresentSummary: {
+        incompleteHours: todayStats.notPresentSummary.incompleteHours,
+        incompleteHoursDiff: diff(
+          todayStats.notPresentSummary.incompleteHours,
+          yesterdayStats.notPresentSummary.incompleteHours,
+        ),
+
         absent: todayStats.notPresentSummary.absent,
         absentDiff: diff(
           todayStats.notPresentSummary.absent,
