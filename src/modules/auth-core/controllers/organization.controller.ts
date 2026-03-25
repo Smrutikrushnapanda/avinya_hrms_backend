@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Put, Param, Get, Delete, UseGuards, Request } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { OrganizationService } from '../services/organization.service';
-import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto } from '../dto/organization.dto';
+import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto, StartTrialDto } from '../dto/organization.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import {
   SwaggerCreateOrganization,
@@ -21,6 +21,11 @@ export class OrganizationController {
   @SwaggerCreateOrganization()
   create(@Body() body: CreateOrganizationDto) {
     return this.orgService.create(body, body.createdBy || 'system');
+  }
+
+  @Post('start-trial')
+  startTrial(@Body() body: StartTrialDto) {
+    return this.orgService.startTrial(body);
   }
 
   @UseGuards(JwtAuthGuard)

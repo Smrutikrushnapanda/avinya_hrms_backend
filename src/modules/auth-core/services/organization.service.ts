@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../entities/organization.entity';
@@ -6,14 +6,18 @@ import { OrganizationSettings } from '../entities/organization-settings.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
-import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto } from '../dto/organization.dto';
+import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto, StartTrialDto } from '../dto/organization.dto';
 import { RoleType } from '../enums/role-type.enum';
 import { LeaveService } from '../../leave/leave.service';
 import { WfhService } from '../../wfh/wfh.service';
+import { MailService } from '../../mail/mail.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class OrganizationService {
+  private readonly defaultAdminUserName = 'avinya_hrms';
+  private readonly defaultAdminPassword = 'password';
+
   constructor(
     @InjectRepository(Organization)
     private readonly orgRepo: Repository<Organization>,
@@ -29,12 +33,43 @@ export class OrganizationService {
     private readonly leaveService: LeaveService,
     @Inject(forwardRef(() => WfhService))
     private readonly wfhService: WfhService,
+    private readonly mailService: MailService,
   ) {}
 
   private normalizeNullableText(value?: string | null): string | null {
     if (value === undefined) return null;
     const normalized = String(value).trim();
     return normalized.length > 0 ? normalized : null;
+  }
+
+  private normalizeEmail(value: string): string {
+    return value.trim().toLowerCase();
+  }
+
+  private async getAvailableAdminUserName(): Promise<string> {
+    const existingBase = await this.userRepo.findOne({
+      where: { userName: this.defaultAdminUserName },
+      select: ['id'],
+    });
+
+    if (!existingBase) {
+      return this.defaultAdminUserName;
+    }
+
+    let suffix = 2;
+    while (suffix <= 9999) {
+      const candidate = `${this.defaultAdminUserName}_${suffix}`;
+      const existing = await this.userRepo.findOne({
+        where: { userName: candidate },
+        select: ['id'],
+      });
+      if (!existing) {
+        return candidate;
+      }
+      suffix += 1;
+    }
+
+    throw new ConflictException('Unable to allocate default admin username right now.');
   }
 
   async create(data: CreateOrganizationDto, createdBy: string) {
@@ -111,10 +146,11 @@ export class OrganizationService {
     }
 
     // Create default admin user for this org
-    const hashedPassword = await bcrypt.hash('password', 12);
+    const adminUserName = await this.getAvailableAdminUserName();
+    const hashedPassword = await bcrypt.hash(this.defaultAdminPassword, 12);
     const adminUser = await this.userRepo.save(
       this.userRepo.create({
-        userName: 'avinya_hrms',
+        userName: adminUserName,
         email: data.email || `admin@${org.id}.hrms`,
         password: hashedPassword,
         firstName: 'Admin',
@@ -129,7 +165,71 @@ export class OrganizationService {
       this.userRoleRepo.create({ user: adminUser, role: adminRole, isActive: true }),
     );
 
-    return { ...org, adminUserName: 'avinya_hrms', adminDefaultPassword: 'password' };
+    return {
+      ...org,
+      adminUserName,
+      adminDefaultPassword: this.defaultAdminPassword,
+    };
+  }
+
+  async startTrial(data: StartTrialDto) {
+    const companyName = data.company.trim();
+    const contactName = data.name.trim();
+    const email = this.normalizeEmail(data.email);
+    const phone = data.phone?.trim() || undefined;
+    const source = data.source?.trim() || 'pricing-start-trial';
+
+    const existingOrganization = await this.orgRepo
+      .createQueryBuilder('organization')
+      .select('organization.id')
+      .where('LOWER(organization.organizationName) = LOWER(:companyName)', { companyName })
+      .getRawOne();
+
+    if (existingOrganization) {
+      throw new ConflictException(
+        'An organization with this company name already exists. Please sign in or contact support.',
+      );
+    }
+
+    const existingUser = await this.userRepo
+      .createQueryBuilder('user')
+      .select('user.id')
+      .where('LOWER(user.email) = LOWER(:email)', { email })
+      .getRawOne();
+
+    if (existingUser) {
+      throw new ConflictException(
+        'This email is already registered. Please sign in with your existing account.',
+      );
+    }
+
+    const organization = await this.create(
+      {
+        organizationName: companyName,
+        email,
+        hrMail: email,
+        phone,
+        isActive: true,
+        createdBy: `trial:${source}`,
+      },
+      'trial-system',
+    );
+
+    await this.mailService.sendEmployeeCredentials({
+      organizationId: organization.id,
+      employeeEmail: email,
+      employeeName: contactName,
+      userName: organization.adminUserName,
+      password: organization.adminDefaultPassword,
+      reason: 'created',
+    });
+
+    return {
+      message: 'Organization created successfully. Username and password have been sent to your email.',
+      organizationId: organization.id,
+      credentialsSent: true,
+      adminUserName: organization.adminUserName,
+    };
   }
 
   async update(id: string, data: UpdateOrganizationDto, updatedBy: string) {
