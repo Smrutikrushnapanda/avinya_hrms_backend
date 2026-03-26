@@ -318,6 +318,19 @@ export class LeaveService {
     if (!leaveType) throw new NotFoundException('Invalid leave type');
 
     const numberOfDays = this.calculateBusinessDays(startDate, endDate);
+    const limitCheck = await this.checkLeaveLimit(
+      userId,
+      leaveTypeId,
+      numberOfDays,
+      startDate,
+    );
+    if (!limitCheck.allowed) {
+      throw new BadRequestException(
+        limitCheck.reason || 'Leave limit reached for this request',
+      );
+    }
+    const paidDays = Math.max(0, Number(limitCheck.paidDays ?? numberOfDays));
+    const unpaidDays = Math.max(0, Number(limitCheck.unpaidDays ?? 0));
     let balance = await this.balanceRepo.findOne({
       where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
     });
@@ -345,6 +358,8 @@ export class LeaveService {
       startDate,
       endDate,
       numberOfDays,
+      paidDays,
+      unpaidDays,
       reason,
       status: 'PENDING',
     });
@@ -508,10 +523,20 @@ export class LeaveService {
       });
 
       if (balance) {
-        const daysToDeduct = Math.max(1, request.numberOfDays || 0);
-        balance.consumed += daysToDeduct;
-        balance.closingBalance -= daysToDeduct;
-        await this.balanceRepo.save(balance);
+        const hasExplicitPaidSplit =
+          Number(request.paidDays ?? 0) > 0 || Number(request.unpaidDays ?? 0) > 0;
+        const payableDays = hasExplicitPaidSplit
+          ? Number(request.paidDays ?? 0)
+          : Number(request.numberOfDays ?? 0);
+        const daysToDeduct = Math.max(
+          0,
+          payableDays,
+        );
+        if (daysToDeduct > 0) {
+          balance.consumed += daysToDeduct;
+          balance.closingBalance -= daysToDeduct;
+          await this.balanceRepo.save(balance);
+        }
       }
 
       this.messageGateway.emitToUser(request.user.id, {
@@ -617,10 +642,17 @@ export class LeaveService {
         );
       }
 
-      const daysToDeduct = Math.max(1, request.numberOfDays || 0);
-      balance.consumed += daysToDeduct;
-      balance.closingBalance -= daysToDeduct;
-      await this.balanceRepo.save(balance);
+      const hasExplicitPaidSplit =
+        Number(request.paidDays ?? 0) > 0 || Number(request.unpaidDays ?? 0) > 0;
+      const payableDays = hasExplicitPaidSplit
+        ? Number(request.paidDays ?? 0)
+        : Number(request.numberOfDays ?? 0);
+      const daysToDeduct = Math.max(0, payableDays);
+      if (daysToDeduct > 0) {
+        balance.consumed += daysToDeduct;
+        balance.closingBalance -= daysToDeduct;
+        await this.balanceRepo.save(balance);
+      }
 
       this.messageGateway.emitToUser(userId, {
         type: 'leave:approved',
@@ -825,13 +857,26 @@ export class LeaveService {
   // ─── Employee Leave Limits (Optional Admin-Set Limits) ───
 
   async setEmployeeLeaveLimit(dto: SetEmployeeLeaveLimitDto) {
-    const { userId, leaveTypeId, maxDaysPerYear, maxDaysPerRequest, isEnabled } = dto;
+    const {
+      userId,
+      leaveTypeId,
+      maxDaysPerMonth,
+      maxDaysPerYear,
+      maxDaysPerRequest,
+      isEnabled,
+    } = dto;
 
     const user = await this.leaveTypeRepo.manager.findOne('User', { where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const leaveType = await this.leaveTypeRepo.findOne({ where: { id: leaveTypeId } });
+    const leaveType = await this.leaveTypeRepo.findOne({
+      where: { id: leaveTypeId },
+      relations: ['organization'],
+    });
     if (!leaveType) throw new NotFoundException('Leave type not found');
+    if (!leaveType.organization) {
+      throw new NotFoundException('Leave type organization not found');
+    }
 
     const org = leaveType.organization;
 
@@ -843,6 +888,7 @@ export class LeaveService {
 
     if (limit) {
       // Update existing
+      limit.maxDaysPerMonth = maxDaysPerMonth ?? limit.maxDaysPerMonth;
       limit.maxDaysPerYear = maxDaysPerYear ?? limit.maxDaysPerYear;
       limit.maxDaysPerRequest = maxDaysPerRequest ?? limit.maxDaysPerRequest;
       if (isEnabled !== undefined) limit.isEnabled = isEnabled;
@@ -854,8 +900,9 @@ export class LeaveService {
       user: { id: userId },
       leaveType: { id: leaveTypeId },
       organization: org,
-      maxDaysPerYear: maxDaysPerYear || null,
-      maxDaysPerRequest: maxDaysPerRequest || null,
+      maxDaysPerMonth: maxDaysPerMonth ?? null,
+      maxDaysPerYear: maxDaysPerYear ?? null,
+      maxDaysPerRequest: maxDaysPerRequest ?? null,
       isEnabled: isEnabled !== undefined ? isEnabled : true,
     });
 
@@ -883,6 +930,7 @@ export class LeaveService {
 
     if (!limit) throw new NotFoundException('Leave limit not found for this employee');
 
+    if (dto.maxDaysPerMonth !== undefined) limit.maxDaysPerMonth = dto.maxDaysPerMonth;
     if (dto.maxDaysPerYear !== undefined) limit.maxDaysPerYear = dto.maxDaysPerYear;
     if (dto.maxDaysPerRequest !== undefined) limit.maxDaysPerRequest = dto.maxDaysPerRequest;
     if (dto.isEnabled !== undefined) limit.isEnabled = dto.isEnabled;
@@ -900,13 +948,18 @@ export class LeaveService {
     await this.employeeLeaveLimitRepo.remove(limit);
   }
 
-  async checkLeaveLimit(userId: string, leaveTypeId: string, requestedDays: number): Promise<{ allowed: boolean; reason?: string }> {
+  async checkLeaveLimit(
+    userId: string,
+    leaveTypeId: string,
+    requestedDays: number,
+    startDate?: string,
+  ): Promise<{ allowed: boolean; reason?: string; paidDays?: number; unpaidDays?: number }> {
     const limit = await this.employeeLeaveLimitRepo.findOne({
       where: { user: { id: userId }, leaveType: { id: leaveTypeId }, isEnabled: true },
     });
 
     if (!limit) {
-      return { allowed: true }; // No limit set for this employee
+      return { allowed: true, paidDays: requestedDays, unpaidDays: 0 };
     }
 
     if (limit.maxDaysPerRequest && requestedDays > limit.maxDaysPerRequest) {
@@ -938,6 +991,55 @@ export class LeaveService {
       }
     }
 
-    return { allowed: true };
+    let paidDays = requestedDays;
+    let unpaidDays = 0;
+
+    if (limit.maxDaysPerMonth !== null && limit.maxDaysPerMonth !== undefined) {
+      const referenceDate = startDate ? new Date(startDate) : new Date();
+      const monthStart = new Date(
+        referenceDate.getFullYear(),
+        referenceDate.getMonth(),
+        1,
+      )
+        .toISOString()
+        .slice(0, 10);
+      const monthEnd = new Date(
+        referenceDate.getFullYear(),
+        referenceDate.getMonth() + 1,
+        0,
+      )
+        .toISOString()
+        .slice(0, 10);
+
+      const usageRow = await this.requestRepo
+        .createQueryBuilder('lr')
+        .select(
+          'COALESCE(SUM(COALESCE(lr.paid_days, lr.number_of_days)), 0)',
+          'total',
+        )
+        .where('lr.user_id = :userId', { userId })
+        .andWhere('lr.leave_type_id = :leaveTypeId', { leaveTypeId })
+        .andWhere('lr.status IN (:...statuses)', {
+          statuses: ['PENDING', 'APPROVED'],
+        })
+        .andWhere('lr.start_date BETWEEN :monthStart AND :monthEnd', {
+          monthStart,
+          monthEnd,
+        })
+        .getRawOne<{ total: string }>();
+
+      const usedPaidDaysThisMonth = Number(usageRow?.total || 0);
+      const monthlyPaidLimit = Number(limit.maxDaysPerMonth || 0);
+      const remainingPaidDays = Math.max(0, monthlyPaidLimit - usedPaidDaysThisMonth);
+
+      paidDays = Math.min(requestedDays, remainingPaidDays);
+      unpaidDays = Math.max(0, requestedDays - paidDays);
+    }
+
+    return {
+      allowed: true,
+      paidDays,
+      unpaidDays,
+    };
   }
 }

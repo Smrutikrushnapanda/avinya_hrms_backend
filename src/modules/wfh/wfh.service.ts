@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository } from 'typeorm';
 import { WfhRequest } from './entities/wfh-request.entity';
 import { WfhApproval } from './entities/wfh-approval.entity';
 import { WfhApprovalAssignment } from './entities/wfh-approval-assignment.entity';
@@ -52,6 +52,16 @@ export class WfhService {
 
   async applyForWfh(userId: string, dto: ApplyWfhDto) {
     const numberOfDays = this.calculateDays(dto.date, dto.endDate);
+    const wfhLimitCheck = await this.checkWfhLimit(
+      userId,
+      numberOfDays,
+      dto.date,
+    );
+    if (!wfhLimitCheck.allowed) {
+      throw new BadRequestException(
+        wfhLimitCheck.reason || 'WFH monthly limit reached',
+      );
+    }
     const balance = await this.wfhBalanceRepo.findOne({
       where: { user: { id: userId } },
     });
@@ -664,9 +674,9 @@ export class WfhService {
     limit = this.employeeWfhLimitRepo.create({
       user: { id: userId },
       organization: { id: employee.organization.id },
-      maxDaysPerMonth: maxDaysPerMonth || null,
-      maxDaysPerWeek: maxDaysPerWeek || null,
-      maxDaysPerYear: maxDaysPerYear || null,
+      maxDaysPerMonth: maxDaysPerMonth ?? null,
+      maxDaysPerWeek: maxDaysPerWeek ?? null,
+      maxDaysPerYear: maxDaysPerYear ?? null,
       isEnabled: isEnabled !== undefined ? isEnabled : true,
     });
 
@@ -704,80 +714,88 @@ export class WfhService {
     await this.employeeWfhLimitRepo.remove(limit);
   }
 
-  async checkWfhLimit(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+  async checkWfhLimit(
+    userId: string,
+    requestedDays: number,
+    startDate?: string,
+  ): Promise<{ allowed: boolean; reason?: string }> {
     const limit = await this.employeeWfhLimitRepo.findOne({
       where: { user: { id: userId }, isEnabled: true },
     });
 
     if (!limit) {
-      return { allowed: true }; // No limit set for this employee
+      return {
+        allowed: false,
+        reason:
+          'WFH is not enabled yet. Ask admin to set your monthly WFH limit first.',
+      };
     }
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const referenceDate = startDate ? new Date(startDate) : new Date();
+    const refYear = referenceDate.getFullYear();
+    const refMonth = referenceDate.getMonth();
+
+    const sumRequestedDays = async (fromDate: string, toDate: string): Promise<number> => {
+      const row = await this.requestRepo
+        .createQueryBuilder('wfh')
+        .select('COALESCE(SUM(COALESCE(wfh.number_of_days, 1)), 0)', 'total')
+        .where('wfh.user_id = :userId', { userId })
+        .andWhere('wfh.status IN (:...statuses)', {
+          statuses: ['PENDING', 'APPROVED'],
+        })
+        .andWhere('wfh.date BETWEEN :fromDate AND :toDate', {
+          fromDate,
+          toDate,
+        })
+        .getRawOne<{ total: string }>();
+
+      return Number(row?.total || 0);
+    };
 
     // Check monthly limit
-    if (limit.maxDaysPerMonth) {
-      const approvedWfhThisMonth = await this.requestRepo.count({
-        where: {
-          user: { id: userId },
-          status: 'APPROVED',
-          createdAt: Between(
-            new Date(currentYear, currentMonth, 1),
-            new Date(currentYear, currentMonth + 1, 0),
-          ),
-        },
-      });
-
-      if (approvedWfhThisMonth >= limit.maxDaysPerMonth) {
+    if (limit.maxDaysPerMonth !== null && limit.maxDaysPerMonth !== undefined) {
+      const monthStart = new Date(refYear, refMonth, 1).toISOString().slice(0, 10);
+      const monthEnd = new Date(refYear, refMonth + 1, 0).toISOString().slice(0, 10);
+      const usedThisMonth = await sumRequestedDays(monthStart, monthEnd);
+      if (usedThisMonth + requestedDays > limit.maxDaysPerMonth) {
+        const remaining = Math.max(0, limit.maxDaysPerMonth - usedThisMonth);
         return {
           allowed: false,
-          reason: `Monthly WFH limit (${limit.maxDaysPerMonth} days) reached for this month.`,
+          reason: `Monthly WFH limit is ${limit.maxDaysPerMonth} day(s). Remaining this month: ${remaining}.`,
         };
       }
     }
 
     // Check weekly limit
-    if (limit.maxDaysPerWeek) {
-      const currentWeekStart = new Date(now);
-      currentWeekStart.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
-      const currentWeekEnd = new Date(currentWeekStart);
-      currentWeekEnd.setDate(currentWeekStart.getDate() + 6); // End of week (Saturday)
+    if (limit.maxDaysPerWeek !== null && limit.maxDaysPerWeek !== undefined) {
+      const weekStart = new Date(referenceDate);
+      weekStart.setDate(referenceDate.getDate() - referenceDate.getDay()); // Sunday
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6); // Saturday
 
-      const approvedWfhThisWeek = await this.requestRepo.count({
-        where: {
-          user: { id: userId },
-          status: 'APPROVED',
-          createdAt: Between(currentWeekStart, currentWeekEnd),
-        },
-      });
-
-      if (approvedWfhThisWeek >= limit.maxDaysPerWeek) {
+      const usedThisWeek = await sumRequestedDays(
+        weekStart.toISOString().slice(0, 10),
+        weekEnd.toISOString().slice(0, 10),
+      );
+      if (usedThisWeek + requestedDays > limit.maxDaysPerWeek) {
+        const remaining = Math.max(0, limit.maxDaysPerWeek - usedThisWeek);
         return {
           allowed: false,
-          reason: `Weekly WFH limit (${limit.maxDaysPerWeek} days) reached for this week.`,
+          reason: `Weekly WFH limit is ${limit.maxDaysPerWeek} day(s). Remaining this week: ${remaining}.`,
         };
       }
     }
 
     // Check yearly limit
-    if (limit.maxDaysPerYear) {
-      const approvedWfhThisYear = await this.requestRepo.count({
-        where: {
-          user: { id: userId },
-          status: 'APPROVED',
-          createdAt: Between(
-            new Date(currentYear, 0, 1),
-            new Date(currentYear, 11, 31),
-          ),
-        },
-      });
-
-      if (approvedWfhThisYear >= limit.maxDaysPerYear) {
+    if (limit.maxDaysPerYear !== null && limit.maxDaysPerYear !== undefined) {
+      const yearStart = new Date(refYear, 0, 1).toISOString().slice(0, 10);
+      const yearEnd = new Date(refYear, 11, 31).toISOString().slice(0, 10);
+      const usedThisYear = await sumRequestedDays(yearStart, yearEnd);
+      if (usedThisYear + requestedDays > limit.maxDaysPerYear) {
+        const remaining = Math.max(0, limit.maxDaysPerYear - usedThisYear);
         return {
           allowed: false,
-          reason: `Yearly WFH limit (${limit.maxDaysPerYear} days) reached for this year.`,
+          reason: `Yearly WFH limit is ${limit.maxDaysPerYear} day(s). Remaining this year: ${remaining}.`,
         };
       }
     }

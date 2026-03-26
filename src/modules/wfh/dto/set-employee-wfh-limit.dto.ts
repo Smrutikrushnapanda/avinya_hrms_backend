@@ -6,17 +6,17 @@ export class SetEmployeeWfhLimitDto {
 
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerMonth?: number;
 
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerWeek?: number;
 
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerYear?: number;
 
   @IsOptional()
@@ -27,17 +27,17 @@ export class SetEmployeeWfhLimitDto {
 export class UpdateEmployeeWfhLimitDto {
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerMonth?: number;
 
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerWeek?: number;
 
   @IsOptional()
   @IsNumber()
-  @Min(1)
+  @Min(0)
   maxDaysPerYear?: number;
 
   @IsOptional()

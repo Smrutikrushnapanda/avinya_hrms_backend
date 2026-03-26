@@ -34,6 +34,12 @@ export class LeaveRequest {
   @Column({ name: 'number_of_days', type: 'float' })
   numberOfDays: number;
 
+  @Column({ name: 'paid_days', type: 'float', default: 0 })
+  paidDays: number;
+
+  @Column({ name: 'unpaid_days', type: 'float', default: 0 })
+  unpaidDays: number;
+
   @Column({ name: 'reason', nullable: true })
   reason: string;
 

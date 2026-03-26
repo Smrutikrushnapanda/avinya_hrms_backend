@@ -9,6 +9,11 @@ export class SetEmployeeLeaveLimitDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
+  maxDaysPerMonth?: number;
+
+  @IsOptional()
+  @IsNumber()
   @Min(1)
   maxDaysPerYear?: number;
 
@@ -23,6 +28,11 @@ export class SetEmployeeLeaveLimitDto {
 }
 
 export class UpdateEmployeeLeaveLimitDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxDaysPerMonth?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(1)
