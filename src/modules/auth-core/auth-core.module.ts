@@ -16,10 +16,12 @@ import { UsersService } from './services/users.service';
 import { RolesService } from './services/roles.service';
 import { UserActivitiesService } from './services/user-activities.service';
 import { AdminSeederService } from './services/admin-seeder.service';
+import { PricingTypeSeederService } from './services/pricing-type-seeder.service';
 import { StorageService } from '../attendance/storage.service';
 
 import { Organization } from './entities/organization.entity';
 import { OrganizationSettings } from './entities/organization-settings.entity';
+import { PricingType } from './entities/pricing-type.entity';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
@@ -41,6 +43,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
     TypeOrmModule.forFeature([
       Organization,
       OrganizationSettings,
+      PricingType,
       OrganizationRole,
       User,
       Role,
@@ -78,6 +81,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
     RolesService,
     UserActivitiesService,
     AdminSeederService,
+    PricingTypeSeederService,
     StorageService,
   ],
   exports: [OrganizationService, AuthService, UsersService, RolesService, TypeOrmModule],
