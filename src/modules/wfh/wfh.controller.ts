@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Param,
   Body,
@@ -14,6 +15,7 @@ import { ApproveWfhDto } from './dto/approve-wfh.dto';
 import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
 import { SetWfhBalanceTemplatesDto } from './dto/set-wfh-balance-templates.dto';
+import { SetEmployeeWfhLimitDto, UpdateEmployeeWfhLimitDto } from './dto/set-employee-wfh-limit.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -169,5 +171,43 @@ export class WfhController {
     @Query('employmentType') employmentType?: string,
   ) {
     return this.wfhService.getWfhBalanceTemplates(orgId, employmentType);
+  }
+
+  // ─── Employee WFH Limits ───
+
+  @Post('employee-limits')
+  @ApiOperation({ summary: 'Set or update WFH limits for an employee' })
+  @ApiBody({ type: SetEmployeeWfhLimitDto })
+  async setEmployeeWfhLimit(@Body() dto: SetEmployeeWfhLimitDto) {
+    return this.wfhService.setEmployeeWfhLimit(dto);
+  }
+
+  @Get('employee-limits/:userId/:orgId')
+  @ApiOperation({ summary: 'Get WFH limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
+  async getEmployeeWfhLimit(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+  ) {
+    return this.wfhService.getEmployeeWfhLimit(userId, orgId);
+  }
+
+  @Put('employee-limits/:userId')
+  @ApiOperation({ summary: 'Update WFH limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async updateEmployeeWfhLimit(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: UpdateEmployeeWfhLimitDto,
+  ) {
+    return this.wfhService.updateEmployeeWfhLimit(userId, dto);
+  }
+
+  @Delete('employee-limits/:userId')
+  @ApiOperation({ summary: 'Remove WFH limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async deleteEmployeeWfhLimit(@Param('userId', ParseUUIDPipe) userId: string) {
+    await this.wfhService.deleteEmployeeWfhLimit(userId);
+    return { message: 'WFH limit removed successfully' };
   }
 }

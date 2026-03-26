@@ -7,6 +7,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { join } from 'path';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import * as fs from 'fs';
 import { GlobalCacheModule } from './shared/cache.module';
 import { AuthCoreModule } from './modules/auth-core/auth-core.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
@@ -43,10 +44,27 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
       ...dataSource.options,
       autoLoadEntities: true,
     }),
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'public'),
-      serveRoot: '/static', // makes your files accessible at /static/*
-    }),
+    (() => {
+      const publicPath = join(__dirname, '..', 'public');
+      const uploadsPath = join(publicPath, 'uploads');
+      const chatPath = join(uploadsPath, 'chat');
+      
+      // Ensure directories exist
+      if (!fs.existsSync(publicPath)) {
+        fs.mkdirSync(publicPath, { recursive: true });
+      }
+      if (!fs.existsSync(uploadsPath)) {
+        fs.mkdirSync(uploadsPath, { recursive: true });
+      }
+      if (!fs.existsSync(chatPath)) {
+        fs.mkdirSync(chatPath, { recursive: true });
+      }
+      
+      return ServeStaticModule.forRoot({
+        rootPath: publicPath,
+        serveRoot: '/static',
+      });
+    })(),
     GlobalCacheModule,
     ScheduleModule.forRoot(),
     AuthCoreModule,

@@ -7,3 +7,4 @@ export * from './leave-policy.entity';
 export * from './leave-request.entity';
 export * from './leave-type.entity';
 export * from './leave-workflow-config.entity';
+export * from './employee-leave-limit.entity';

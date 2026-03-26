@@ -18,9 +18,8 @@ import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
 import { CreateLeaveAssignmentDto } from './dto/create-leave-assignment.dto';
 import { InitializeBalanceDto } from './dto/initialize-balance.dto';
 import { SetLeaveBalanceTemplatesDto } from './dto/set-leave-balance-templates.dto';
+import { SetEmployeeLeaveLimitDto, UpdateEmployeeLeaveLimitDto } from './dto/set-employee-leave-limit.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
-
-@ApiTags('Leave')
 @Controller('leave')
 export class LeaveController {
   constructor(private readonly leaveService: LeaveService) {}
@@ -217,5 +216,49 @@ export class LeaveController {
   async deleteAssignment(@Param('id', ParseUUIDPipe) id: string) {
     await this.leaveService.deleteApprovalAssignment(id);
     return { message: 'Assignment deleted successfully' };
+  }
+
+  // ─── Employee Leave Limits ───
+
+  @Post('employee-limits')
+  @ApiOperation({ summary: 'Set or update leave limits for an employee' })
+  @ApiBody({ type: SetEmployeeLeaveLimitDto })
+  async setEmployeeLeaveLimit(@Body() dto: SetEmployeeLeaveLimitDto) {
+    return this.leaveService.setEmployeeLeaveLimit(dto);
+  }
+
+  @Get('employee-limits/:userId/:orgId')
+  @ApiOperation({ summary: 'Get leave limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
+  async getEmployeeLeaveLimits(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+  ) {
+    return this.leaveService.getEmployeeLeaveLimits(userId, orgId);
+  }
+
+  @Put('employee-limits/:userId/:leaveTypeId')
+  @ApiOperation({ summary: 'Update leave limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'leaveTypeId', type: 'string', format: 'uuid' })
+  async updateEmployeeLeaveLimit(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Param('leaveTypeId', ParseUUIDPipe) leaveTypeId: string,
+    @Body() dto: UpdateEmployeeLeaveLimitDto,
+  ) {
+    return this.leaveService.updateEmployeeLeaveLimit(userId, leaveTypeId, dto);
+  }
+
+  @Delete('employee-limits/:userId/:leaveTypeId')
+  @ApiOperation({ summary: 'Remove leave limits for an employee' })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  @ApiParam({ name: 'leaveTypeId', type: 'string', format: 'uuid' })
+  async deleteEmployeeLeaveLimit(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Param('leaveTypeId', ParseUUIDPipe) leaveTypeId: string,
+  ) {
+    await this.leaveService.deleteEmployeeLeaveLimit(userId, leaveTypeId);
+    return { message: 'Leave limit removed successfully' };
   }
 }

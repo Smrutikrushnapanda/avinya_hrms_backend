@@ -2,7 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WfhController } from './wfh.controller';
 import { WfhService } from './wfh.service';
-import { WfhRequest, WfhApproval, WfhApprovalAssignment, WfhBalance, WfhBalanceTemplate } from './entities';
+import { WfhRequest, WfhApproval, WfhApprovalAssignment, WfhBalance, WfhBalanceTemplate, EmployeeWfhLimitEntity } from './entities';
 import { MessageModule } from '../message/message.module';
 import { AuthCoreModule } from '../auth-core/auth-core.module';
 import { UserRole } from '../auth-core/entities/user-role.entity';
@@ -18,6 +18,7 @@ import { Organization } from '../auth-core/entities/organization.entity';
       WfhApprovalAssignment,
       WfhBalance,
       WfhBalanceTemplate,
+      EmployeeWfhLimitEntity,
       UserRole,
       Role,
       Employee,

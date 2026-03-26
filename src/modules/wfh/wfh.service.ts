@@ -5,12 +5,13 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { WfhRequest } from './entities/wfh-request.entity';
 import { WfhApproval } from './entities/wfh-approval.entity';
 import { WfhApprovalAssignment } from './entities/wfh-approval-assignment.entity';
 import { WfhBalance } from './entities/wfh-balance.entity';
 import { WfhBalanceTemplate } from './entities/wfh-balance-template.entity';
+import { EmployeeWfhLimitEntity } from './entities/employee-wfh-limit.entity';
 import { UserRole } from '../auth-core/entities/user-role.entity';
 import { MessageService } from '../message/message.service';
 import { Employee } from '../employee/entities/employee.entity';
@@ -19,6 +20,7 @@ import { ApplyWfhDto } from './dto/apply-wfh.dto';
 import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
 import { SetWfhBalanceTemplatesDto } from './dto/set-wfh-balance-templates.dto';
+import { SetEmployeeWfhLimitDto, UpdateEmployeeWfhLimitDto } from './dto/set-employee-wfh-limit.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MailService } from '../mail/mail.service';
 
@@ -35,6 +37,8 @@ export class WfhService {
     private wfhBalanceRepo: Repository<WfhBalance>,
     @InjectRepository(WfhBalanceTemplate)
     private wfhBalanceTemplateRepo: Repository<WfhBalanceTemplate>,
+    @InjectRepository(EmployeeWfhLimitEntity)
+    private employeeWfhLimitRepo: Repository<EmployeeWfhLimitEntity>,
     @InjectRepository(UserRole)
     private userRoleRepo: Repository<UserRole>,
     @InjectRepository(Employee)
@@ -626,5 +630,158 @@ export class WfhService {
     }
 
     return count || 1;
+  }
+
+  // ─── Employee WFH Limits (Optional Admin-Set Limits) ───
+
+  async setEmployeeWfhLimit(dto: SetEmployeeWfhLimitDto) {
+    const { userId, maxDaysPerMonth, maxDaysPerWeek, maxDaysPerYear, isEnabled } = dto;
+
+    const user = await this.employeeRepo.manager.findOne('User', { where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const employee = await this.employeeRepo.findOne({
+      where: { userId },
+      relations: ['organization'],
+    });
+    if (!employee || !employee.organization) throw new NotFoundException('Employee organization not found');
+
+    // Check if limit already exists
+    let limit = await this.employeeWfhLimitRepo.findOne({
+      where: { user: { id: userId }, organization: { id: employee.organization.id } },
+    });
+
+    if (limit) {
+      // Update existing
+      limit.maxDaysPerMonth = maxDaysPerMonth ?? limit.maxDaysPerMonth;
+      limit.maxDaysPerWeek = maxDaysPerWeek ?? limit.maxDaysPerWeek;
+      limit.maxDaysPerYear = maxDaysPerYear ?? limit.maxDaysPerYear;
+      if (isEnabled !== undefined) limit.isEnabled = isEnabled;
+      return this.employeeWfhLimitRepo.save(limit);
+    }
+
+    // Create new
+    limit = this.employeeWfhLimitRepo.create({
+      user: { id: userId },
+      organization: { id: employee.organization.id },
+      maxDaysPerMonth: maxDaysPerMonth || null,
+      maxDaysPerWeek: maxDaysPerWeek || null,
+      maxDaysPerYear: maxDaysPerYear || null,
+      isEnabled: isEnabled !== undefined ? isEnabled : true,
+    });
+
+    return this.employeeWfhLimitRepo.save(limit);
+  }
+
+  async getEmployeeWfhLimit(userId: string, orgId: string) {
+    return this.employeeWfhLimitRepo.findOne({
+      where: { user: { id: userId }, organization: { id: orgId } },
+    });
+  }
+
+  async updateEmployeeWfhLimit(userId: string, dto: UpdateEmployeeWfhLimitDto) {
+    const limit = await this.employeeWfhLimitRepo.findOne({
+      where: { user: { id: userId } },
+    });
+
+    if (!limit) throw new NotFoundException('WFH limit not found for this employee');
+
+    if (dto.maxDaysPerMonth !== undefined) limit.maxDaysPerMonth = dto.maxDaysPerMonth;
+    if (dto.maxDaysPerWeek !== undefined) limit.maxDaysPerWeek = dto.maxDaysPerWeek;
+    if (dto.maxDaysPerYear !== undefined) limit.maxDaysPerYear = dto.maxDaysPerYear;
+    if (dto.isEnabled !== undefined) limit.isEnabled = dto.isEnabled;
+
+    return this.employeeWfhLimitRepo.save(limit);
+  }
+
+  async deleteEmployeeWfhLimit(userId: string) {
+    const limit = await this.employeeWfhLimitRepo.findOne({
+      where: { user: { id: userId } },
+    });
+
+    if (!limit) throw new NotFoundException('WFH limit not found for this employee');
+
+    await this.employeeWfhLimitRepo.remove(limit);
+  }
+
+  async checkWfhLimit(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+    const limit = await this.employeeWfhLimitRepo.findOne({
+      where: { user: { id: userId }, isEnabled: true },
+    });
+
+    if (!limit) {
+      return { allowed: true }; // No limit set for this employee
+    }
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Check monthly limit
+    if (limit.maxDaysPerMonth) {
+      const approvedWfhThisMonth = await this.requestRepo.count({
+        where: {
+          user: { id: userId },
+          status: 'APPROVED',
+          createdAt: Between(
+            new Date(currentYear, currentMonth, 1),
+            new Date(currentYear, currentMonth + 1, 0),
+          ),
+        },
+      });
+
+      if (approvedWfhThisMonth >= limit.maxDaysPerMonth) {
+        return {
+          allowed: false,
+          reason: `Monthly WFH limit (${limit.maxDaysPerMonth} days) reached for this month.`,
+        };
+      }
+    }
+
+    // Check weekly limit
+    if (limit.maxDaysPerWeek) {
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
+      const currentWeekEnd = new Date(currentWeekStart);
+      currentWeekEnd.setDate(currentWeekStart.getDate() + 6); // End of week (Saturday)
+
+      const approvedWfhThisWeek = await this.requestRepo.count({
+        where: {
+          user: { id: userId },
+          status: 'APPROVED',
+          createdAt: Between(currentWeekStart, currentWeekEnd),
+        },
+      });
+
+      if (approvedWfhThisWeek >= limit.maxDaysPerWeek) {
+        return {
+          allowed: false,
+          reason: `Weekly WFH limit (${limit.maxDaysPerWeek} days) reached for this week.`,
+        };
+      }
+    }
+
+    // Check yearly limit
+    if (limit.maxDaysPerYear) {
+      const approvedWfhThisYear = await this.requestRepo.count({
+        where: {
+          user: { id: userId },
+          status: 'APPROVED',
+          createdAt: Between(
+            new Date(currentYear, 0, 1),
+            new Date(currentYear, 11, 31),
+          ),
+        },
+      });
+
+      if (approvedWfhThisYear >= limit.maxDaysPerYear) {
+        return {
+          allowed: false,
+          reason: `Yearly WFH limit (${limit.maxDaysPerYear} days) reached for this year.`,
+        };
+      }
+    }
+
+    return { allowed: true };
   }
 }

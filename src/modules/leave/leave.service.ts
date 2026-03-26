@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import {
   LeaveType,
   LeavePolicy,
@@ -16,6 +16,7 @@ import {
   LeaveApprovalAssignment,
   LeaveWorkflowConfig,
   Holiday,
+  EmployeeLeaveLimitEntity,
 } from './entities';
 import { Employee } from '../employee/entities/employee.entity';
 import { UserRole } from '../auth-core/entities/user-role.entity';
@@ -23,6 +24,7 @@ import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
 import { CreateLeaveAssignmentDto } from './dto/create-leave-assignment.dto';
 import { InitializeBalanceDto } from './dto/initialize-balance.dto';
 import { SetLeaveBalanceTemplatesDto } from './dto/set-leave-balance-templates.dto';
+import { SetEmployeeLeaveLimitDto, UpdateEmployeeLeaveLimitDto } from './dto/set-employee-leave-limit.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MessageService } from '../message/message.service';
 import { MailService } from '../mail/mail.service';
@@ -47,6 +49,8 @@ export class LeaveService {
     @InjectRepository(Holiday) private holidayRepo: Repository<Holiday>,
     @InjectRepository(Employee) private employeeRepo: Repository<Employee>,
     @InjectRepository(UserRole) private userRoleRepo: Repository<UserRole>,
+    @InjectRepository(EmployeeLeaveLimitEntity)
+    private employeeLeaveLimitRepo: Repository<EmployeeLeaveLimitEntity>,
     private messageGateway: MessageGateway,
     private messageService: MessageService,
     private mailService: MailService,
@@ -816,5 +820,124 @@ export class LeaveService {
     }
 
     return count;
+  }
+
+  // ─── Employee Leave Limits (Optional Admin-Set Limits) ───
+
+  async setEmployeeLeaveLimit(dto: SetEmployeeLeaveLimitDto) {
+    const { userId, leaveTypeId, maxDaysPerYear, maxDaysPerRequest, isEnabled } = dto;
+
+    const user = await this.leaveTypeRepo.manager.findOne('User', { where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const leaveType = await this.leaveTypeRepo.findOne({ where: { id: leaveTypeId } });
+    if (!leaveType) throw new NotFoundException('Leave type not found');
+
+    const org = leaveType.organization;
+
+    // Check if limit already exists
+    let limit = await this.employeeLeaveLimitRepo.findOne({
+      where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
+      relations: ['organization'],
+    });
+
+    if (limit) {
+      // Update existing
+      limit.maxDaysPerYear = maxDaysPerYear ?? limit.maxDaysPerYear;
+      limit.maxDaysPerRequest = maxDaysPerRequest ?? limit.maxDaysPerRequest;
+      if (isEnabled !== undefined) limit.isEnabled = isEnabled;
+      return this.employeeLeaveLimitRepo.save(limit);
+    }
+
+    // Create new
+    limit = this.employeeLeaveLimitRepo.create({
+      user: { id: userId },
+      leaveType: { id: leaveTypeId },
+      organization: org,
+      maxDaysPerYear: maxDaysPerYear || null,
+      maxDaysPerRequest: maxDaysPerRequest || null,
+      isEnabled: isEnabled !== undefined ? isEnabled : true,
+    });
+
+    return this.employeeLeaveLimitRepo.save(limit);
+  }
+
+  async getEmployeeLeaveLimits(userId: string, orgId: string) {
+    return this.employeeLeaveLimitRepo.find({
+      where: {
+        user: { id: userId },
+        organization: { id: orgId },
+      },
+      relations: ['leaveType'],
+    });
+  }
+
+  async updateEmployeeLeaveLimit(
+    userId: string,
+    leaveTypeId: string,
+    dto: UpdateEmployeeLeaveLimitDto,
+  ) {
+    const limit = await this.employeeLeaveLimitRepo.findOne({
+      where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
+    });
+
+    if (!limit) throw new NotFoundException('Leave limit not found for this employee');
+
+    if (dto.maxDaysPerYear !== undefined) limit.maxDaysPerYear = dto.maxDaysPerYear;
+    if (dto.maxDaysPerRequest !== undefined) limit.maxDaysPerRequest = dto.maxDaysPerRequest;
+    if (dto.isEnabled !== undefined) limit.isEnabled = dto.isEnabled;
+
+    return this.employeeLeaveLimitRepo.save(limit);
+  }
+
+  async deleteEmployeeLeaveLimit(userId: string, leaveTypeId: string) {
+    const limit = await this.employeeLeaveLimitRepo.findOne({
+      where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
+    });
+
+    if (!limit) throw new NotFoundException('Leave limit not found for this employee');
+
+    await this.employeeLeaveLimitRepo.remove(limit);
+  }
+
+  async checkLeaveLimit(userId: string, leaveTypeId: string, requestedDays: number): Promise<{ allowed: boolean; reason?: string }> {
+    const limit = await this.employeeLeaveLimitRepo.findOne({
+      where: { user: { id: userId }, leaveType: { id: leaveTypeId }, isEnabled: true },
+    });
+
+    if (!limit) {
+      return { allowed: true }; // No limit set for this employee
+    }
+
+    if (limit.maxDaysPerRequest && requestedDays > limit.maxDaysPerRequest) {
+      return {
+        allowed: false,
+        reason: `Maximum ${limit.maxDaysPerRequest} days allowed per request. You requested ${requestedDays} days.`,
+      };
+    }
+
+    if (limit.maxDaysPerYear) {
+      const thisYear = new Date().getFullYear();
+      const approvedLeaveThisYear = await this.requestRepo.sum('numberOfDays', {
+        user: { id: userId },
+        leaveType: { id: leaveTypeId },
+        status: 'APPROVED',
+        createdAt: Between(
+          new Date(`${thisYear}-01-01`),
+          new Date(`${thisYear}-12-31`),
+        ),
+      });
+
+      const totalWithNewRequest = (approvedLeaveThisYear || 0) + requestedDays;
+      if (totalWithNewRequest > limit.maxDaysPerYear) {
+        const remaining = limit.maxDaysPerYear - (approvedLeaveThisYear || 0);
+        return {
+          allowed: false,
+          reason: `Annual limit is ${limit.maxDaysPerYear} days. You have ${remaining} days remaining this year.`,
+        };
+      }
+    }
+
+    return { allowed: true };
   }
 }

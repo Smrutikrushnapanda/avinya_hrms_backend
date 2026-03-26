@@ -15,6 +15,7 @@ import {
   LeaveRequest,
   LeaveType,
   LeaveWorkflowConfig,
+  EmployeeLeaveLimitEntity,
 } from './entities';
 
 @Module({
@@ -29,6 +30,7 @@ import {
       LeaveApprovalAssignment,
       LeaveWorkflowConfig,
       Holiday,
+      EmployeeLeaveLimitEntity,
     ]),
     MessageModule,
     forwardRef(() => AuthCoreModule),
