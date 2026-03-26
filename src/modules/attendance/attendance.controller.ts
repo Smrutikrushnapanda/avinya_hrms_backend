@@ -26,6 +26,8 @@ import {
   CreateBranchDto,
   UpdateBranchDto,
   ToggleBreakDto,
+  CreateShiftDto,
+  UpdateShiftDto,
 } from './dto';
 import {
   AttendanceLog,
@@ -33,6 +35,7 @@ import {
   BiometricDevice,
   WifiLocation,
   AttendanceSettings,
+  AttendanceShift,
 } from './entities';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -178,6 +181,42 @@ export class AttendanceController {
   @ApiOperation({ summary: 'Delete branch' })
   async deleteBranch(@Param('id') id: string) {
     return this.attendanceService.deleteBranch(id);
+  }
+
+  // 🕒 Shift Management
+  @Get('shifts')
+  @ApiOperation({ summary: 'List shifts for organization' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  async getShifts(@Query('organizationId') organizationId: string) {
+    return this.attendanceService.listShifts(organizationId);
+  }
+
+  @Post('shifts')
+  @ApiOperation({ summary: 'Create shift' })
+  @ApiResponse({
+    status: 201,
+    description: 'Created shift',
+    type: AttendanceShift,
+  })
+  async createShift(@Body() dto: CreateShiftDto) {
+    return this.attendanceService.createShift(dto);
+  }
+
+  @Put('shifts/:id')
+  @ApiOperation({ summary: 'Update shift' })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated shift',
+    type: AttendanceShift,
+  })
+  async updateShift(@Param('id') id: string, @Body() dto: UpdateShiftDto) {
+    return this.attendanceService.updateShift(id, dto);
+  }
+
+  @Delete('shifts/:id')
+  @ApiOperation({ summary: 'Delete shift' })
+  async deleteShift(@Param('id') id: string) {
+    return this.attendanceService.deleteShift(id);
   }
 
   // ➕ Create a new Wi-Fi location

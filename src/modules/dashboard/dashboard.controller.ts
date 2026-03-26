@@ -118,6 +118,7 @@ export class DashboardController {
       const managers = await this.employeeService.findManagers(organizationId);
       const recentJoiners = await this.employeeService.getRecentJoiners(organizationId, 30);
       const branches = await this.employeeService.getBranchesForOrg(organizationId);
+      const shifts = await this.employeeService.getShiftsForOrg(organizationId);
       const roles = await this.rolesService.findAllForOrg(organizationId);
 
       return {
@@ -130,6 +131,7 @@ export class DashboardController {
             designations,
             managers,
             branches,
+            shifts,
             roles,
             appliedFilters: filters,
           },
@@ -160,6 +162,7 @@ export class DashboardController {
             designations: [],
             managers: [],
             branches: [],
+            shifts: [],
             roles: [],
             appliedFilters: filters,
           },

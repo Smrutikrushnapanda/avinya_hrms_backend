@@ -12,6 +12,7 @@ import { Department } from './department.entity';
 import { Designation } from './designation.entity';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Branch } from 'src/modules/attendance/entities/branch.entity';
+import { AttendanceShift } from 'src/modules/attendance/entities/attendance-shift.entity';
 
 @Entity('employees')
 export class Employee {
@@ -32,6 +33,9 @@ export class Employee {
 
   @Column({ type: 'uuid', name: 'branch_id', nullable: true })
   branchId: string | null;
+
+  @Column({ type: 'uuid', name: 'shift_id', nullable: true })
+  shiftId: string | null;
 
   @Column({ name: 'reporting_to', nullable: true })
   reportingTo: string | null;
@@ -129,6 +133,10 @@ export class Employee {
   @ManyToOne(() => Branch, { nullable: true })
   @JoinColumn({ name: 'branch_id' })
   branch: Branch | null;
+
+  @ManyToOne(() => AttendanceShift, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'shift_id' })
+  shift: AttendanceShift | null;
 
   @ManyToOne(() => Employee, { nullable: true })
   @JoinColumn({ name: 'reporting_to' })

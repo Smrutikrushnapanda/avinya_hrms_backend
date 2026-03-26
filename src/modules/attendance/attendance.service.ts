@@ -15,6 +15,7 @@ import {
   WifiLocation,
   AttendanceSettings,
   Branch,
+  AttendanceShift,
 } from './entities';
 import {
   CreateAttendanceLogDto,
@@ -28,6 +29,8 @@ import {
   UpdateHolidayDto,
   CreateBranchDto,
   UpdateBranchDto,
+  CreateShiftDto,
+  UpdateShiftDto,
 } from './dto';
 import { Common } from '../common/common.service';
 import { StorageService } from './storage.service';
@@ -82,6 +85,8 @@ export class AttendanceService {
     private readonly storageService: StorageService,
     @InjectRepository(Branch)
     private branchRepo: Repository<Branch>,
+    @InjectRepository(AttendanceShift)
+    private shiftRepo: Repository<AttendanceShift>,
   ) {}
 
   private normalizeBranchName(name: string): string {
@@ -90,6 +95,14 @@ export class AttendanceService {
 
   private canonicalBranchName(name: string): string {
     return this.normalizeBranchName(name).toLowerCase();
+  }
+
+  private normalizeShiftName(name: string): string {
+    return name.trim().replace(/\s+/g, ' ');
+  }
+
+  private canonicalShiftName(name: string): string {
+    return this.normalizeShiftName(name).toLowerCase();
   }
 
   async createWifiLocation(dto: CreateWifiLocationDto): Promise<WifiLocation> {
@@ -740,8 +753,26 @@ export class AttendanceService {
     lastPunch: Date | null;
     isOnBreak: boolean;
     activeBreakSince: Date | null;
+    attendanceStatus: Attendance['status'] | null;
+    workStartTime: string | null;
+    graceMinutes: number | null;
+    lateThresholdMinutes: number | null;
   }> {
-    const { start: from, end: to, dateStr } = this.getDayBoundsInZone(new Date());
+    const now = new Date();
+    const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+    const { windowStart, windowEnd, attendanceDate } = this.computeShiftWindow(
+      now,
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const isOvernight = this.isOvernightShift(
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const dayBounds = this.getDayBoundsInZone(now);
+    const from = isOvernight ? windowStart : dayBounds.start;
+    const to = isOvernight ? windowEnd : dayBounds.end;
+    const dateStr = isOvernight ? attendanceDate : dayBounds.dateStr;
 
     const logs = await this.attendanceLogRepo.find({
       where: {
@@ -769,6 +800,10 @@ export class AttendanceService {
       lastPunch,
       isOnBreak,
       activeBreakSince,
+      attendanceStatus: attendanceSummary?.status ?? null,
+      workStartTime: shiftConfig.workStartTime ?? null,
+      graceMinutes: shiftConfig.graceMinutes ?? null,
+      lateThresholdMinutes: shiftConfig.lateThresholdMinutes ?? null,
     };
   }
 
@@ -1482,33 +1517,74 @@ export class AttendanceService {
   private async resolveShiftConfig(organizationId: string, userId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
-      relations: ['branch'],
+      relations: ['branch', 'shift'],
     });
 
+    let activeBranch: Branch | null = null;
+
     if (employee?.branchId) {
-      const branch = await this.branchRepo.findOne({
-        where: { id: employee.branchId, organizationId: organizationId, isActive: true },
+      activeBranch = await this.branchRepo.findOne({
+        where: { id: employee.branchId, organizationId, isActive: true },
       });
-      if (branch) {
+    }
+
+    if (employee?.shiftId) {
+      const shift = await this.shiftRepo.findOne({
+        where: {
+          id: employee.shiftId,
+          organizationId,
+          isActive: true,
+        },
+      });
+
+      if (shift) {
+        const settings = activeBranch
+          ? null
+          : await this.getOrCreateAttendanceSettings(organizationId);
+
         return {
-          branchId: branch.id,
-          workStartTime: branch.workStartTime,
-          workEndTime: branch.workEndTime,
-          graceMinutes: branch.graceMinutes,
-          lateThresholdMinutes: branch.lateThresholdMinutes,
-          halfDayCutoffTime: branch.halfDayCutoffTime,
-          workingDays: branch.workingDays,
-          weekdayOffRules: branch.weekdayOffRules,
-          officeLatitude: branch.officeLatitude,
-          officeLongitude: branch.officeLongitude,
-          allowedRadiusMeters: branch.allowedRadiusMeters,
-          altLocations: branch.altLocations ?? [],
+          shiftId: shift.id,
+          branchId: activeBranch?.id ?? null,
+          workStartTime: shift.workStartTime,
+          workEndTime: shift.workEndTime,
+          graceMinutes: shift.graceMinutes,
+          lateThresholdMinutes: shift.lateThresholdMinutes,
+          halfDayCutoffTime: shift.halfDayCutoffTime,
+          workingDays: shift.workingDays,
+          weekdayOffRules: shift.weekdayOffRules,
+          officeLatitude: activeBranch?.officeLatitude ?? settings?.officeLatitude ?? null,
+          officeLongitude:
+            activeBranch?.officeLongitude ?? settings?.officeLongitude ?? null,
+          allowedRadiusMeters:
+            activeBranch?.allowedRadiusMeters ??
+            settings?.allowedRadiusMeters ??
+            100,
+          altLocations: activeBranch?.altLocations ?? [],
         };
       }
     }
 
+    if (activeBranch) {
+      return {
+        shiftId: null,
+        branchId: activeBranch.id,
+        workStartTime: activeBranch.workStartTime,
+        workEndTime: activeBranch.workEndTime,
+        graceMinutes: activeBranch.graceMinutes,
+        lateThresholdMinutes: activeBranch.lateThresholdMinutes,
+        halfDayCutoffTime: activeBranch.halfDayCutoffTime,
+        workingDays: activeBranch.workingDays,
+        weekdayOffRules: activeBranch.weekdayOffRules,
+        officeLatitude: activeBranch.officeLatitude,
+        officeLongitude: activeBranch.officeLongitude,
+        allowedRadiusMeters: activeBranch.allowedRadiusMeters,
+        altLocations: activeBranch.altLocations ?? [],
+      };
+    }
+
     const settings = await this.getOrCreateAttendanceSettings(organizationId);
     return {
+      shiftId: null,
       branchId: null,
       workStartTime: settings.workStartTime,
       workEndTime: settings.workEndTime,
@@ -2139,6 +2215,104 @@ async getAttendanceReport(
     const result = await this.branchRepo.delete(id);
     if (!result.affected) {
       throw new NotFoundException(`Branch with ID ${id} not found`);
+    }
+  }
+
+  // ===== Shift Methods =====
+  async createShift(dto: CreateShiftDto): Promise<AttendanceShift> {
+    const normalizedName = this.normalizeShiftName(dto.name);
+    if (!normalizedName) {
+      throw new BadRequestException('Shift name is required');
+    }
+
+    const existingShifts = await this.shiftRepo.find({
+      where: { organizationId: dto.organizationId },
+      select: ['id', 'name'],
+    });
+    if (
+      existingShifts.some(
+        (shift) =>
+          this.canonicalShiftName(shift.name) ===
+          this.canonicalShiftName(normalizedName),
+      )
+    ) {
+      throw new BadRequestException(`Shift "${normalizedName}" already exists`);
+    }
+
+    const orgSettings = await this.getOrCreateAttendanceSettings(dto.organizationId);
+    const shift = this.shiftRepo.create({
+      ...dto,
+      name: normalizedName,
+      description: dto.description?.trim() || null,
+      workStartTime: dto.workStartTime ?? orgSettings.workStartTime ?? '09:00:00',
+      workEndTime: dto.workEndTime ?? orgSettings.workEndTime ?? '18:00:00',
+      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes ?? 15,
+      lateThresholdMinutes:
+        dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes ?? 30,
+      halfDayCutoffTime:
+        dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime ?? '14:00:00',
+      workingDays:
+        Array.isArray(dto.workingDays) && dto.workingDays.length
+          ? dto.workingDays
+          : orgSettings.workingDays,
+      weekdayOffRules: dto.weekdayOffRules ?? orgSettings.weekdayOffRules ?? {},
+      isActive: dto.isActive ?? true,
+    });
+
+    return this.shiftRepo.save(shift);
+  }
+
+  async listShifts(organizationId: string): Promise<AttendanceShift[]> {
+    return this.shiftRepo.find({
+      where: { organizationId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async updateShift(id: string, dto: UpdateShiftDto): Promise<AttendanceShift> {
+    const shift = await this.shiftRepo.findOne({ where: { id } });
+    if (!shift) {
+      throw new NotFoundException(`Shift with ID ${id} not found`);
+    }
+
+    if (dto.name !== undefined) {
+      const normalizedName = this.normalizeShiftName(dto.name);
+      if (!normalizedName) {
+        throw new BadRequestException('Shift name is required');
+      }
+      const targetCanonicalName = this.canonicalShiftName(normalizedName);
+      const currentCanonicalName = this.canonicalShiftName(shift.name);
+
+      if (targetCanonicalName !== currentCanonicalName) {
+        const existingShifts = await this.shiftRepo.find({
+          where: { organizationId: shift.organizationId },
+          select: ['id', 'name'],
+        });
+        const hasDuplicate = existingShifts.some(
+          (item) =>
+            item.id !== id &&
+            this.canonicalShiftName(item.name) === targetCanonicalName,
+        );
+        if (hasDuplicate) {
+          throw new BadRequestException(`Shift "${normalizedName}" already exists`);
+        }
+      }
+
+      dto.name = normalizedName;
+    }
+
+    if (dto.description !== undefined) {
+      dto.description = dto.description?.trim() || undefined;
+    }
+
+    Object.assign(shift, dto);
+    return this.shiftRepo.save(shift);
+  }
+
+  async deleteShift(id: string): Promise<void> {
+    const result = await this.shiftRepo.delete(id);
+    if (!result.affected) {
+      throw new NotFoundException(`Shift with ID ${id} not found`);
     }
   }
 

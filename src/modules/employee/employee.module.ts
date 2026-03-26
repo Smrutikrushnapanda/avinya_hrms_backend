@@ -19,6 +19,7 @@ import { Role } from '../auth-core/entities/role.entity';
 import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
 import { Branch } from '../attendance/entities/branch.entity';
+import { AttendanceShift } from '../attendance/entities/attendance-shift.entity';
 import { StorageService } from '../attendance/storage.service';
 import { ResignationRequest } from '../resignation/entities/resignation-request.entity';
 import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.entity';
@@ -41,6 +42,7 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
       UserRole,
       Role,
       Branch,
+      AttendanceShift,
       ResignationRequest,
       WorkflowAssignment,
       Timesheet,

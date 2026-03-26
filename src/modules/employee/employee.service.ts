@@ -17,6 +17,7 @@ import { LeaveService } from '../leave/leave.service';
 import { WfhService } from '../wfh/wfh.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from '../attendance/entities/branch.entity';
+import { AttendanceShift } from '../attendance/entities/attendance-shift.entity';
 import { StorageService } from '../attendance/storage.service';
 import { ResignationRequest } from '../resignation/entities/resignation-request.entity';
 import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.entity';
@@ -43,6 +44,9 @@ export class EmployeeService {
     private readonly employeeProfileRepository: Repository<EmployeeProfile>,
     @InjectRepository(Branch)
     private readonly branchRepository: Repository<Branch>,
+
+    @InjectRepository(AttendanceShift)
+    private readonly shiftRepository: Repository<AttendanceShift>,
 
     @InjectRepository(UserRole)
     private readonly userRoleRepository: Repository<UserRole>,
@@ -84,6 +88,10 @@ export class EmployeeService {
 
       const { loginUserName: rawLoginUserName, loginPassword, roleId, ...employeePayload } = dto;
       const loginUserName = rawLoginUserName.trim();
+      await this.ensureShiftBelongsToOrganization(
+        dto.organizationId,
+        dto.shiftId ?? null,
+      );
       const selectedRole = await this.resolveRoleForEmployee(
         dto.organizationId,
         roleId,
@@ -213,7 +221,7 @@ export class EmployeeService {
   async findByUserId(userId: string): Promise<any | null> {
     const employee = await this.employeeRepository.findOne({
       where: { userId },
-      relations: ['user', 'organization', 'department', 'designation', 'manager'],
+      relations: ['user', 'organization', 'department', 'designation', 'manager', 'branch', 'shift'],
     });
     if (!employee) return null;
 
@@ -253,7 +261,7 @@ export class EmployeeService {
       
       const emps = await this.employeeRepository.find({
         where: { organizationId },
-        relations: ['department', 'designation', 'manager', 'user', 'branch'],
+        relations: ['department', 'designation', 'manager', 'user', 'branch', 'shift'],
         order: { firstName: 'ASC' },
       });
       
@@ -282,7 +290,7 @@ export class EmployeeService {
     
     const employee = await this.employeeRepository.findOne({
       where: { id },
-      relations: ['department', 'designation', 'manager', 'user', 'branch'],
+      relations: ['department', 'designation', 'manager', 'user', 'branch', 'shift'],
     });
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
@@ -318,6 +326,14 @@ export class EmployeeService {
   async update(id: string, dto: UpdateEmployeeDto) {
     const { loginUserName, loginPassword, roleId, ...employeeUpdate } =
       dto as any;
+
+    if (Object.prototype.hasOwnProperty.call(employeeUpdate, 'shiftId')) {
+      const existingEmployee = await this.findOne(id);
+      await this.ensureShiftBelongsToOrganization(
+        existingEmployee.organizationId,
+        employeeUpdate.shiftId ?? null,
+      );
+    }
 
     if (Object.keys(employeeUpdate).length > 0) {
       await this.employeeRepository.update(id, employeeUpdate);
@@ -651,6 +667,7 @@ export class EmployeeService {
       .leftJoinAndSelect('employee.designation', 'designation')
       .leftJoinAndSelect('employee.manager', 'manager')
       .leftJoinAndSelect('employee.branch', 'branch')
+      .leftJoinAndSelect('employee.shift', 'shift')
       .leftJoinAndSelect('employee.user', 'user')
       .where('employee.organizationId = :organizationId', { organizationId });
 
@@ -799,6 +816,13 @@ export class EmployeeService {
 
   async getBranchesForOrg(organizationId: string) {
     return this.branchRepository.find({
+      where: { organizationId, isActive: true },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async getShiftsForOrg(organizationId: string) {
+    return this.shiftRepository.find({
       where: { organizationId, isActive: true },
       order: { name: 'ASC' },
     });
@@ -1151,6 +1175,22 @@ export class EmployeeService {
         createdBy: 'system',
       }),
     );
+  }
+
+  private async ensureShiftBelongsToOrganization(
+    organizationId: string,
+    shiftId?: string | null,
+  ): Promise<void> {
+    if (!shiftId) return;
+
+    const shift = await this.shiftRepository.findOne({
+      where: { id: shiftId, organizationId },
+      select: ['id'],
+    });
+
+    if (!shift) {
+      throw new BadRequestException('Selected shift was not found for this organization');
+    }
   }
 
   private async setUserPrimaryRole(userId: string, role: Role) {

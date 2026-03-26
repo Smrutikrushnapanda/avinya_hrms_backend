@@ -1,7 +1,15 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { Attendance, AttendanceLog, BiometricDevice, WifiLocation, AttendanceSettings, Branch } from './entities';
+import {
+  Attendance,
+  AttendanceLog,
+  BiometricDevice,
+  WifiLocation,
+  AttendanceSettings,
+  Branch,
+  AttendanceShift,
+} from './entities';
 
 import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
@@ -20,6 +28,7 @@ import { StorageService } from './storage.service';
         WifiLocation,
         AttendanceSettings,
         Branch,
+        AttendanceShift,
         LeaveRequest,
         Holiday,
         Employee,
