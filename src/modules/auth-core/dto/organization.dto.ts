@@ -124,6 +124,12 @@ export class StartTrialDto {
   @IsOptional()
   @IsString()
   submittedAt?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(3)
+  pricingTypeId?: number;
 }
 
 export class ChangeCredentialsDto {

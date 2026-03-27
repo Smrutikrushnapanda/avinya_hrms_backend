@@ -13,8 +13,10 @@ import { MessageService } from './message.service';
 import { MessageGateway } from './message.gateway';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MarkMessageReadDto } from './dto/mark-read.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @ApiTags('Messages')
+@RequireProPlan()
 @Controller('messages')
 @UseGuards(JwtAuthGuard)
 export class MessageController {

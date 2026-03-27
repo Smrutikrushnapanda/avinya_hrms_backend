@@ -1,10 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Put, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { LogReportService } from './log-report.service';
 import { CreateLogReportDto } from './dto/log-report.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Log Reports')
+@RequireProPlan()
 @Controller('logreports')
+@UseGuards(JwtAuthGuard)
 export class LogReportController {
   constructor(private readonly logReportService: LogReportService) {}
 

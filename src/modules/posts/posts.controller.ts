@@ -7,11 +7,16 @@ import {
   Body,
   Param,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { PostType } from './entities/post.entity';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
+@RequireProPlan()
 @Controller('posts')
+@UseGuards(JwtAuthGuard)
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
@@ -168,4 +173,3 @@ export class PostsController {
     return { count: await this.postsService.getPostCount(organizationId) };
   }
 }
-

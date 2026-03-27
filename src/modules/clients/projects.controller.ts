@@ -6,9 +6,11 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @ApiTags('Projects')
 @ApiBearerAuth()
+@RequireProPlan()
 @Controller('client-projects')
 export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}

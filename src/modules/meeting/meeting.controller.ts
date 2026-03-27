@@ -11,7 +11,9 @@ import {
 import { MeetingService } from './meeting.service';
 import { CreateMeetingDto, UpdateMeetingDto } from './dto/meeting.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
+@RequireProPlan()
 @Controller('meetings')
 @UseGuards(JwtAuthGuard)
 export class MeetingController {
@@ -70,4 +72,3 @@ export class MeetingController {
     return this.meetingService.updateMeetingStatus(id, status);
   }
 }
-

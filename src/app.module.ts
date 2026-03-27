@@ -34,8 +34,10 @@ import { MailModule } from './modules/mail/mail.module';
 import { ResignationModule } from './modules/resignation/resignation.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { UploadModule } from './modules/upload/upload.module';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { PricingModule } from './modules/pricing/pricing.module';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
+import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
 
 @Module({
   imports: [
@@ -92,10 +94,12 @@ import { LogReportInterceptor } from './shared/log-report.interceptor';
     ResignationModule,
     PostsModule,
     UploadModule,
+    PricingModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_GUARD, useClass: PlanAccessGuard },
     { provide: APP_INTERCEPTOR, useClass: LogReportInterceptor },
   ],
 })

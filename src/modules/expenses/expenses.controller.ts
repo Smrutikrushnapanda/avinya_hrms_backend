@@ -8,13 +8,18 @@ import {
   Body,
   Query,
   ParseUUIDPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto, UpdateExpenseStatusDto } from './dto/create-expense.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Expenses')
+@RequireProPlan()
 @Controller('expenses')
+@UseGuards(JwtAuthGuard)
 export class ExpensesController {
   constructor(private readonly expensesService: ExpensesService) {}
 

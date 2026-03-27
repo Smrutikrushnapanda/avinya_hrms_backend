@@ -14,7 +14,9 @@ import { CreatePolicyDto } from './dto/create-policy.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
+@RequireProPlan()
 @Controller('policy')
 @UseGuards(JwtAuthGuard)
 export class PolicyController {

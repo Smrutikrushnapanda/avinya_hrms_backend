@@ -31,8 +31,10 @@ import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import * as fs from 'fs';
 import { Express } from 'express';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @ApiTags('Chat')
+@RequireProPlan()
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
 export class ChatController {

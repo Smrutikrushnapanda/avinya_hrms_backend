@@ -9,6 +9,7 @@ import {
   Query,
   Delete,
   Patch,
+  UseGuards,
 } from '@nestjs/common';
 import { PollsService } from './polls.service';
 import { CreatePollDto } from './dto/create-poll.dto';
@@ -23,9 +24,13 @@ import {
   ApiQuery,
   ApiParam,
 } from '@nestjs/swagger';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Polls')
+@RequireProPlan()
 @Controller('polls')
+@UseGuards(JwtAuthGuard)
 export class PollsController {
   constructor(private readonly pollsService: PollsService) {}
 

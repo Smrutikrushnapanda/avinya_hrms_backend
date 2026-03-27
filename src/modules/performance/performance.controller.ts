@@ -16,7 +16,9 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
+@RequireProPlan()
 @Controller('performance')
 @UseGuards(JwtAuthGuard)
 export class PerformanceController {

@@ -1,11 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PayrollService } from './payroll.service';
 import { CreatePayrollRecordDto, SendPayslipDto, UpdatePayrollRecordDto, UpdatePayrollSettingsDto } from './dto/payroll.dto';
+import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Payroll')
+@RequireProPlan()
 @Controller('payroll')
+@UseGuards(JwtAuthGuard)
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}
 

@@ -12,7 +12,7 @@ const DEFAULT_PRICING_TYPES: Array<Partial<PricingType>> = [
     billingModel: 'MONTHLY',
     isCustomPricing: false,
     description:
-      'Attendance-focused plan with basic admin web, employee web, and limited mobile navigation.',
+      'Attendance-focused plan with attendance, leave, WFH, and timeslips across mobile, employee web, and admin web.',
   },
   {
     typeId: 2,
@@ -22,7 +22,7 @@ const DEFAULT_PRICING_TYPES: Array<Partial<PricingType>> = [
     billingModel: 'MONTHLY',
     isCustomPricing: false,
     description:
-      'Full-featured HRMS plan across admin web, employee web, and mobile.',
+      'Full-featured HRMS plan with all modules enabled across admin web, employee web, and mobile.',
   },
   {
     typeId: 3,
@@ -32,7 +32,7 @@ const DEFAULT_PRICING_TYPES: Array<Partial<PricingType>> = [
     billingModel: 'CUSTOM_QUOTE',
     isCustomPricing: true,
     description:
-      'Enterprise plan with dedicated database, priority support, and custom rollout scope.',
+      'Enterprise plan with dedicated database, isolated data environment, priority support, and organization-specific customization.',
   },
 ];
 

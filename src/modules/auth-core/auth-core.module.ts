@@ -37,6 +37,7 @@ import { LogReportModule } from '../log-report/log-report.module';
 import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
 import { AttendanceModule } from '../attendance/attendance.module';
+import { PricingModule } from '../pricing/pricing.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
     forwardRef(() => LeaveModule),
     forwardRef(() => WfhModule),
     forwardRef(() => AttendanceModule),
+    PricingModule,
   ],
   controllers: [
     OrganizationController,
@@ -84,6 +86,13 @@ import { AttendanceModule } from '../attendance/attendance.module';
     PricingTypeSeederService,
     StorageService,
   ],
-  exports: [OrganizationService, AuthService, UsersService, RolesService, TypeOrmModule],
+  exports: [
+    OrganizationService,
+    AuthService,
+    UsersService,
+    RolesService,
+    TypeOrmModule,
+    JwtModule,
+  ],
 })
 export class AuthCoreModule {}

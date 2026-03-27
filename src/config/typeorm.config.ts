@@ -40,7 +40,7 @@ const dataSource = new DataSource({
   schema: dbSchema,
 
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
-  migrations: [path.join(__dirname, '/../database/migrations/*{.ts,.js}')],
+  migrations: [path.join(__dirname, '/../migrations/*{.ts,.js}')],
 
   synchronize: true,
 

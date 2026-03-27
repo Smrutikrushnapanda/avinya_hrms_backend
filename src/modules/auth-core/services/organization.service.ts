@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationSettings } from '../entities/organization-settings.entity';
+import { PricingType } from '../entities/pricing-type.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
@@ -11,6 +12,9 @@ import { RoleType } from '../enums/role-type.enum';
 import { LeaveService } from '../../leave/leave.service';
 import { WfhService } from '../../wfh/wfh.service';
 import { MailService } from '../../mail/mail.service';
+import { PricingService } from '../../pricing/pricing.service';
+import { PlanType } from '../../pricing/entities/pricing-plan.entity';
+import { SubscriptionStatus } from '../../pricing/entities/subscription.entity';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -23,6 +27,8 @@ export class OrganizationService {
     private readonly orgRepo: Repository<Organization>,
     @InjectRepository(OrganizationSettings)
     private readonly orgSettingsRepo: Repository<OrganizationSettings>,
+    @InjectRepository(PricingType)
+    private readonly pricingTypeRepo: Repository<PricingType>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(Role)
@@ -34,6 +40,7 @@ export class OrganizationService {
     @Inject(forwardRef(() => WfhService))
     private readonly wfhService: WfhService,
     private readonly mailService: MailService,
+    private readonly pricingService: PricingService,
   ) {}
 
   private normalizeNullableText(value?: string | null): string | null {
@@ -70,6 +77,19 @@ export class OrganizationService {
     }
 
     throw new ConflictException('Unable to allocate default admin username right now.');
+  }
+
+  private mapPricingTypeToPlanType(pricingTypeId: number): PlanType {
+    switch (pricingTypeId) {
+      case 1:
+        return PlanType.BASIC;
+      case 2:
+        return PlanType.PRO;
+      case 3:
+        return PlanType.ENTERPRISE;
+      default:
+        throw new BadRequestException('Invalid pricing type selected.');
+    }
   }
 
   async create(data: CreateOrganizationDto, createdBy: string) {
@@ -178,6 +198,24 @@ export class OrganizationService {
     const email = this.normalizeEmail(data.email);
     const phone = data.phone?.trim() || undefined;
     const source = data.source?.trim() || 'pricing-start-trial';
+    const pricingTypeId = data.pricingTypeId ?? 2;
+
+    const pricingType = await this.pricingTypeRepo.findOne({
+      where: { typeId: pricingTypeId },
+    });
+
+    if (!pricingType) {
+      throw new BadRequestException('Invalid pricing type selected.');
+    }
+
+    if (pricingType.isCustomPricing || pricingType.typeId === 3) {
+      throw new BadRequestException(
+        'Enterprise requests should be handled by the sales team.',
+      );
+    }
+
+    const planType = this.mapPricingTypeToPlanType(pricingType.typeId);
+    const pricingPlan = await this.pricingService.getPlanByType(planType);
 
     const existingOrganization = await this.orgRepo
       .createQueryBuilder('organization')
@@ -215,6 +253,16 @@ export class OrganizationService {
       'trial-system',
     );
 
+    await this.pricingService.createSubscription({
+      organizationId: organization.id,
+      planId: pricingPlan.id,
+      status: SubscriptionStatus.TRIAL,
+      startDate: new Date().toISOString(),
+      billingCycleMonths: 1,
+      paymentMethod: 'TRIAL',
+      customizations: `${pricingType.typeName} trial signup (${source})`,
+    });
+
     await this.mailService.sendEmployeeCredentials({
       organizationId: organization.id,
       employeeEmail: email,
@@ -229,6 +277,9 @@ export class OrganizationService {
       organizationId: organization.id,
       credentialsSent: true,
       adminUserName: organization.adminUserName,
+      pricingTypeId: pricingType.typeId,
+      planId: pricingPlan.id,
+      planName: pricingPlan.name,
     };
   }
 
