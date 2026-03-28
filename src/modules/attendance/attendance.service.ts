@@ -1467,9 +1467,11 @@ export class AttendanceService {
       config.workStartTime,
       config.workEndTime,
     );
-    const cutoffTime = config.halfDayCutoffTime || '14:00:00';
     const start = this.parseTimeToMinutes(config.workStartTime);
-    const cutoff = this.parseTimeToMinutes(cutoffTime);
+    const cutoff =
+      typeof config.halfDayCutoffTime === 'string' && config.halfDayCutoffTime.trim()
+        ? this.parseTimeToMinutes(config.halfDayCutoffTime)
+        : start + Math.floor(fullShiftMinutes / 2);
 
     let threshold = cutoff - start;
     if (threshold <= 0) threshold += 24 * 60;
@@ -1505,10 +1507,8 @@ export class AttendanceService {
       config.workStartTime,
       config.workEndTime,
     );
-    const lateAfterMinutes =
-      Number(config.graceMinutes ?? NaN) ||
-      Number(config.lateThresholdMinutes ?? NaN) ||
-      0;
+    const lateAfterRaw = config.graceMinutes ?? config.lateThresholdMinutes ?? 0;
+    const lateAfterMinutes = Number(lateAfterRaw);
     const safeLateAfter = Math.max(0, lateAfterMinutes);
     const lateCutoff = new Date(windowStart.getTime() + safeLateAfter * 60_000);
     return inTime.getTime() > lateCutoff.getTime();
@@ -2148,11 +2148,11 @@ async getAttendanceReport(
     const branch = this.branchRepo.create({
       ...dto,
       name: normalizedName,
-      workStartTime: dto.workStartTime ?? orgSettings.workStartTime ?? '09:00:00',
-      workEndTime: dto.workEndTime ?? orgSettings.workEndTime ?? '18:00:00',
-      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes ?? 15,
-      lateThresholdMinutes: dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes ?? 30,
-      halfDayCutoffTime: dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime ?? '14:00:00',
+      workStartTime: dto.workStartTime ?? orgSettings.workStartTime,
+      workEndTime: dto.workEndTime ?? orgSettings.workEndTime,
+      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes,
+      lateThresholdMinutes: dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes,
+      halfDayCutoffTime: dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime,
       workingDays:
         Array.isArray(dto.workingDays) && dto.workingDays.length
           ? dto.workingDays
@@ -2244,13 +2244,13 @@ async getAttendanceReport(
       ...dto,
       name: normalizedName,
       description: dto.description?.trim() || null,
-      workStartTime: dto.workStartTime ?? orgSettings.workStartTime ?? '09:00:00',
-      workEndTime: dto.workEndTime ?? orgSettings.workEndTime ?? '18:00:00',
-      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes ?? 15,
+      workStartTime: dto.workStartTime ?? orgSettings.workStartTime,
+      workEndTime: dto.workEndTime ?? orgSettings.workEndTime,
+      graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes,
       lateThresholdMinutes:
-        dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes ?? 30,
+        dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes,
       halfDayCutoffTime:
-        dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime ?? '14:00:00',
+        dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime,
       workingDays:
         Array.isArray(dto.workingDays) && dto.workingDays.length
           ? dto.workingDays
