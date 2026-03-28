@@ -21,7 +21,7 @@ type RequestWithAuth = Request & {
 @Injectable()
 export class PlanAccessGuard implements CanActivate {
   private readonly planRestrictionsEnabled =
-    process.env.ENABLE_PLAN_RESTRICTIONS === 'true';
+    process.env.ENABLE_PLAN_RESTRICTIONS !== 'false';
 
   constructor(
     private readonly reflector: Reflector,
@@ -43,9 +43,9 @@ export class PlanAccessGuard implements CanActivate {
       return true;
     }
 
-    // For now Basic and Pro Launch share the same product surface. Keep the
-    // guard wiring in place so we can turn enforcement back on once billing and
-    // payment-gateway based access control is ready.
+    // Plan restrictions are enabled by default. Set
+    // ENABLE_PLAN_RESTRICTIONS=false only when you explicitly want to open the
+    // full product surface during billing/payment integration work.
     if (!this.planRestrictionsEnabled) {
       return true;
     }
