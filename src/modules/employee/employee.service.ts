@@ -146,6 +146,9 @@ export class EmployeeService {
       }
 
       const existingUser = uniqueMatchedUsers[0] ?? null;
+      const matchedAnotherOrganization =
+        existingUser?.organizationId &&
+        existingUser.organizationId !== dto.organizationId;
 
       const userDto: CreateUserDto = {
         userName: loginUserName,
@@ -161,11 +164,37 @@ export class EmployeeService {
       };
 
       if (existingUser) {
+        if (matchedAnotherOrganization) {
+          if (existingUserByEmail?.id === existingUser.id) {
+            throw new ConflictException(
+              'Work email is already used in another organization',
+            );
+          }
+          if (existingUserByUserName?.id === existingUser.id) {
+            throw new ConflictException(
+              'Username is already used in another organization',
+            );
+          }
+          if (existingUserByMobile?.id === existingUser.id) {
+            throw new ConflictException(
+              'Contact number is already used in another organization',
+            );
+          }
+          throw new ConflictException(
+            'User details are already used in another organization',
+          );
+        }
+
         const existingEmployee = await this.employeeRepository.findOne({
           where: { userId: existingUser.id },
         });
 
         if (existingEmployee) {
+          if (existingEmployee.organizationId !== dto.organizationId) {
+            throw new ConflictException(
+              'This user is already linked to an employee in another organization',
+            );
+          }
           throw new ConflictException(
             `Employee already exists for this user (employee code: ${existingEmployee.employeeCode})`,
           );
