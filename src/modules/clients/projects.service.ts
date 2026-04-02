@@ -88,6 +88,35 @@ export class ProjectsService implements OnModuleInit {
     });
   }
 
+  async findOneForUser(
+    id: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['client', 'manager', 'manager.user', 'members', 'members.user'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.organizationId !== organizationId) {
+      throw new ForbiddenException('Project does not belong to your organization');
+    }
+
+    if (isAdminOrManager) {
+      return project;
+    }
+
+    const isManager = Boolean(project.manager?.userId && project.manager.userId === userId);
+    const isMember = (project.members ?? []).some((member) => member.userId === userId);
+
+    if (!isManager && !isMember) {
+      throw new ForbiddenException('You are not assigned to this project');
+    }
+
+    return project;
+  }
+
   async update(id: string, dto: UpdateProjectDto) {
     const project = await this.projectRepo.findOne({ where: { id } });
     if (!project) throw new NotFoundException('Project not found');

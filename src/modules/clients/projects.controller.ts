@@ -51,6 +51,21 @@ export class ProjectsController {
     return this.projectsService.findAll(orgId, clientId);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a client project by id' })
+  @UseGuards(JwtAuthGuard)
+  findOne(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.projectsService.findOneForUser(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
   @Put(':id')
   @ApiOperation({ summary: 'Update project' })
   @UseGuards(JwtAuthGuard)
