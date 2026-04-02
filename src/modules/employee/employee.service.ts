@@ -97,13 +97,55 @@ export class EmployeeService {
         roleId,
       );
 
-      const existingUser = await this.userRepository.findOne({
-        where: [
-          { email: dto.workEmail },
-          { userName: loginUserName },
-          ...(dto.contactNumber ? [{ mobileNumber: dto.contactNumber }] : []),
-        ],
-      });
+      const normalizedWorkEmail = dto.workEmail.trim().toLowerCase();
+      const normalizedContactNumber = dto.contactNumber?.trim() || undefined;
+
+      const [existingUserByEmail, existingUserByUserName, existingUserByMobile] =
+        await Promise.all([
+          this.userRepository.findOne({
+            where: { email: normalizedWorkEmail },
+          }),
+          this.userRepository.findOne({
+            where: { userName: loginUserName },
+          }),
+          normalizedContactNumber
+            ? this.userRepository.findOne({
+                where: { mobileNumber: normalizedContactNumber },
+              })
+            : Promise.resolve(null),
+        ]);
+
+      const matchedUsers = [
+        existingUserByEmail,
+        existingUserByUserName,
+        existingUserByMobile,
+      ].filter(Boolean) as User[];
+      const uniqueMatchedUsers = Array.from(
+        new Map(matchedUsers.map((user) => [user.id, user])).values(),
+      );
+
+      if (uniqueMatchedUsers.length > 1) {
+        if (
+          existingUserByEmail &&
+          uniqueMatchedUsers.some((user) => user.id !== existingUserByEmail.id)
+        ) {
+          throw new ConflictException('Work email is already linked to another user');
+        }
+        if (
+          existingUserByUserName &&
+          uniqueMatchedUsers.some((user) => user.id !== existingUserByUserName.id)
+        ) {
+          throw new ConflictException('Username already in use');
+        }
+        if (
+          existingUserByMobile &&
+          uniqueMatchedUsers.some((user) => user.id !== existingUserByMobile.id)
+        ) {
+          throw new ConflictException('Contact number is already linked to another user');
+        }
+      }
+
+      const existingUser = uniqueMatchedUsers[0] ?? null;
 
       const userDto: CreateUserDto = {
         userName: loginUserName,
@@ -111,34 +153,31 @@ export class EmployeeService {
         firstName: dto.firstName,
         middleName: dto.middleName,
         lastName: dto.lastName ?? '',
-        email: dto.workEmail,
-        mobileNumber: dto.contactNumber ?? undefined,
+        email: normalizedWorkEmail,
+        mobileNumber: normalizedContactNumber,
         dob: dto.dateOfBirth,
         gender: dto.gender,
         organizationId: dto.organizationId,
       };
 
       if (existingUser) {
-        const existingByUserName = await this.userRepository.findOne({
-          where: { userName: loginUserName },
-        });
-        if (existingByUserName && existingByUserName.id !== existingUser.id) {
-          throw new ConflictException('Username already in use');
-        }
-
-        existingUser.userName = loginUserName;
-        existingUser.password = await bcrypt.hash(loginPassword, 12);
-        existingUser.mustChangePassword = true;
-        existingUser.organizationId = dto.organizationId;
-        await this.userRepository.save(existingUser);
-
         const existingEmployee = await this.employeeRepository.findOne({
           where: { userId: existingUser.id },
         });
 
         if (existingEmployee) {
-          throw new ConflictException('Employee already exists for this user');
+          throw new ConflictException(
+            `Employee already exists for this user (employee code: ${existingEmployee.employeeCode})`,
+          );
         }
+
+        existingUser.userName = loginUserName;
+        existingUser.email = normalizedWorkEmail;
+        existingUser.mobileNumber = normalizedContactNumber;
+        existingUser.password = await bcrypt.hash(loginPassword, 12);
+        existingUser.mustChangePassword = true;
+        existingUser.organizationId = dto.organizationId;
+        await this.userRepository.save(existingUser);
 
         await this.setUserPrimaryRole(existingUser.id, selectedRole);
 
