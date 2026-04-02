@@ -3,9 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ClientProject } from './entities/project.entity';
 import { ClientProjectMember } from './entities/client-project-member.entity';
+import { ProjectTask, TaskStatus, TaskPriority } from './entities/project-task.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
+import { User } from 'src/modules/auth-core/entities/user.entity';
 
 @Injectable()
 export class ProjectsService implements OnModuleInit {
@@ -16,6 +18,10 @@ export class ProjectsService implements OnModuleInit {
     private memberRepo: Repository<ClientProjectMember>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    @InjectRepository(ProjectTask)
+    private taskRepo: Repository<ProjectTask>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
   ) {}
 
   async onModuleInit() {
@@ -314,6 +320,127 @@ export class ProjectsService implements OnModuleInit {
     const member = await this.memberRepo.findOne({ where: { projectId, userId } });
     if (!member) throw new NotFoundException('Employee not found in this project');
     await this.memberRepo.remove(member);
+    return { success: true };
+  }
+
+  // ─── Task Management ───────────────────────────────────────────────────────────────
+
+  async createTask(
+    projectId: string,
+    data: {
+      title: string;
+      description?: string;
+      assignedToUserId?: string;
+      assignedByUserId: string;
+      dueDate?: string;
+      priority?: TaskPriority;
+    },
+  ) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const task = this.taskRepo.create({
+      projectId,
+      title: data.title,
+      description: data.description || null,
+      assignedToUserId: data.assignedToUserId || null,
+      assignedByUserId: data.assignedByUserId,
+      dueDate: data.dueDate || null,
+      priority: data.priority || TaskPriority.MEDIUM,
+      status: TaskStatus.PENDING,
+    });
+
+    return this.taskRepo.save(task);
+  }
+
+  async getProjectTasks(projectId: string) {
+    const tasks = await this.taskRepo.find({
+      where: { projectId },
+      relations: ['assignedToUser', 'assignedByUser'],
+      order: { createdAt: 'DESC' },
+    });
+    return tasks;
+  }
+
+  async getMyAssignedTasks(userId: string, organizationId: string) {
+    // Get tasks assigned to this user across all projects in the organization
+    const employee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+    });
+    if (!employee) return [];
+
+    // Also get tasks via project membership
+    const memberProjectIds = await this.memberRepo
+      .find({
+        where: { userId },
+        select: ['projectId'],
+      })
+      .then((members) => members.map((m) => m.projectId));
+
+    const tasks = await this.taskRepo
+      .createQueryBuilder('task')
+      .leftJoinAndSelect('task.project', 'project')
+      .leftJoinAndSelect('task.assignedToUser', 'assignedToUser')
+      .leftJoinAndSelect('task.assignedByUser', 'assignedByUser')
+      .where('task.assigned_to_user_id = :userId', { userId })
+      .andWhere('project.organization_id = :organizationId', { organizationId })
+      .orderBy('task.createdAt', 'DESC')
+      .getMany();
+
+    return tasks;
+  }
+
+  async updateTaskStatus(
+    taskId: string,
+    userId: string,
+    status: TaskStatus,
+  ) {
+    const task = await this.taskRepo.findOne({
+      where: { id: taskId },
+      relations: ['project'],
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    // Only assigned user or project manager can update status
+    if (task.assignedToUserId !== userId) {
+      const employee = await this.employeeRepo.findOne({
+        where: { userId, organizationId: task.project.organizationId },
+      });
+      if (employee?.id !== task.project.managerId) {
+        throw new ForbiddenException('You cannot update this task');
+      }
+    }
+
+    task.status = status;
+    if (status === TaskStatus.COMPLETED) {
+      task.completedAt = new Date();
+    } else {
+      task.completedAt = null;
+    }
+
+    return this.taskRepo.save(task);
+  }
+
+  async deleteTask(taskId: string, userId: string, organizationId: string) {
+    const task = await this.taskRepo.findOne({
+      where: { id: taskId },
+      relations: ['project'],
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    // Only assigned user or project manager can delete
+    const employee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+    });
+    if (
+      task.assignedByUserId !== userId &&
+      task.assignedToUserId !== userId &&
+      employee?.id !== task.project.managerId
+    ) {
+      throw new ForbiddenException('You cannot delete this task');
+    }
+
+    await this.taskRepo.remove(task);
     return { success: true };
   }
 }

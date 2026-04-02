@@ -11,6 +11,7 @@ import {
 import { Client } from './client.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { ClientProjectMember } from './client-project-member.entity';
+import { ProjectTask } from './project-task.entity';
 
 @Entity('client_projects')
 export class ClientProject {
@@ -37,6 +38,9 @@ export class ClientProject {
 
   @OneToMany(() => ClientProjectMember, (member) => member.project)
   members: ClientProjectMember[];
+
+  @OneToMany(() => ProjectTask, (task) => task.project)
+  tasks: ProjectTask[];
 
   // Default empty string lets TypeORM add the column on existing rows without failing on NOT NULL
   @Column({ name: 'project_name', length: 150, default: '' })

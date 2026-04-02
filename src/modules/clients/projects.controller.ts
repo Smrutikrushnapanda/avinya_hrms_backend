@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
+import { TaskStatus, TaskPriority } from './entities/project-task.entity';
 
 @ApiTags('Projects')
 @ApiBearerAuth()
@@ -112,5 +113,65 @@ export class ProjectsController {
     @Param('userId') userId: string,
   ) {
     return this.projectsService.removeEmployee(id, userId);
+  }
+
+  // ─── Task Management ───────────────────────────────────────────────────
+
+  @Post(':id/tasks')
+  @ApiOperation({ summary: 'Create a task/work assignment for a project' })
+  @UseGuards(JwtAuthGuard)
+  createTask(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Body() body: {
+      title: string;
+      description?: string;
+      assignedToUserId?: string;
+      dueDate?: string;
+      priority?: TaskPriority;
+    },
+  ) {
+    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    return this.projectsService.createTask(projectId, {
+      ...body,
+      assignedByUserId: user.userId,
+    });
+  }
+
+  @Get(':id/tasks')
+  @ApiOperation({ summary: 'Get all tasks for a project' })
+  @UseGuards(JwtAuthGuard)
+  getProjectTasks(@Param('id') projectId: string) {
+    return this.projectsService.getProjectTasks(projectId);
+  }
+
+  @Get('tasks/my')
+  @ApiOperation({ summary: 'Get tasks assigned to current user' })
+  @UseGuards(JwtAuthGuard)
+  getMyTasks(@GetUser() user: JwtPayload) {
+    return this.projectsService.getMyAssignedTasks(user.userId, user.organizationId);
+  }
+
+  @Put(':id/tasks/:taskId/status')
+  @ApiOperation({ summary: 'Update task status' })
+  @UseGuards(JwtAuthGuard)
+  updateTaskStatus(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('taskId') taskId: string,
+    @Body() body: { status: TaskStatus },
+  ) {
+    return this.projectsService.updateTaskStatus(taskId, user.userId, body.status);
+  }
+
+  @Delete(':id/tasks/:taskId')
+  @ApiOperation({ summary: 'Delete a task' })
+  @UseGuards(JwtAuthGuard)
+  deleteTask(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.projectsService.deleteTask(taskId, user.userId, user.organizationId);
   }
 }
