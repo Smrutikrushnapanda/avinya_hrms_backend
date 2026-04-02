@@ -30,9 +30,9 @@ export class ProjectsController {
   }
 
   @Get('my')
-  @ApiOperation({ summary: 'Get projects managed by the current user' })
+  @ApiOperation({ summary: 'Get client projects relevant to current user (managed + assigned)' })
   @UseGuards(JwtAuthGuard)
-  findMyManagedProjects(@GetUser() user: JwtPayload) {
+  findMyProjects(@GetUser() user: JwtPayload) {
     return this.projectsService.findManagedByUserId(user.userId, user.organizationId);
   }
 

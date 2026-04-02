@@ -122,14 +122,56 @@ export class ProjectsService implements OnModuleInit {
   async findManagedByUserId(userId: string, organizationId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
-      select: ['id'],
+      select: ['id', 'userId'],
     });
-    if (!employee) return [];
-    return this.projectRepo.find({
-      where: { managerId: employee.id },
-      relations: ['client', 'manager', 'manager.user'],
-      order: { projectName: 'ASC' },
-    });
+
+    // Backward-compatible lookup in case older rows were stored with employeeId
+    // instead of userId in client_project_members.user_id.
+    const membershipLookupIds = Array.from(
+      new Set(
+        [userId, employee?.userId, employee?.id].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    );
+
+    const memberProjectIds =
+      membershipLookupIds.length > 0
+        ? Array.from(
+            new Set(
+              (
+                await this.memberRepo.find({
+                  where: { userId: In(membershipLookupIds) },
+                  select: ['projectId'],
+                })
+              ).map((member) => member.projectId),
+            ),
+          )
+        : [];
+
+    // Visible projects = projects managed by this user + projects assigned to this user.
+    // Keep organization scoping strict.
+    const query = this.projectRepo
+      .createQueryBuilder('project')
+      .leftJoinAndSelect('project.client', 'client')
+      .leftJoinAndSelect('project.manager', 'manager')
+      .leftJoinAndSelect('manager.user', 'managerUser')
+      .where('project.organizationId = :organizationId', { organizationId });
+
+    if (employee?.id && memberProjectIds.length > 0) {
+      query.andWhere(
+        '(project.managerId = :managerId OR project.id IN (:...memberProjectIds))',
+        { managerId: employee.id, memberProjectIds },
+      );
+    } else if (employee?.id) {
+      query.andWhere('project.managerId = :managerId', { managerId: employee.id });
+    } else if (memberProjectIds.length > 0) {
+      query.andWhere('project.id IN (:...memberProjectIds)', { memberProjectIds });
+    } else {
+      return [];
+    }
+
+    return query.orderBy('project.projectName', 'ASC').getMany();
   }
 
   // ─── Employee Assignment ───────────────────────────────────────────────────
