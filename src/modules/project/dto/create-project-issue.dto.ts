@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsUrl, Length } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUrl, IsUUID, Length } from 'class-validator';
 import { ProjectIssueStatus } from '../entities/project-issue.entity';
 
 export class CreateProjectIssueDto {
@@ -21,4 +21,8 @@ export class CreateProjectIssueDto {
   @IsOptional()
   @IsIn(['pending', 'resolved'])
   status?: ProjectIssueStatus;
+
+  @IsOptional()
+  @IsUUID()
+  assigneeUserId?: string | null;
 }

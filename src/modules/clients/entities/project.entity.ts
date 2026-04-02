@@ -6,9 +6,11 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
 import { Client } from './client.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
+import { ClientProjectMember } from './client-project-member.entity';
 
 @Entity('client_projects')
 export class ClientProject {
@@ -32,6 +34,9 @@ export class ClientProject {
   @ManyToOne(() => Employee, { nullable: true })
   @JoinColumn({ name: 'manager_id' })
   manager: Employee | null;
+
+  @OneToMany(() => ClientProjectMember, (member) => member.project)
+  members: ClientProjectMember[];
 
   // Default empty string lets TypeORM add the column on existing rows without failing on NOT NULL
   @Column({ name: 'project_name', length: 150, default: '' })

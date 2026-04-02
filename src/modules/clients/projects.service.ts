@@ -77,7 +77,7 @@ export class ProjectsService implements OnModuleInit {
         organizationId,
         ...(clientId ? { clientId } : {}),
       },
-      relations: ['client', 'manager', 'manager.user'],
+      relations: ['client', 'manager', 'manager.user', 'members', 'members.user'],
       order: { projectName: 'ASC' },
     });
   }
@@ -156,6 +156,8 @@ export class ProjectsService implements OnModuleInit {
       .leftJoinAndSelect('project.client', 'client')
       .leftJoinAndSelect('project.manager', 'manager')
       .leftJoinAndSelect('manager.user', 'managerUser')
+      .leftJoinAndSelect('project.members', 'projectMembers')
+      .leftJoinAndSelect('projectMembers.user', 'projectMemberUser')
       .where('project.organizationId = :organizationId', { organizationId });
 
     if (employee?.id && memberProjectIds.length > 0) {
@@ -177,7 +179,10 @@ export class ProjectsService implements OnModuleInit {
   // ─── Employee Assignment ───────────────────────────────────────────────────
 
   async getProjectEmployees(projectId: string) {
-    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      relations: ['manager', 'manager.user'],
+    });
     if (!project) throw new NotFoundException('Project not found');
 
     const members = await this.memberRepo.find({
@@ -188,7 +193,9 @@ export class ProjectsService implements OnModuleInit {
     const employeesWithInfo = await Promise.all(
       members.map(async (m) => {
         const emp = await this.employeeRepo.findOne({
-          where: { userId: m.userId },
+          where: project.organizationId
+            ? [{ userId: m.userId, organizationId: project.organizationId }]
+            : [{ userId: m.userId }],
           relations: ['manager', 'designation'],
         });
         return {
@@ -210,7 +217,52 @@ export class ProjectsService implements OnModuleInit {
       }),
     );
 
-    return employeesWithInfo;
+    const managerEmployee = project.manager;
+    const managerUserId = managerEmployee?.userId ?? null;
+    const managerRecord = managerUserId
+      ? {
+          userId: managerUserId,
+          role: 'manager',
+          assignedAt: project.createdAt,
+          employeeId: managerEmployee?.id ?? null,
+          employeeCode: managerEmployee?.employeeCode ?? null,
+          firstName: managerEmployee?.firstName ?? managerEmployee?.user?.firstName ?? '',
+          lastName: managerEmployee?.lastName ?? managerEmployee?.user?.lastName ?? '',
+          email: managerEmployee?.user?.email ?? managerEmployee?.workEmail ?? '',
+          workEmail: managerEmployee?.workEmail ?? '',
+          designation: null,
+          reportingTo: managerEmployee?.reportingTo ?? null,
+          managerName: null,
+        }
+      : null;
+
+    const mergedByUserId = new Map<string, any>();
+    if (managerRecord?.userId) {
+      mergedByUserId.set(managerRecord.userId, managerRecord);
+    }
+
+    employeesWithInfo.forEach((row) => {
+      const existing = mergedByUserId.get(row.userId);
+      if (existing?.role === 'manager') {
+        mergedByUserId.set(row.userId, {
+          ...row,
+          ...existing,
+          role: 'manager',
+          assignedAt: existing.assignedAt ?? row.assignedAt,
+        });
+        return;
+      }
+      mergedByUserId.set(row.userId, row);
+    });
+
+    const merged = Array.from(mergedByUserId.values());
+    merged.sort((a, b) => {
+      if (a.role === 'manager' && b.role !== 'manager') return -1;
+      if (a.role !== 'manager' && b.role === 'manager') return 1;
+      return String(a.firstName ?? '').localeCompare(String(b.firstName ?? ''));
+    });
+
+    return merged;
   }
 
   async assignEmployees(

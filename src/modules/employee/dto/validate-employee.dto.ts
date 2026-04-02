@@ -11,11 +11,13 @@ export class ValidateEmployeeDto {
   employeeId?: string;
 
   @ApiProperty({ description: 'Proposed manager ID (reportingTo)' })
+  @IsOptional()
   @IsUUID()
-  reportingTo: string;
+  reportingTo?: string;
 
   @ApiProperty({ description: 'Organization ID' })
   @IsUUID()
-  organizationId: string;
+  @IsOptional()
+  organizationId?: string;
 }
 

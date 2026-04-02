@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
@@ -27,7 +28,7 @@ type AssignEmployeeInput = {
 };
 
 @Injectable()
-export class ProjectService {
+export class ProjectService implements OnModuleInit {
   constructor(
     @InjectRepository(Project)
     private projectRepo: Repository<Project>,
@@ -38,6 +39,20 @@ export class ProjectService {
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
   ) {}
+
+  async onModuleInit() {
+    const [{ schema }] = await this.projectRepo.query(
+      'SELECT current_schema() AS schema',
+    );
+    const [{ exists }] = await this.projectRepo.query(
+      `SELECT to_regclass('${schema}.project_issues') IS NOT NULL AS exists`,
+    );
+    if (!exists) return;
+
+    await this.projectRepo.query(
+      `ALTER TABLE "${schema}"."project_issues" ADD COLUMN IF NOT EXISTS assignee_user_id uuid`,
+    );
+  }
 
   // ── Admin / Manager ─────────────────────────────────────────────────────────
 
@@ -508,6 +523,19 @@ export class ProjectService {
       throw new BadRequestException('pageName and issueTitle are required');
     }
 
+    let assigneeUserId: string | null = null;
+    if (dto.assigneeUserId) {
+      const assigneeMembership = await this.findMembershipByIdentity(
+        projectId,
+        dto.assigneeUserId,
+        organizationId,
+      );
+      if (!assigneeMembership) {
+        throw new BadRequestException('Assignee must be a member of this project');
+      }
+      assigneeUserId = assigneeMembership.userId;
+    }
+
     const status: ProjectIssueStatus = dto.status === 'resolved' ? 'resolved' : 'pending';
     const now = new Date();
     const issue = this.issueRepo.create({
@@ -521,6 +549,7 @@ export class ProjectService {
       createdByUserId: userId,
       resolvedByUserId: status === 'resolved' ? userId : null,
       resolvedAt: status === 'resolved' ? now : null,
+      assigneeUserId,
     });
     return this.issueRepo.save(issue);
   }
@@ -544,6 +573,22 @@ export class ProjectService {
     if (dto.issueTitle !== undefined) issue.issueTitle = dto.issueTitle.trim();
     if (dto.description !== undefined) issue.description = dto.description?.trim() || null;
     if (dto.imageUrl !== undefined) issue.imageUrl = dto.imageUrl?.trim() || null;
+    if (dto.assigneeUserId !== undefined) {
+      const normalizedAssigneeIdentifier = String(dto.assigneeUserId ?? '').trim();
+      if (!normalizedAssigneeIdentifier) {
+        issue.assigneeUserId = null;
+      } else {
+        const assigneeMembership = await this.findMembershipByIdentity(
+          projectId,
+          normalizedAssigneeIdentifier,
+          organizationId,
+        );
+        if (!assigneeMembership) {
+          throw new BadRequestException('Assignee must be a member of this project');
+        }
+        issue.assigneeUserId = assigneeMembership.userId;
+      }
+    }
     if (dto.status !== undefined) {
       issue.status = dto.status;
       if (dto.status === 'resolved') {

@@ -47,6 +47,9 @@ export class ProjectIssue {
   @Column({ name: 'resolved_by_user_id', type: 'uuid', nullable: true })
   resolvedByUserId: string | null;
 
+  @Column({ name: 'assignee_user_id', type: 'uuid', nullable: true })
+  assigneeUserId: string | null;
+
   @Column({ name: 'resolved_at', type: 'timestamptz', nullable: true })
   resolvedAt: Date | null;
 

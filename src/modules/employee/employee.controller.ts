@@ -37,7 +37,7 @@ export class EmployeeController {
     try {
       return await this.employeeService.getDashboardStats(user.organizationId);
     } catch (error) {
-      console.error('getDashboardStats controller error:', error?.message);
+      console.error('getDashboardStats controller error:', error instanceof Error ? error.message : 'Unknown error');
       return {
         totalEmployees: { value: 0, change: 0 },
         activeEmployees: { value: 0, change: 0 },
@@ -149,7 +149,10 @@ async getUpcomingBirthdays(
   async validateEmployee(
     @Body() dto: ValidateEmployeeDto
   ) {
-    const result = await this.employeeService.validateManagerAssignment(dto);
+    if (!dto.organizationId) {
+      return { isValid: false, errors: ['organizationId is required'] };
+    }
+    const result = await this.employeeService.validateManagerAssignment(dto as { organizationId: string; employeeId?: string; reportingTo: string });
     return result;
   }
 
