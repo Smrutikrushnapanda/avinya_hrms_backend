@@ -15,6 +15,7 @@ import { Employee } from '../employee/entities/employee.entity';
 import { ProjectIssue, ProjectIssueStatus } from './entities/project-issue.entity';
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 
 type OrgEmployeeFilters = {
   search?: string;
@@ -25,6 +26,13 @@ type OrgEmployeeFilters = {
 type AssignEmployeeInput = {
   userId: string;
   role?: string;
+};
+
+type ProjectTimesheetQuery = {
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  limit?: number;
 };
 
 @Injectable()
@@ -38,6 +46,8 @@ export class ProjectService implements OnModuleInit {
     private issueRepo: Repository<ProjectIssue>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    @InjectRepository(Timesheet)
+    private timesheetRepo: Repository<Timesheet>,
   ) {}
 
   async onModuleInit() {
@@ -622,6 +632,63 @@ export class ProjectService implements OnModuleInit {
     }
 
     return this.issueRepo.save(issue);
+  }
+
+  async getProjectTimesheets(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+    query: ProjectTimesheetQuery = {},
+  ) {
+    const project = await this.ensureProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+
+    const page = Math.max(1, Number(query.page ?? 1));
+    const limit = Math.min(Math.max(Number(query.limit ?? 200), 1), 500);
+
+    const qb = this.timesheetRepo
+      .createQueryBuilder('ts')
+      .leftJoinAndSelect('ts.employee', 'employee')
+      .leftJoinAndSelect('employee.user', 'employeeUser')
+      .leftJoinAndSelect('employee.department', 'department')
+      .leftJoinAndSelect('employee.designation', 'designation')
+      .where('ts.organizationId = :organizationId', {
+        organizationId: project.organizationId,
+      })
+      .andWhere(
+        "LOWER(TRIM(COALESCE(ts.projectName, ''))) = LOWER(TRIM(:projectName))",
+        { projectName: project.name },
+      );
+
+    if (query.fromDate) {
+      qb.andWhere('ts.date >= :fromDate', { fromDate: query.fromDate });
+    }
+    if (query.toDate) {
+      qb.andWhere('ts.date <= :toDate', { toDate: query.toDate });
+    }
+
+    const [results, total] = await qb
+      .orderBy('ts.date', 'DESC')
+      .addOrderBy('ts.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      results,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      projectName: project.name,
+    };
   }
 
   async getAllOrgEmployees(

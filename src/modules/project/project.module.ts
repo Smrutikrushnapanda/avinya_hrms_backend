@@ -7,10 +7,11 @@ import { ProjectMember } from './entities/project-member.entity';
 import { AuthCoreModule } from '../auth-core/auth-core.module';
 import { Employee } from '../employee/entities/employee.entity';
 import { ProjectIssue } from './entities/project-issue.entity';
+import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Project, ProjectMember, ProjectIssue, Employee]),
+    TypeOrmModule.forFeature([Project, ProjectMember, ProjectIssue, Employee, Timesheet]),
     AuthCoreModule,
   ],
   controllers: [ProjectController],

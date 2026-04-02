@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  DefaultValuePipe,
   Delete,
   ForbiddenException,
   Get,
   Param,
   Patch,
+  ParseIntPipe,
   Post,
   Query,
   UseGuards,
@@ -68,6 +70,24 @@ export class ProjectController {
       designationId,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
     });
+  }
+
+  @Get(':id/timesheets')
+  getProjectTimesheets(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(200), ParseIntPipe) limit = 200,
+  ) {
+    return this.service.getProjectTimesheets(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+      { fromDate, toDate, page, limit },
+    );
   }
 
   @Get(':id')
