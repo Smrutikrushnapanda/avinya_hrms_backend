@@ -156,7 +156,13 @@ export class ProjectController {
     @Param('id') id: string,
     @Param('userId') userId: string,
   ) {
-    return this.service.removeEmployee(id, userId);
+    return this.service.removeEmployee(
+      id,
+      userId,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
   }
 
   @Patch(':id/members/:userId/role')

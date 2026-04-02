@@ -454,9 +454,30 @@ export class ProjectService implements OnModuleInit {
     return this.getProjectEmployees(projectId);
   }
 
-  async removeEmployee(projectId: string, userId: string) {
+  async removeEmployee(
+    projectId: string,
+    userId: string,
+    requestingUserId?: string,
+    organizationId?: string,
+    isAdminOrManager = false,
+  ) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
+
+    if (requestingUserId && organizationId) {
+      await this.ensureProjectAccess(
+        projectId,
+        requestingUserId,
+        organizationId,
+        isAdminOrManager,
+      );
+    }
+
+    if (requestingUserId && userId === requestingUserId && isAdminOrManager) {
+      throw new BadRequestException(
+        'Manager/Admin cannot remove themselves from the project',
+      );
+    }
 
     const member = await this.findMembershipByIdentity(
       projectId,
