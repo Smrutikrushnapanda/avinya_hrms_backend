@@ -59,10 +59,13 @@ export class AuthService {
   }
 
   // Check if user is an approver
-  async checkIsApprover(userId: string): Promise<boolean> {
+  async checkIsApprover(
+    userId: string,
+    organizationId?: string | null,
+  ): Promise<boolean> {
     try {
       const employee = await this.employeeRepository.findOne({
-        where: { userId: userId },
+        where: organizationId ? { userId, organizationId } : { userId },
       });
 
       if (!employee) {
@@ -100,8 +103,12 @@ export class AuthService {
   // Get enhanced profile with isApprover flag
   async getEnhancedProfile(user: any): Promise<any> {
     const [isApprover, employee] = await Promise.all([
-      this.checkIsApprover(user.userId),
-      this.employeeRepository.findOne({ where: { userId: user.userId } }),
+      this.checkIsApprover(user.userId, user.organizationId ?? null),
+      this.employeeRepository.findOne({
+        where: user.organizationId
+          ? { userId: user.userId, organizationId: user.organizationId }
+          : { userId: user.userId },
+      }),
     ]);
 
     let avatar: string | null = null;
@@ -165,6 +172,26 @@ export class AuthService {
       .filter((r, i, self) => self.findIndex((x) => x.id === r.id) === i);
 
     user['roles'] = roles;
+
+    const latestEmployee = await this.employeeRepository.findOne({
+      where: { userId: user.id },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (latestEmployee?.organizationId) {
+      const previousOrganizationId = user.organizationId ?? user.organization?.id;
+      user.organizationId = latestEmployee.organizationId;
+      user.organization = { id: latestEmployee.organizationId } as any;
+
+      if (previousOrganizationId !== latestEmployee.organizationId) {
+        await this.userRepository
+          .createQueryBuilder()
+          .update(User)
+          .set({ organizationId: latestEmployee.organizationId })
+          .where('id = :id', { id: user.id })
+          .execute();
+      }
+    }
 
     if (user && (await bcrypt.compare(password, user.password))) {
       await this.userRepository

@@ -14,6 +14,7 @@ import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { ValidateEmployeeDto } from './dto/validate-employee.dto';
 import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard'; // <-- 2. Import JwtAuthGuard
 import { GetUser } from '../auth-core/decorators/get-user.decorator'; // <-- 3. Import GetUser decorator
@@ -126,12 +127,30 @@ async getUpcomingBirthdays(
     return this.employeeService.findOne(id);
   }
 
-  @Get('by-user/:userId')
+@Get('by-user/:userId')
   @CacheTTL(600) // 10 minutes cache for user lookup
   @ApiOperation({ summary: 'Get employee by user ID' })
   @ApiParam({ name: 'userId', type: 'string' })
   async findByUserId(@Param('userId') userId: string) {
     return this.employeeService.findByUserId(userId);
+  }
+
+  @Get('managers')
+  @CacheTTL(300)
+  @ApiOperation({ summary: 'Get all potential managers for organization' })
+  @ApiQuery({ name: 'organizationId', required: true })
+  async getManagers(@Query('organizationId') organizationId: string) {
+    return this.employeeService.findManagers(organizationId);
+  }
+
+  @Post('validate')
+  @ApiOperation({ summary: 'Validate employee data before create/update (manager assignment, duplicates, etc)' })
+  @ApiResponse({ status: 200, description: 'Validation result' })
+  async validateEmployee(
+    @Body() dto: ValidateEmployeeDto
+  ) {
+    const result = await this.employeeService.validateManagerAssignment(dto);
+    return result;
   }
 
   @Put(':id')

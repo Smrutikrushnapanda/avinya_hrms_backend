@@ -13,6 +13,9 @@ import {
 import { ProjectService } from './project.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
+import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
@@ -44,7 +47,7 @@ export class ProjectController {
 
   @Get('my')
   findMyProjects(@GetUser() user: JwtPayload) {
-    return this.service.findMyProjects(user.userId);
+    return this.service.findMyProjects(user.userId, user.organizationId);
   }
 
   @Get('managers/team')
@@ -69,7 +72,12 @@ export class ProjectController {
 
   @Get(':id')
   findOne(@GetUser() user: JwtPayload, @Param('id') id: string) {
-    return this.service.findOne(id);
+    return this.service.findOneForUser(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
   }
 
   @Patch(':id')
@@ -112,22 +120,33 @@ export class ProjectController {
 
   @Get(':id/employees')
   getProjectEmployees(@GetUser() user: JwtPayload, @Param('id') id: string) {
-    return this.service.getProjectEmployees(id);
+    return this.service.getProjectEmployees(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
   }
 
   @Post(':id/employees')
   assignEmployees(
     @GetUser() user: JwtPayload,
     @Param('id') id: string,
-    @Body() body: { userIds: string[] },
+    @Body()
+    body: {
+      userIds?: string[];
+      assignments?: { userId: string; role?: string }[];
+    },
   ) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN') ?? false;
+    const assignments =
+      body?.assignments && Array.isArray(body.assignments)
+        ? body.assignments
+        : body?.userIds ?? [];
     return this.service.assignEmployees(
       id,
-      body.userIds,
+      assignments,
       user.userId,
       user.organizationId,
-      isAdmin,
     );
   }
 
@@ -138,6 +157,59 @@ export class ProjectController {
     @Param('userId') userId: string,
   ) {
     return this.service.removeEmployee(id, userId);
+  }
+
+  @Patch(':id/members/:userId/role')
+  updateMemberRole(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateProjectMemberRoleDto,
+  ) {
+    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    return this.service.updateMemberRole(id, userId, dto.role, user.organizationId);
+  }
+
+  @Get(':id/issues')
+  listIssues(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.service.listIssues(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/issues')
+  createIssue(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateProjectIssueDto,
+  ) {
+    return this.service.createIssue(
+      id,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Patch(':id/issues/:issueId')
+  updateIssue(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('issueId') issueId: string,
+    @Body() dto: UpdateProjectIssueDto,
+  ) {
+    return this.service.updateIssue(
+      id,
+      issueId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
   }
 
 }

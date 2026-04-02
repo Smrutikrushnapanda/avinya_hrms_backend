@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Employee } from './entities/employee.entity';
 import { EmployeeProfile } from './entities/employee-profile.entity';
+import { ValidateEmployeeDto } from './dto/validate-employee.dto';
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
 import { EmployeeService } from './employee.service';

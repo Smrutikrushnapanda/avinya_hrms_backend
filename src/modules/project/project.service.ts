@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
@@ -10,11 +11,19 @@ import { ProjectMember } from './entities/project-member.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from '../employee/entities/employee.entity';
+import { ProjectIssue, ProjectIssueStatus } from './entities/project-issue.entity';
+import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
+import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
 
 type OrgEmployeeFilters = {
   search?: string;
   designationId?: string;
   limit?: number;
+};
+
+type AssignEmployeeInput = {
+  userId: string;
+  role?: string;
 };
 
 @Injectable()
@@ -24,6 +33,8 @@ export class ProjectService {
     private projectRepo: Repository<Project>,
     @InjectRepository(ProjectMember)
     private memberRepo: Repository<ProjectMember>,
+    @InjectRepository(ProjectIssue)
+    private issueRepo: Repository<ProjectIssue>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
   ) {}
@@ -78,6 +89,16 @@ export class ProjectService {
     return this.formatProject(p);
   }
 
+  async findOneForUser(
+    id: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(id, userId, organizationId, isAdminOrManager);
+    return this.findOne(id);
+  }
+
   async update(id: string, dto: UpdateProjectDto) {
     const project = await this.projectRepo.findOne({ where: { id } });
     if (!project) throw new NotFoundException('Project not found');
@@ -107,9 +128,17 @@ export class ProjectService {
     if (!project) throw new NotFoundException('Project not found');
 
     for (const userId of userIds) {
-      const exists = await this.memberRepo.findOne({ where: { projectId, userId } });
+      const exists = await this.findMembershipByIdentity(
+        projectId,
+        userId,
+        project.organizationId ?? undefined,
+      );
       if (!exists) {
         await this.memberRepo.save(this.memberRepo.create({ projectId, userId, role: 'member' }));
+      } else {
+        exists.userId = userId;
+        exists.role = 'member';
+        await this.memberRepo.save(exists);
       }
     }
 
@@ -117,7 +146,14 @@ export class ProjectService {
   }
 
   async removeMember(projectId: string, userId: string) {
-    const member = await this.memberRepo.findOne({ where: { projectId, userId } });
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const member = await this.findMembershipByIdentity(
+      projectId,
+      userId,
+      project.organizationId ?? undefined,
+    );
     if (!member) throw new NotFoundException('Member not found in this project');
     await this.memberRepo.remove(member);
     return { success: true };
@@ -125,14 +161,19 @@ export class ProjectService {
 
   // ── Employee ────────────────────────────────────────────────────────────────
 
-  async findMyProjects(userId: string) {
+  async findMyProjects(userId: string, organizationId?: string) {
+    const membershipLookupIds = await this.getMembershipLookupIds(userId, organizationId);
     const memberships = await this.memberRepo
       .createQueryBuilder('pm')
       .leftJoinAndSelect('pm.project', 'p')
       .leftJoinAndSelect('p.createdBy', 'creator')
       .leftJoinAndSelect('p.members', 'allMembers')
       .leftJoinAndSelect('allMembers.user', 'u')
-      .where('pm.userId = :userId', { userId })
+      .where('pm.userId IN (:...membershipLookupIds)', { membershipLookupIds })
+      .andWhere(
+        organizationId ? 'p.organizationId = :organizationId' : '1 = 1',
+        organizationId ? { organizationId } : {},
+      )
       .orderBy('p.createdAt', 'DESC')
       .getMany();
 
@@ -140,6 +181,81 @@ export class ProjectService {
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  private sanitizeProjectMemberRole(role?: string): string {
+    const normalized = String(role ?? 'member').trim().toLowerCase();
+    if (!normalized) return 'member';
+    if (normalized.length > 30) return normalized.slice(0, 30);
+    return normalized;
+  }
+
+  private async ensureProjectAccess(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+    if (project.organizationId !== organizationId) {
+      throw new ForbiddenException('Project does not belong to your organization');
+    }
+
+    if (isAdminOrManager) {
+      return project;
+    }
+
+    const isMember = await this.findMembershipByIdentity(projectId, userId, organizationId);
+    if (!isMember) {
+      throw new ForbiddenException('You are not assigned to this project');
+    }
+    return project;
+  }
+
+  private async getMembershipLookupIds(memberIdentifier: string, organizationId?: string) {
+    const lookupIds = new Set<string>();
+    const normalizedMemberIdentifier = String(memberIdentifier ?? '').trim();
+
+    if (!normalizedMemberIdentifier) {
+      return [];
+    }
+
+    lookupIds.add(normalizedMemberIdentifier);
+
+    const employee = await this.employeeRepo.findOne({
+      where: organizationId
+        ? [
+            { userId: normalizedMemberIdentifier, organizationId },
+            { id: normalizedMemberIdentifier, organizationId },
+          ]
+        : [{ userId: normalizedMemberIdentifier }, { id: normalizedMemberIdentifier }],
+      select: ['id', 'userId'],
+    });
+
+    if (employee?.id) lookupIds.add(employee.id);
+    if (employee?.userId) lookupIds.add(employee.userId);
+
+    return Array.from(lookupIds);
+  }
+
+  private async findMembershipByIdentity(
+    projectId: string,
+    memberIdentifier: string,
+    organizationId?: string,
+  ) {
+    const lookupIds = await this.getMembershipLookupIds(memberIdentifier, organizationId);
+    if (lookupIds.length === 0) {
+      return null;
+    }
+
+    return this.memberRepo
+      .createQueryBuilder('pm')
+      .where('pm.projectId = :projectId', { projectId })
+      .andWhere('pm.userId IN (:...lookupIds)', { lookupIds })
+      .getOne();
+  }
 
   private formatProject(p: Project) {
     const today = new Date().toISOString().split('T')[0];
@@ -195,9 +311,22 @@ export class ProjectService {
 
   // ─── Employee Assignment (for managers) ─────────────────────────────────────
 
-  async getProjectEmployees(projectId: string) {
+  async getProjectEmployees(
+    projectId: string,
+    userId?: string,
+    organizationId?: string,
+    isAdminOrManager = false,
+  ) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
+    if (userId && organizationId) {
+      await this.ensureProjectAccess(
+        projectId,
+        userId,
+        organizationId,
+        isAdminOrManager,
+      );
+    }
 
     // Get all employees assigned to this project via ProjectMember
     const members = await this.memberRepo.find({
@@ -209,18 +338,23 @@ export class ProjectService {
     const employeesWithInfo = await Promise.all(
       members.map(async (m) => {
         const emp = await this.employeeRepo.findOne({
-          where: { userId: m.userId },
-          relations: ['manager', 'designation'],
+          where: project.organizationId
+            ? [
+                { userId: m.userId, organizationId: project.organizationId },
+                { id: m.userId, organizationId: project.organizationId },
+              ]
+            : [{ userId: m.userId }, { id: m.userId }],
+          relations: ['manager', 'designation', 'user'],
         });
         return {
-          userId: m.userId,
+          userId: emp?.userId ?? m.userId,
           role: m.role,
           assignedAt: m.assignedAt,
           employeeId: emp?.id ?? null,
           employeeCode: emp?.employeeCode ?? null,
           firstName: emp?.firstName ?? m.user?.firstName ?? '',
           lastName: emp?.lastName ?? m.user?.lastName ?? '',
-          email: m.user?.email ?? '',
+          email: emp?.user?.email ?? m.user?.email ?? '',
           workEmail: emp?.workEmail ?? '',
           designation: emp?.designation?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
@@ -234,10 +368,9 @@ export class ProjectService {
 
   async assignEmployees(
     projectId: string,
-    userIds: string[],
+    assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
-    isAdmin = false,
   ) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
@@ -245,12 +378,30 @@ export class ProjectService {
       throw new ForbiddenException('You cannot assign employees to this project');
     }
 
-    const normalizedUserIds = Array.from(
-      new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean)),
+    const normalizedAssignmentsRaw = (Array.isArray(assignmentsOrUserIds)
+      ? assignmentsOrUserIds
+      : []
+    )
+      .map((entry) =>
+        typeof entry === 'string'
+          ? { userId: entry, role: 'member' }
+          : {
+              userId: entry?.userId,
+              role: this.sanitizeProjectMemberRole(entry?.role),
+            },
+      )
+      .filter((entry) => Boolean(entry.userId));
+
+    const uniqueAssignmentMap = new Map<string, AssignEmployeeInput>();
+    normalizedAssignmentsRaw.forEach((entry) => {
+      if (!entry.userId) return;
+      uniqueAssignmentMap.set(entry.userId, entry);
+    });
+    const assignableAssignments = Array.from(uniqueAssignmentMap.values()).filter(
+      (entry) => entry.userId !== requestingUserId,
     );
-    const assignableUserIds = normalizedUserIds.filter(
-      (userId) => userId !== requestingUserId,
-    );
+    const assignableUserIds = assignableAssignments.map((entry) => entry.userId);
+
     if (assignableUserIds.length === 0) {
       return this.getProjectEmployees(projectId);
     }
@@ -265,13 +416,23 @@ export class ProjectService {
       throw new ForbiddenException('Selected employees must belong to your organization');
     }
 
-    // Assign each employee to the project
-    for (const userId of assignableUserIds) {
-      const exists = await this.memberRepo.findOne({ where: { projectId, userId } });
+    // Assign/update each employee on the project
+    for (const assignment of assignableAssignments) {
+      const userId = assignment.userId;
+      const nextRole = this.sanitizeProjectMemberRole(assignment.role);
+      const exists = await this.findMembershipByIdentity(
+        projectId,
+        userId,
+        organizationId,
+      );
       if (!exists) {
         await this.memberRepo.save(
-          this.memberRepo.create({ projectId, userId, role: 'member' }),
+          this.memberRepo.create({ projectId, userId, role: nextRole }),
         );
+      } else {
+        exists.userId = userId;
+        exists.role = nextRole;
+        await this.memberRepo.save(exists);
       }
     }
 
@@ -279,10 +440,122 @@ export class ProjectService {
   }
 
   async removeEmployee(projectId: string, userId: string) {
-    const member = await this.memberRepo.findOne({ where: { projectId, userId } });
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const member = await this.findMembershipByIdentity(
+      projectId,
+      userId,
+      project.organizationId ?? undefined,
+    );
     if (!member) throw new NotFoundException('Employee not found in this project');
     await this.memberRepo.remove(member);
     return { success: true };
+  }
+
+  async updateMemberRole(
+    projectId: string,
+    userId: string,
+    role: string,
+    organizationId: string,
+  ) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Project not found');
+    if (project.organizationId !== organizationId) {
+      throw new ForbiddenException('Project does not belong to your organization');
+    }
+
+    const member = await this.findMembershipByIdentity(
+      projectId,
+      userId,
+      organizationId,
+    );
+    if (!member) throw new NotFoundException('Member not found in this project');
+
+    member.userId = userId;
+    member.role = this.sanitizeProjectMemberRole(role);
+    await this.memberRepo.save(member);
+    return this.getProjectEmployees(projectId);
+  }
+
+  async listIssues(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+    return this.issueRepo.find({
+      where: { projectId, organizationId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async createIssue(
+    projectId: string,
+    dto: CreateProjectIssueDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    if (!dto.pageName?.trim() || !dto.issueTitle?.trim()) {
+      throw new BadRequestException('pageName and issueTitle are required');
+    }
+
+    const status: ProjectIssueStatus = dto.status === 'resolved' ? 'resolved' : 'pending';
+    const now = new Date();
+    const issue = this.issueRepo.create({
+      projectId,
+      organizationId: project.organizationId,
+      pageName: dto.pageName.trim(),
+      issueTitle: dto.issueTitle.trim(),
+      description: dto.description?.trim() || null,
+      imageUrl: dto.imageUrl?.trim() || null,
+      status,
+      createdByUserId: userId,
+      resolvedByUserId: status === 'resolved' ? userId : null,
+      resolvedAt: status === 'resolved' ? now : null,
+    });
+    return this.issueRepo.save(issue);
+  }
+
+  async updateIssue(
+    projectId: string,
+    issueId: string,
+    dto: UpdateProjectIssueDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const issue = await this.issueRepo.findOne({
+      where: { id: issueId, projectId, organizationId },
+    });
+    if (!issue) throw new NotFoundException('Issue not found');
+
+    if (dto.pageName !== undefined) issue.pageName = dto.pageName.trim();
+    if (dto.issueTitle !== undefined) issue.issueTitle = dto.issueTitle.trim();
+    if (dto.description !== undefined) issue.description = dto.description?.trim() || null;
+    if (dto.imageUrl !== undefined) issue.imageUrl = dto.imageUrl?.trim() || null;
+    if (dto.status !== undefined) {
+      issue.status = dto.status;
+      if (dto.status === 'resolved') {
+        issue.resolvedByUserId = userId;
+        issue.resolvedAt = new Date();
+      } else {
+        issue.resolvedByUserId = null;
+        issue.resolvedAt = null;
+      }
+    }
+
+    return this.issueRepo.save(issue);
   }
 
   async getAllOrgEmployees(

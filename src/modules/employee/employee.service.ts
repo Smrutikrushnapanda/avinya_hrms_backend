@@ -129,6 +129,7 @@ export class EmployeeService {
         existingUser.userName = loginUserName;
         existingUser.password = await bcrypt.hash(loginPassword, 12);
         existingUser.mustChangePassword = true;
+        existingUser.organizationId = dto.organizationId;
         await this.userRepository.save(existingUser);
 
         const existingEmployee = await this.employeeRepository.findOne({
@@ -780,36 +781,37 @@ export class EmployeeService {
   }
 
   // --- NEW: FIND MANAGERS ---
-  async findManagers(organizationId: string) {
+async findManagers(organizationId: string) {
     try {
-      // Get employees who can be managers (active employees with leadership roles or seniority)
+      const cacheKey = `managers:${organizationId}`;
+      const cached = await this.cacheManager.get(cacheKey);
+      if (cached) {
+        console.log('📦 Returning cached managers for org:', organizationId);
+        return cached;
+      }
+
+      // Return ALL active employees as potential managers (broader selection)
       const managers = await this.employeeRepository.find({
         where: { 
           organizationId,
           status: 'active',
         },
-        relations: ['designation', 'department'],
+        relations: ['designation'],
         order: { firstName: 'ASC' },
-        select: ['id', 'firstName', 'lastName', 'employeeCode', 'workEmail'],
       });
 
-      // Filter for potential managers based on designation or experience
-      const potentialManagers = managers.filter(emp => {
-        const designation = emp.designation?.name?.toLowerCase() || '';
-        return (
-          designation.includes('manager') ||
-          designation.includes('lead') ||
-          designation.includes('head') ||
-          designation.includes('director') ||
-          designation.includes('senior') ||
-          designation.includes('supervisor')
-        );
-      });
+      // Sign profile photos in parallel
+      const managersWithPhotos = await Promise.all(
+        managers.map(emp => this.addSignedProfilePhoto(emp))
+      );
 
-      // If no designated managers found, return all employees who can potentially manage
-      return potentialManagers.length > 0 ? potentialManagers : managers.slice(0, 20); // Limit to 20 for performance
+      // Cache for 10 minutes
+      await this.cacheManager.set(cacheKey, managersWithPhotos, 600);
+      console.log(`✅ Loaded ${managersWithPhotos.length} potential managers for org: ${organizationId}`);
+      
+      return managersWithPhotos;
     } catch (error) {
-      console.error('Error finding managers:', error);
+      console.error('❌ Error finding managers:', error);
       return [];
     }
   }
@@ -1078,47 +1080,60 @@ export class EmployeeService {
     }
   }
 
-  // --- NEW: VALIDATE EMPLOYEE DATA ---
-  async validateEmployeeData(employeeData: Partial<CreateEmployeeDto | UpdateEmployeeDto>, employeeId?: string) {
+// --- NEW: VALIDATE MANAGER ASSIGNMENT ---
+  async validateManagerAssignment(dto: {
+    organizationId: string;
+    employeeId?: string;
+    reportingTo: string;
+  }) {
+    const { organizationId, employeeId, reportingTo } = dto;
     const errors: string[] = [];
 
     try {
-      // Check for duplicate employee code
-      if (employeeData.employeeCode) {
-        const existingEmployee = await this.employeeRepository.findOne({
-          where: { employeeCode: employeeData.employeeCode },
-        });
+      // Check if manager exists and is active
+      const manager = await this.employeeRepository.findOne({
+        where: {
+          id: reportingTo,
+          organizationId,
+          status: 'active',
+        },
+        relations: ['user'],
+      });
 
-        if (existingEmployee && existingEmployee.id !== employeeId) {
-          errors.push('Employee code already exists');
-        }
+      if (!manager) {
+        errors.push('Selected manager does not exist, is inactive, or belongs to different organization');
+        return { isValid: false, errors };
       }
 
-      // Check for duplicate work email
-      if (employeeData.workEmail) {
-        const existingEmployee = await this.employeeRepository.findOne({
-          where: { workEmail: employeeData.workEmail },
-        });
-
-        if (existingEmployee && existingEmployee.id !== employeeId) {
-          errors.push('Work email already exists');
-        }
-      }
-
-      // Validate reporting structure (no circular references)
-      if (employeeData.reportingTo && employeeId) {
-        const isCircular = await this.checkCircularReporting(employeeId, employeeData.reportingTo);
+      // Check circular reference
+      if (employeeId && employeeId !== reportingTo) {
+        const isCircular = await this.checkCircularReporting(employeeId, reportingTo);
         if (isCircular) {
-          errors.push('Circular reporting structure detected');
+          errors.push('Cannot assign manager - creates circular reporting structure');
         }
+      }
+
+      // Check if manager can have direct reports (optional business rule)
+      const directReports = await this.employeeRepository.count({
+        where: { reportingTo, organizationId },
+      });
+
+      if (directReports >= 50) { // Arbitrary limit, configurable
+        errors.push('Manager already has too many direct reports (50+). Consider restructuring.');
       }
 
       return {
         isValid: errors.length === 0,
         errors,
+        manager: {
+          id: manager.id,
+          name: `${manager.firstName} ${manager.lastName || ''}`.trim() || manager.workEmail,
+          currentDirectReports: directReports,
+          employeeCount: directReports + (employeeId ? 1 : 0),
+        },
       };
     } catch (error) {
-      console.error('Error validating employee data:', error);
+      console.error('Error validating manager assignment:', error);
       return {
         isValid: false,
         errors: ['Validation error occurred'],
