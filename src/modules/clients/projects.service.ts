@@ -361,12 +361,46 @@ export class ProjectsService implements OnModuleInit {
       description?: string;
       assignedToUserId?: string;
       assignedByUserId: string;
+      organizationId: string;
       dueDate?: string;
       priority?: TaskPriority;
     },
   ) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
+
+    const actingEmployee = await this.employeeRepo.findOne({
+      where: {
+        userId: data.assignedByUserId,
+        organizationId: data.organizationId,
+      },
+      select: ['id'],
+    });
+    if (!actingEmployee || project.managerId !== actingEmployee.id) {
+      throw new ForbiddenException('Only the assigned project manager can create tasks');
+    }
+
+    if (data.assignedToUserId) {
+      const [memberRecord, managerEmployee] = await Promise.all([
+        this.memberRepo.findOne({
+          where: { projectId, userId: data.assignedToUserId },
+          select: ['id'],
+        }),
+        project.managerId
+          ? this.employeeRepo.findOne({
+              where: { id: project.managerId },
+              select: ['userId'],
+            })
+          : Promise.resolve(null),
+      ]);
+
+      const isAssignedManager = Boolean(
+        managerEmployee?.userId && managerEmployee.userId === data.assignedToUserId,
+      );
+      if (!memberRecord && !isAssignedManager) {
+        throw new ForbiddenException('Task can be assigned only to project members');
+      }
+    }
 
     const task = this.taskRepo.create({
       projectId,

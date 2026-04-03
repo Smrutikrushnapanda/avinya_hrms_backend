@@ -157,10 +157,10 @@ export class ProjectsController {
       priority?: TaskPriority;
     },
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
     return this.projectsService.createTask(projectId, {
       ...body,
       assignedByUserId: user.userId,
+      organizationId: user.organizationId,
     });
   }
 
