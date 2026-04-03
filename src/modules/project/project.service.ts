@@ -1295,9 +1295,6 @@ export class ProjectService implements OnModuleInit {
     }
 
     const title = this.sanitizeTestSheetText(dto.title, 250);
-    if (!title) {
-      throw new BadRequestException('Test case title is required');
-    }
 
     const [qaUserId, developerUserId] = await Promise.all([
       this.resolveAssignableMemberUserId(projectId, organizationId, dto.qaUserId),
@@ -1381,9 +1378,7 @@ export class ProjectService implements OnModuleInit {
       testCase.caseCode = this.normalizeOptionalText(dto.caseCode, 80);
     }
     if (dto.title !== undefined) {
-      const nextTitle = this.sanitizeTestSheetText(dto.title, 250);
-      if (!nextTitle) throw new BadRequestException('Test case title is required');
-      testCase.title = nextTitle;
+      testCase.title = this.sanitizeTestSheetText(dto.title, 250);
     }
     if (dto.steps !== undefined) {
       testCase.steps = this.normalizeOptionalText(dto.steps, 10000);
@@ -1457,6 +1452,57 @@ export class ProjectService implements OnModuleInit {
         afterValue,
       });
     }
+
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async deleteTestCase(
+    projectId: string,
+    testCaseId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const testCase = await this.testSheetCaseRepo.findOne({
+      where: {
+        id: testCaseId,
+        projectId,
+        organizationId,
+        projectSource: 'standalone',
+      },
+    });
+    if (!testCase) {
+      throw new NotFoundException('Test case not found');
+    }
+
+    const beforeSnapshot = this.serializeTestCase(testCase);
+    await this.testSheetCaseRepo.remove(testCase);
+
+    await this.testSheetCaseRepo
+      .createQueryBuilder()
+      .update(ProjectTestSheetCase)
+      .set({ rowIndex: () => '"row_index" - 1' })
+      .where('project_id = :projectId', { projectId })
+      .andWhere('organization_id = :organizationId', { organizationId })
+      .andWhere('project_source = :projectSource', { projectSource: 'standalone' })
+      .andWhere('tab_id = :tabId', { tabId: testCase.tabId })
+      .andWhere('row_index > :rowIndex', { rowIndex: beforeSnapshot.rowIndex })
+      .execute();
+
+    await this.createTestSheetChangeLog({
+      projectId,
+      organizationId,
+      changedByUserId: userId,
+      action: 'test_case_deleted',
+      tabId: testCase.tabId,
+      testCaseId,
+      fieldName: 'testCase',
+      summary: `Deleted test case "${beforeSnapshot.title || '(untitled)'}"`,
+      beforeValue: beforeSnapshot,
+      afterValue: null,
+    });
 
     return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
   }

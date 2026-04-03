@@ -8,7 +8,7 @@ export class CreateProjectTestCaseDto {
   caseCode?: string;
 
   @IsString()
-  @Length(1, 250)
+  @Length(0, 250)
   title: string;
 
   @IsOptional()

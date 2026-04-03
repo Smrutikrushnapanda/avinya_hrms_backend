@@ -287,6 +287,23 @@ export class ProjectsController {
     );
   }
 
+  @Delete(':id/test-sheet/cases/:caseId')
+  @ApiOperation({ summary: 'Delete test case row for a client project test sheet' })
+  @UseGuards(JwtAuthGuard)
+  deleteTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('caseId') caseId: string,
+  ) {
+    return this.projectsService.deleteTestCase(
+      projectId,
+      caseId,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
   @Get('tasks/my')
   @ApiOperation({ summary: 'Get tasks assigned to current user' })
   @UseGuards(JwtAuthGuard)

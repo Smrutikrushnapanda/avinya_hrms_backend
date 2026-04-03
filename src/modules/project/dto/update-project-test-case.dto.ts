@@ -9,7 +9,7 @@ export class UpdateProjectTestCaseDto {
 
   @IsOptional()
   @IsString()
-  @Length(1, 250)
+  @Length(0, 250)
   title?: string;
 
   @IsOptional()

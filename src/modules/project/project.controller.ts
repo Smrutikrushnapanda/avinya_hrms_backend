@@ -334,4 +334,19 @@ export class ProjectController {
     );
   }
 
+  @Delete(':id/test-sheet/cases/:caseId')
+  deleteTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('caseId') caseId: string,
+  ) {
+    return this.service.deleteTestCase(
+      id,
+      caseId,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
 }
