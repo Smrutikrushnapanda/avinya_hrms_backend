@@ -64,6 +64,12 @@ export class ClientProject {
   @Column({ name: 'completion_percent', type: 'int', default: 0 })
   completionPercent: number;
 
+  @Column({ name: 'project_cost', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  projectCost: number | null;
+
+  @Column({ name: 'hourly_rate', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  hourlyRate: number | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class UpdateProjectDto {
   @IsOptional()
@@ -34,4 +34,14 @@ export class UpdateProjectDto {
   @Min(0)
   @Max(100)
   completionPercent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  projectCost?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  hourlyRate?: number;
 }

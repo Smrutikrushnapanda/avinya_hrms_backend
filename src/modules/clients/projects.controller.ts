@@ -200,4 +200,13 @@ export class ProjectsController {
   ) {
     return this.projectsService.deleteTask(taskId, user.userId, user.organizationId);
   }
+
+  // ─── Timesheets Summary ───────────────────────────────────────────────────
+
+  @Get(':id/timesheets-summary')
+  @ApiOperation({ summary: 'Get timesheet summary for P&L calculation' })
+  @UseGuards(JwtAuthGuard)
+  getTimesheetsSummary(@Param('id') projectId: string) {
+    return this.projectsService.getTimesheetsSummary(projectId);
+  }
 }

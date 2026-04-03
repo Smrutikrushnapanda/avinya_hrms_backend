@@ -8,6 +8,7 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { User } from 'src/modules/auth-core/entities/user.entity';
+import { Timesheet } from 'src/modules/workflow/timesheet/entities/timesheet.entity';
 
 @Injectable()
 export class ProjectsService implements OnModuleInit {
@@ -22,6 +23,8 @@ export class ProjectsService implements OnModuleInit {
     private taskRepo: Repository<ProjectTask>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(Timesheet)
+    private timesheetRepo: Repository<Timesheet>,
   ) {}
 
   async onModuleInit() {
@@ -40,6 +43,12 @@ export class ProjectsService implements OnModuleInit {
     );
     await this.projectRepo.query(
       `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS completion_percent integer DEFAULT 0`,
+    );
+    await this.projectRepo.query(
+      `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS project_cost decimal(12,2)`,
+    );
+    await this.projectRepo.query(
+      `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS hourly_rate decimal(10,2)`,
     );
   }
 
@@ -505,5 +514,48 @@ export class ProjectsService implements OnModuleInit {
 
     await this.taskRepo.remove(task);
     return { success: true };
+  }
+
+  async getTimesheetsSummary(projectId: string) {
+    // Get project by ID to get project name and cost info
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const projectName = project.projectName;
+    const projectCost = project.projectCost ?? 0;
+    const hourlyRate = project.hourlyRate ?? 0;
+
+    // Query timesheets where project_name matches
+    const timesheets = await this.timesheetRepo
+      .createQueryBuilder('ts')
+      .where('ts.project_name = :projectName', { projectName })
+      .getMany();
+
+    // Calculate summary
+    const totalMinutes = timesheets.reduce((sum, ts) => sum + (ts.workingMinutes || 0), 0);
+    const totalHours = totalMinutes / 60;
+    const actualCost = hourlyRate > 0 ? totalHours * hourlyRate : 0;
+    const profitLoss = projectCost - actualCost;
+    const isProfit = profitLoss >= 0;
+
+    // Get unique employee count
+    const uniqueEmployeeIds = new Set(timesheets.map(ts => ts.employeeId));
+    const employeeCount = uniqueEmployeeIds.size;
+
+    return {
+      projectId,
+      projectName,
+      projectCost,
+      hourlyRate,
+      totalHours: Math.round(totalHours * 100) / 100,
+      totalMinutes,
+      employeeCount,
+      actualCost: Math.round(actualCost * 100) / 100,
+      profitLoss: Math.round(Math.abs(profitLoss) * 100) / 100,
+      isProfit,
+      timesheetCount: timesheets.length,
+    };
   }
 }
