@@ -16,10 +16,21 @@ import { TaskStatus, TaskPriority } from './entities/project-task.entity';
 export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}
 
-  private isAdminOrManager(user: JwtPayload) {
-    return user.roles?.some(
-      (r) => r.roleName === 'ADMIN' || r.roleName === 'MANAGER',
+  private hasAnyRole(user: JwtPayload, roles: string[]) {
+    const allowed = new Set(roles.map((role) => role.toUpperCase()));
+    return (
+      user.roles?.some((roleEntry) =>
+        allowed.has(String(roleEntry?.roleName ?? '').toUpperCase()),
+      ) ?? false
     );
+  }
+
+  private isAdmin(user: JwtPayload) {
+    return this.hasAnyRole(user, ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN']);
+  }
+
+  private isAdminOrManager(user: JwtPayload) {
+    return this.hasAnyRole(user, ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN', 'MANAGER']);
   }
 
   @Post()
@@ -62,7 +73,7 @@ export class ProjectsController {
       id,
       user.userId,
       user.organizationId,
-      this.isAdminOrManager(user),
+      this.isAdmin(user),
     );
   }
 
@@ -110,7 +121,7 @@ export class ProjectsController {
     @Param('id') id: string,
     @Body() body: { userIds: string[] },
   ) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN') ?? false;
+    const isAdmin = this.isAdmin(user);
     return this.projectsService.assignEmployees(
       id,
       body.userIds,
