@@ -13,6 +13,7 @@ import { ClientProject } from './project.entity';
 export enum TaskStatus {
   PENDING = 'pending',
   IN_PROGRESS = 'in_progress',
+  ISSUE = 'issue',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
 }
