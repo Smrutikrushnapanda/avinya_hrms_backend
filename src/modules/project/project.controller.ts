@@ -19,6 +19,7 @@ import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
 import { CreateProjectTestSheetTabDto } from './dto/create-project-test-sheet-tab.dto';
 import { UpdateProjectTestSheetTabDto } from './dto/update-project-test-sheet-tab.dto';
+import { UpdateProjectTestSheetColumnsDto } from './dto/update-project-test-sheet-columns.dto';
 import { CreateProjectTestCaseDto } from './dto/create-project-test-case.dto';
 import { UpdateProjectTestCaseDto } from './dto/update-project-test-case.dto';
 import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto';
@@ -261,6 +262,21 @@ export class ProjectController {
     return this.service.createTestSheetTab(
       id,
       dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/columns')
+  updateTestSheetColumns(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateProjectTestSheetColumnsDto,
+  ) {
+    return this.service.updateTestSheetColumnHeaders(
+      id,
+      dto.columnHeaders,
       user.userId,
       user.organizationId,
       this.isAdminOrManager(user),

@@ -70,6 +70,9 @@ export class ClientProject {
   @Column({ name: 'hourly_rate', type: 'decimal', precision: 10, scale: 2, nullable: true })
   hourlyRate: number | null;
 
+  @Column({ name: 'test_sheet_column_headers', type: 'jsonb', nullable: true })
+  testSheetColumnHeaders: Record<string, string> | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

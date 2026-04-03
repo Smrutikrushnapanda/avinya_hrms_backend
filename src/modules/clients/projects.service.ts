@@ -74,6 +74,9 @@ export class ProjectsService implements OnModuleInit {
     await this.projectRepo.query(
       `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS hourly_rate decimal(10,2)`,
     );
+    await this.projectRepo.query(
+      `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS test_sheet_column_headers jsonb`,
+    );
   }
 
   private sanitizeProjectMemberRole(role?: string): string {
@@ -688,6 +691,40 @@ export class ProjectsService implements OnModuleInit {
     return normalized || null;
   }
 
+  private sanitizeTestSheetColumnHeaders(
+    input: unknown,
+  ): Record<string, string> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      return {};
+    }
+
+    const allowedKeys = new Set([
+      'caseCode',
+      'title',
+      'steps',
+      'expectedResult',
+      'actualResult',
+      'qaUserId',
+      'developerUserId',
+      'status',
+      'updatedAt',
+    ]);
+    const sanitized: Record<string, string> = {};
+    const entries = Object.entries(input as Record<string, unknown>).slice(0, 40);
+
+    entries.forEach(([rawKey, rawValue]) => {
+      const key = String(rawKey ?? '').trim();
+      if (!key) return;
+      if (!allowedKeys.has(key) && !/^custom_\d+$/.test(key)) return;
+
+      const value = this.sanitizeTestSheetText(rawValue, 120);
+      if (!value) return;
+      sanitized[key] = value;
+    });
+
+    return sanitized;
+  }
+
   private normalizeTestCaseStatus(status?: string | null): ProjectTestCaseStatus {
     return String(status ?? '').trim().toLowerCase() === 'resolved'
       ? 'resolved'
@@ -885,7 +922,7 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     projectSource: ProjectTestSheetSource = 'client',
   ) {
-    const [tabs, testCases, logs] = await Promise.all([
+    const [tabs, testCases, logs, project] = await Promise.all([
       this.testSheetTabRepo.find({
         where: { projectId, organizationId, projectSource },
         order: { orderIndex: 'ASC', createdAt: 'ASC' },
@@ -899,6 +936,10 @@ export class ProjectsService implements OnModuleInit {
         order: { createdAt: 'DESC' },
         take: 200,
       }),
+      this.projectRepo.findOne({
+        where: { id: projectId, organizationId },
+        select: ['id', 'testSheetColumnHeaders'],
+      }),
     ]);
 
     const testCasesByTabId = new Map<string, ProjectTestSheetCase[]>();
@@ -911,6 +952,9 @@ export class ProjectsService implements OnModuleInit {
     return {
       projectId,
       projectSource,
+      columnHeaders: this.sanitizeTestSheetColumnHeaders(
+        project?.testSheetColumnHeaders,
+      ),
       tabs: tabs.map((tab) => ({
         id: tab.id,
         name: tab.name,
@@ -961,6 +1005,47 @@ export class ProjectsService implements OnModuleInit {
   ) {
     await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
     await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
+    return this.buildTestSheetResponse(projectId, organizationId, 'client');
+  }
+
+  async updateTestSheetColumnHeaders(
+    projectId: string,
+    columnHeaders: Record<string, unknown>,
+    userId: string,
+    organizationId: string,
+    isAdmin = false,
+  ) {
+    const project = await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
+    await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
+
+    const nextHeaders = this.sanitizeTestSheetColumnHeaders(columnHeaders);
+    const previousHeaders = this.sanitizeTestSheetColumnHeaders(
+      project.testSheetColumnHeaders,
+    );
+
+    if (JSON.stringify(previousHeaders) !== JSON.stringify(nextHeaders)) {
+      project.testSheetColumnHeaders = Object.keys(nextHeaders).length
+        ? nextHeaders
+        : null;
+      await this.projectRepo.save(project);
+
+      await this.createTestSheetChangeLog({
+        projectId,
+        organizationId,
+        changedByUserId: userId,
+        action: 'columns_updated',
+        fieldName: 'columnHeaders',
+        summary: 'Updated test sheet column headers',
+        beforeValue: { columnHeaders: previousHeaders },
+        afterValue: { columnHeaders: nextHeaders },
+      });
+    }
+
     return this.buildTestSheetResponse(projectId, organizationId, 'client');
   }
 

@@ -5,6 +5,7 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateProjectTestSheetTabDto } from '../project/dto/create-project-test-sheet-tab.dto';
 import { UpdateProjectTestSheetTabDto } from '../project/dto/update-project-test-sheet-tab.dto';
+import { UpdateProjectTestSheetColumnsDto } from '../project/dto/update-project-test-sheet-columns.dto';
 import { CreateProjectTestCaseDto } from '../project/dto/create-project-test-case.dto';
 import { UpdateProjectTestCaseDto } from '../project/dto/update-project-test-case.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
@@ -206,6 +207,23 @@ export class ProjectsController {
     return this.projectsService.createTestSheetTab(
       projectId,
       dto,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/columns')
+  @ApiOperation({ summary: 'Update test sheet column headers for a client project' })
+  @UseGuards(JwtAuthGuard)
+  updateTestSheetColumns(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Body() dto: UpdateProjectTestSheetColumnsDto,
+  ) {
+    return this.projectsService.updateTestSheetColumnHeaders(
+      projectId,
+      dto.columnHeaders,
       user.userId,
       user.organizationId,
       this.isAdmin(user),

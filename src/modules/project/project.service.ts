@@ -67,14 +67,23 @@ export class ProjectService implements OnModuleInit {
     const [{ schema }] = await this.projectRepo.query(
       'SELECT current_schema() AS schema',
     );
-    const [{ exists }] = await this.projectRepo.query(
-      `SELECT to_regclass('${schema}.project_issues') IS NOT NULL AS exists`,
+    const [{ projectIssuesExists }] = await this.projectRepo.query(
+      `SELECT to_regclass('${schema}.project_issues') IS NOT NULL AS "projectIssuesExists"`,
     );
-    if (!exists) return;
+    if (projectIssuesExists) {
+      await this.projectRepo.query(
+        `ALTER TABLE "${schema}"."project_issues" ADD COLUMN IF NOT EXISTS assignee_user_id uuid`,
+      );
+    }
 
-    await this.projectRepo.query(
-      `ALTER TABLE "${schema}"."project_issues" ADD COLUMN IF NOT EXISTS assignee_user_id uuid`,
+    const [{ projectsExists }] = await this.projectRepo.query(
+      `SELECT to_regclass('${schema}.projects') IS NOT NULL AS "projectsExists"`,
     );
+    if (projectsExists) {
+      await this.projectRepo.query(
+        `ALTER TABLE "${schema}"."projects" ADD COLUMN IF NOT EXISTS test_sheet_column_headers jsonb`,
+      );
+    }
   }
 
   // ── Admin / Manager ─────────────────────────────────────────────────────────
@@ -835,6 +844,40 @@ export class ProjectService implements OnModuleInit {
     return normalized || null;
   }
 
+  private sanitizeTestSheetColumnHeaders(
+    input: unknown,
+  ): Record<string, string> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      return {};
+    }
+
+    const allowedKeys = new Set([
+      'caseCode',
+      'title',
+      'steps',
+      'expectedResult',
+      'actualResult',
+      'qaUserId',
+      'developerUserId',
+      'status',
+      'updatedAt',
+    ]);
+    const sanitized: Record<string, string> = {};
+    const entries = Object.entries(input as Record<string, unknown>).slice(0, 40);
+
+    entries.forEach(([rawKey, rawValue]) => {
+      const key = String(rawKey ?? '').trim();
+      if (!key) return;
+      if (!allowedKeys.has(key) && !/^custom_\d+$/.test(key)) return;
+
+      const value = this.sanitizeTestSheetText(rawValue, 120);
+      if (!value) return;
+      sanitized[key] = value;
+    });
+
+    return sanitized;
+  }
+
   private normalizeTestCaseStatus(status?: string | null): ProjectTestCaseStatus {
     return String(status ?? '').trim().toLowerCase() === 'resolved'
       ? 'resolved'
@@ -1002,7 +1045,7 @@ export class ProjectService implements OnModuleInit {
     organizationId: string,
     projectSource: ProjectTestSheetSource = 'standalone',
   ) {
-    const [tabs, testCases, logs] = await Promise.all([
+    const [tabs, testCases, logs, project] = await Promise.all([
       this.testSheetTabRepo.find({
         where: { projectId, organizationId, projectSource },
         order: { orderIndex: 'ASC', createdAt: 'ASC' },
@@ -1016,6 +1059,10 @@ export class ProjectService implements OnModuleInit {
         order: { createdAt: 'DESC' },
         take: 200,
       }),
+      this.projectRepo.findOne({
+        where: { id: projectId, organizationId },
+        select: ['id', 'testSheetColumnHeaders'],
+      }),
     ]);
 
     const testCasesByTabId = new Map<string, ProjectTestSheetCase[]>();
@@ -1028,6 +1075,9 @@ export class ProjectService implements OnModuleInit {
     return {
       projectId,
       projectSource,
+      columnHeaders: this.sanitizeTestSheetColumnHeaders(
+        project?.testSheetColumnHeaders,
+      ),
       tabs: tabs.map((tab) => ({
         id: tab.id,
         name: tab.name,
@@ -1078,6 +1128,47 @@ export class ProjectService implements OnModuleInit {
   ) {
     await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
     await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async updateTestSheetColumnHeaders(
+    projectId: string,
+    columnHeaders: Record<string, unknown>,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
+
+    const nextHeaders = this.sanitizeTestSheetColumnHeaders(columnHeaders);
+    const previousHeaders = this.sanitizeTestSheetColumnHeaders(
+      project.testSheetColumnHeaders,
+    );
+
+    if (JSON.stringify(previousHeaders) !== JSON.stringify(nextHeaders)) {
+      project.testSheetColumnHeaders = Object.keys(nextHeaders).length
+        ? nextHeaders
+        : null;
+      await this.projectRepo.save(project);
+
+      await this.createTestSheetChangeLog({
+        projectId,
+        organizationId,
+        changedByUserId: userId,
+        action: 'columns_updated',
+        fieldName: 'columnHeaders',
+        summary: 'Updated test sheet column headers',
+        beforeValue: { columnHeaders: previousHeaders },
+        afterValue: { columnHeaders: nextHeaders },
+      });
+    }
+
     return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
   }
 

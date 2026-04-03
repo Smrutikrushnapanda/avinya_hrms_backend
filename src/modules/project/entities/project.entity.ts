@@ -48,6 +48,9 @@ export class Project {
   @Column({ name: 'hourly_rate', type: 'decimal', precision: 10, scale: 2, nullable: true })
   hourlyRate: number | null;
 
+  @Column({ name: 'test_sheet_column_headers', type: 'jsonb', nullable: true })
+  testSheetColumnHeaders: Record<string, string> | null;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: 'created_by_user_id' })
   createdBy: User;
