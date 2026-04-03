@@ -17,6 +17,10 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { CreateProjectTestSheetTabDto } from './dto/create-project-test-sheet-tab.dto';
+import { UpdateProjectTestSheetTabDto } from './dto/update-project-test-sheet-tab.dto';
+import { CreateProjectTestCaseDto } from './dto/create-project-test-case.dto';
+import { UpdateProjectTestCaseDto } from './dto/update-project-test-case.dto';
 import { UpdateProjectMemberRoleDto } from './dto/update-project-member-role.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
@@ -231,6 +235,82 @@ export class ProjectController {
     return this.service.updateIssue(
       id,
       issueId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Get(':id/test-sheet')
+  getTestSheet(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.service.getTestSheet(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/test-sheet/tabs')
+  createTestSheetTab(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateProjectTestSheetTabDto,
+  ) {
+    return this.service.createTestSheetTab(
+      id,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/tabs/:tabId')
+  updateTestSheetTab(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('tabId') tabId: string,
+    @Body() dto: UpdateProjectTestSheetTabDto,
+  ) {
+    return this.service.updateTestSheetTab(
+      id,
+      tabId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/test-sheet/tabs/:tabId/cases')
+  createTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('tabId') tabId: string,
+    @Body() dto: CreateProjectTestCaseDto,
+  ) {
+    return this.service.createTestCase(
+      id,
+      tabId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/cases/:caseId')
+  updateTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('caseId') caseId: string,
+    @Body() dto: UpdateProjectTestCaseDto,
+  ) {
+    return this.service.updateTestCase(
+      id,
+      caseId,
       dto,
       user.userId,
       user.organizationId,

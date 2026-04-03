@@ -9,8 +9,16 @@ import { Employee } from '../employee/entities/employee.entity';
 import { ProjectIssue, ProjectIssueStatus } from './entities/project-issue.entity';
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { ProjectTestSheetTab, ProjectTestSheetSource } from './entities/project-test-sheet-tab.entity';
+import { ProjectTestSheetCase, ProjectTestCaseStatus } from './entities/project-test-sheet-case.entity';
+import { ProjectTestSheetChangeLog } from './entities/project-test-sheet-log.entity';
+import { CreateProjectTestSheetTabDto } from './dto/create-project-test-sheet-tab.dto';
+import { UpdateProjectTestSheetTabDto } from './dto/update-project-test-sheet-tab.dto';
+import { CreateProjectTestCaseDto } from './dto/create-project-test-case.dto';
+import { UpdateProjectTestCaseDto } from './dto/update-project-test-case.dto';
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
+import { LogReportService } from '../log-report/log-report.service';
 
 type OrgEmployeeFilters = {
   search?: string;
@@ -39,12 +47,21 @@ export class ProjectService implements OnModuleInit {
     private memberRepo: Repository<ProjectMember>,
     @InjectRepository(ProjectIssue)
     private issueRepo: Repository<ProjectIssue>,
+    @InjectRepository(ProjectTestSheetTab)
+    private testSheetTabRepo: Repository<ProjectTestSheetTab>,
+    @InjectRepository(ProjectTestSheetCase)
+    private testSheetCaseRepo: Repository<ProjectTestSheetCase>,
+    @InjectRepository(ProjectTestSheetChangeLog)
+    private testSheetLogRepo: Repository<ProjectTestSheetChangeLog>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
     @InjectRepository(Timesheet)
     private timesheetRepo: Repository<Timesheet>,
     private messageService: MessageService,
+    private logReportService: LogReportService,
   ) {}
+
+  private readonly defaultTestSheetTabName = 'Sheet 1';
 
   async onModuleInit() {
     const [{ schema }] = await this.projectRepo.query(
@@ -805,5 +822,551 @@ export class ProjectService implements OnModuleInit {
       department: tm.department?.name ?? null,
       designation: tm.designation?.name ?? null,
     }));
+  }
+
+  private sanitizeTestSheetText(value: unknown, maxLength: number): string {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return '';
+    return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
+  }
+
+  private normalizeOptionalText(value: unknown, maxLength: number): string | null {
+    const normalized = this.sanitizeTestSheetText(value, maxLength);
+    return normalized || null;
+  }
+
+  private normalizeTestCaseStatus(status?: string | null): ProjectTestCaseStatus {
+    return String(status ?? '').trim().toLowerCase() === 'resolved'
+      ? 'resolved'
+      : 'pending';
+  }
+
+  private makeUniqueTabName(name: string, existingTabs: ProjectTestSheetTab[]) {
+    const currentNames = new Set(
+      existingTabs.map((tab) => tab.name.trim().toLowerCase()),
+    );
+    if (!currentNames.has(name.trim().toLowerCase())) return name;
+
+    for (let i = 2; i < 500; i += 1) {
+      const candidate = `${name} (${i})`;
+      if (!currentNames.has(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+    return `${name}-${Date.now()}`;
+  }
+
+  private async resolveActorName(userId: string, organizationId: string) {
+    const employee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['firstName', 'lastName', 'workEmail'],
+    });
+    if (!employee) return null;
+    const fullName = `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
+    return fullName || employee.workEmail || null;
+  }
+
+  private async resolveAssignableMemberUserId(
+    projectId: string,
+    organizationId: string,
+    value?: string | null,
+  ) {
+    const normalizedIdentifier = String(value ?? '').trim();
+    if (!normalizedIdentifier) return null;
+
+    const membership = await this.findMembershipByIdentity(
+      projectId,
+      normalizedIdentifier,
+      organizationId,
+    );
+    if (!membership) {
+      throw new BadRequestException('Selected user must belong to this project');
+    }
+    return membership.userId;
+  }
+
+  private async createTestSheetChangeLog(payload: {
+    projectId: string;
+    organizationId: string;
+    action: string;
+    changedByUserId: string;
+    tabId?: string | null;
+    testCaseId?: string | null;
+    fieldName?: string | null;
+    summary?: string | null;
+    beforeValue?: Record<string, unknown> | null;
+    afterValue?: Record<string, unknown> | null;
+  }) {
+    const actorName = await this.resolveActorName(
+      payload.changedByUserId,
+      payload.organizationId,
+    );
+
+    const log = await this.testSheetLogRepo.save(
+      this.testSheetLogRepo.create({
+        projectId: payload.projectId,
+        projectSource: 'standalone',
+        organizationId: payload.organizationId,
+        tabId: payload.tabId ?? null,
+        testCaseId: payload.testCaseId ?? null,
+        action: payload.action,
+        fieldName: payload.fieldName ?? null,
+        summary: payload.summary ?? null,
+        beforeValue: payload.beforeValue ?? null,
+        afterValue: payload.afterValue ?? null,
+        changedByUserId: payload.changedByUserId,
+        changedByUserName: actorName,
+      }),
+    );
+
+    try {
+      const enabled = await this.logReportService.isEnabled(payload.organizationId);
+      if (enabled) {
+        await this.logReportService.create({
+          organizationId: payload.organizationId,
+          userId: payload.changedByUserId,
+          userName: actorName ?? undefined,
+          actionType: 'TEST_SHEET',
+          module: 'test-sheet',
+          description: payload.summary || payload.action,
+          metadata: {
+            projectId: payload.projectId,
+            projectSource: 'standalone',
+            tabId: payload.tabId ?? null,
+            testCaseId: payload.testCaseId ?? null,
+            fieldName: payload.fieldName ?? null,
+            beforeValue: payload.beforeValue ?? null,
+            afterValue: payload.afterValue ?? null,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Failed to write test sheet log report', error);
+    }
+
+    return log;
+  }
+
+  private serializeTestCase(testCase: ProjectTestSheetCase) {
+    return {
+      caseCode: testCase.caseCode,
+      title: testCase.title,
+      steps: testCase.steps,
+      expectedResult: testCase.expectedResult,
+      actualResult: testCase.actualResult,
+      qaUserId: testCase.qaUserId,
+      developerUserId: testCase.developerUserId,
+      status: testCase.status,
+      rowIndex: testCase.rowIndex,
+    };
+  }
+
+  private async ensureDefaultTestSheetTab(
+    projectId: string,
+    organizationId: string,
+    userId: string,
+  ) {
+    const count = await this.testSheetTabRepo.count({
+      where: {
+        projectId,
+        organizationId,
+        projectSource: 'standalone',
+      },
+    });
+    if (count > 0) return;
+
+    const tab = await this.testSheetTabRepo.save(
+      this.testSheetTabRepo.create({
+        projectId,
+        projectSource: 'standalone',
+        organizationId,
+        name: this.defaultTestSheetTabName,
+        orderIndex: 0,
+        createdByUserId: userId,
+      }),
+    );
+
+    await this.createTestSheetChangeLog({
+      projectId,
+      organizationId,
+      changedByUserId: userId,
+      action: 'tab_created',
+      tabId: tab.id,
+      summary: `Created tab "${tab.name}"`,
+      afterValue: { name: tab.name, orderIndex: tab.orderIndex },
+    });
+  }
+
+  private async buildTestSheetResponse(
+    projectId: string,
+    organizationId: string,
+    projectSource: ProjectTestSheetSource = 'standalone',
+  ) {
+    const [tabs, testCases, logs] = await Promise.all([
+      this.testSheetTabRepo.find({
+        where: { projectId, organizationId, projectSource },
+        order: { orderIndex: 'ASC', createdAt: 'ASC' },
+      }),
+      this.testSheetCaseRepo.find({
+        where: { projectId, organizationId, projectSource },
+        order: { rowIndex: 'ASC', createdAt: 'ASC' },
+      }),
+      this.testSheetLogRepo.find({
+        where: { projectId, organizationId, projectSource },
+        order: { createdAt: 'DESC' },
+        take: 200,
+      }),
+    ]);
+
+    const testCasesByTabId = new Map<string, ProjectTestSheetCase[]>();
+    testCases.forEach((row) => {
+      const rows = testCasesByTabId.get(row.tabId) ?? [];
+      rows.push(row);
+      testCasesByTabId.set(row.tabId, rows);
+    });
+
+    return {
+      projectId,
+      projectSource,
+      tabs: tabs.map((tab) => ({
+        id: tab.id,
+        name: tab.name,
+        orderIndex: tab.orderIndex,
+        createdAt: tab.createdAt,
+        updatedAt: tab.updatedAt,
+        cases: (testCasesByTabId.get(tab.id) ?? []).map((row) => ({
+          id: row.id,
+          tabId: row.tabId,
+          rowIndex: row.rowIndex,
+          caseCode: row.caseCode,
+          title: row.title,
+          steps: row.steps,
+          expectedResult: row.expectedResult,
+          actualResult: row.actualResult,
+          qaUserId: row.qaUserId,
+          developerUserId: row.developerUserId,
+          status: row.status,
+          createdByUserId: row.createdByUserId,
+          updatedByUserId: row.updatedByUserId,
+          resolvedByUserId: row.resolvedByUserId,
+          resolvedAt: row.resolvedAt,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        })),
+      })),
+      logs: logs.map((log) => ({
+        id: log.id,
+        action: log.action,
+        fieldName: log.fieldName,
+        summary: log.summary,
+        beforeValue: log.beforeValue,
+        afterValue: log.afterValue,
+        changedByUserId: log.changedByUserId,
+        changedByUserName: log.changedByUserName,
+        tabId: log.tabId,
+        testCaseId: log.testCaseId,
+        createdAt: log.createdAt,
+      })),
+    };
+  }
+
+  async getTestSheet(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+    await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async createTestSheetTab(
+    projectId: string,
+    dto: CreateProjectTestSheetTabDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const requestedName = this.sanitizeTestSheetText(dto.name, 120);
+    if (!requestedName) {
+      throw new BadRequestException('Tab name is required');
+    }
+
+    const existingTabs = await this.testSheetTabRepo.find({
+      where: { projectId, organizationId, projectSource: 'standalone' },
+      order: { orderIndex: 'ASC', createdAt: 'ASC' },
+    });
+    const tabName = this.makeUniqueTabName(requestedName, existingTabs);
+    const nextOrderIndex =
+      existingTabs.length > 0
+        ? Math.max(...existingTabs.map((tab) => Number(tab.orderIndex || 0))) + 1
+        : 0;
+
+    const tab = await this.testSheetTabRepo.save(
+      this.testSheetTabRepo.create({
+        projectId,
+        projectSource: 'standalone',
+        organizationId,
+        name: tabName,
+        orderIndex: nextOrderIndex,
+        createdByUserId: userId,
+      }),
+    );
+
+    await this.createTestSheetChangeLog({
+      projectId,
+      organizationId,
+      changedByUserId: userId,
+      action: 'tab_created',
+      tabId: tab.id,
+      summary: `Created tab "${tab.name}"`,
+      afterValue: { name: tab.name, orderIndex: tab.orderIndex },
+    });
+
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async updateTestSheetTab(
+    projectId: string,
+    tabId: string,
+    dto: UpdateProjectTestSheetTabDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const tab = await this.testSheetTabRepo.findOne({
+      where: {
+        id: tabId,
+        projectId,
+        organizationId,
+        projectSource: 'standalone',
+      },
+    });
+    if (!tab) {
+      throw new NotFoundException('Test sheet tab not found');
+    }
+
+    const previous = { name: tab.name, orderIndex: tab.orderIndex };
+    if (dto.name !== undefined) {
+      const nextName = this.sanitizeTestSheetText(dto.name, 120);
+      if (!nextName) throw new BadRequestException('Tab name is required');
+
+      const siblingTabs = await this.testSheetTabRepo.find({
+        where: { projectId, organizationId, projectSource: 'standalone' },
+      });
+      tab.name = this.makeUniqueTabName(
+        nextName,
+        siblingTabs.filter((item) => item.id !== tab.id),
+      );
+    }
+
+    if (dto.orderIndex !== undefined) {
+      tab.orderIndex = Math.max(0, Number(dto.orderIndex || 0));
+    }
+
+    await this.testSheetTabRepo.save(tab);
+
+    await this.createTestSheetChangeLog({
+      projectId,
+      organizationId,
+      changedByUserId: userId,
+      action: 'tab_updated',
+      tabId: tab.id,
+      fieldName: 'name,orderIndex',
+      summary: `Updated tab "${tab.name}"`,
+      beforeValue: previous,
+      afterValue: { name: tab.name, orderIndex: tab.orderIndex },
+    });
+
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async createTestCase(
+    projectId: string,
+    tabId: string,
+    dto: CreateProjectTestCaseDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const tab = await this.testSheetTabRepo.findOne({
+      where: { id: tabId, projectId, organizationId, projectSource: 'standalone' },
+    });
+    if (!tab) {
+      throw new NotFoundException('Test sheet tab not found');
+    }
+
+    const title = this.sanitizeTestSheetText(dto.title, 250);
+    if (!title) {
+      throw new BadRequestException('Test case title is required');
+    }
+
+    const [qaUserId, developerUserId] = await Promise.all([
+      this.resolveAssignableMemberUserId(projectId, organizationId, dto.qaUserId),
+      this.resolveAssignableMemberUserId(projectId, organizationId, dto.developerUserId),
+    ]);
+
+    const lastRow = await this.testSheetCaseRepo
+      .createQueryBuilder('row')
+      .where('row.projectId = :projectId', { projectId })
+      .andWhere('row.organizationId = :organizationId', { organizationId })
+      .andWhere('row.projectSource = :projectSource', { projectSource: 'standalone' })
+      .andWhere('row.tabId = :tabId', { tabId })
+      .orderBy('row.rowIndex', 'DESC')
+      .addOrderBy('row.createdAt', 'DESC')
+      .getOne();
+    const nextRowIndex = lastRow ? Number(lastRow.rowIndex || 0) + 1 : 0;
+
+    const status = this.normalizeTestCaseStatus(dto.status);
+    const now = new Date();
+    const testCase = await this.testSheetCaseRepo.save(
+      this.testSheetCaseRepo.create({
+        projectId,
+        projectSource: 'standalone',
+        organizationId,
+        tabId,
+        rowIndex: nextRowIndex,
+        caseCode: this.normalizeOptionalText(dto.caseCode, 80),
+        title,
+        steps: this.normalizeOptionalText(dto.steps, 10000),
+        expectedResult: this.normalizeOptionalText(dto.expectedResult, 10000),
+        actualResult: this.normalizeOptionalText(dto.actualResult, 10000),
+        qaUserId,
+        developerUserId,
+        status,
+        createdByUserId: userId,
+        updatedByUserId: userId,
+        resolvedByUserId: status === 'resolved' ? userId : null,
+        resolvedAt: status === 'resolved' ? now : null,
+      }),
+    );
+
+    await this.createTestSheetChangeLog({
+      projectId,
+      organizationId,
+      changedByUserId: userId,
+      action: 'test_case_created',
+      tabId,
+      testCaseId: testCase.id,
+      summary: `Created test case "${testCase.title}"`,
+      afterValue: this.serializeTestCase(testCase),
+    });
+
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
+  }
+
+  async updateTestCase(
+    projectId: string,
+    testCaseId: string,
+    dto: UpdateProjectTestCaseDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+
+    const testCase = await this.testSheetCaseRepo.findOne({
+      where: {
+        id: testCaseId,
+        projectId,
+        organizationId,
+        projectSource: 'standalone',
+      },
+    });
+    if (!testCase) {
+      throw new NotFoundException('Test case not found');
+    }
+
+    const beforeSnapshot = this.serializeTestCase(testCase);
+
+    if (dto.caseCode !== undefined) {
+      testCase.caseCode = this.normalizeOptionalText(dto.caseCode, 80);
+    }
+    if (dto.title !== undefined) {
+      const nextTitle = this.sanitizeTestSheetText(dto.title, 250);
+      if (!nextTitle) throw new BadRequestException('Test case title is required');
+      testCase.title = nextTitle;
+    }
+    if (dto.steps !== undefined) {
+      testCase.steps = this.normalizeOptionalText(dto.steps, 10000);
+    }
+    if (dto.expectedResult !== undefined) {
+      testCase.expectedResult = this.normalizeOptionalText(dto.expectedResult, 10000);
+    }
+    if (dto.actualResult !== undefined) {
+      testCase.actualResult = this.normalizeOptionalText(dto.actualResult, 10000);
+    }
+    if (dto.qaUserId !== undefined) {
+      testCase.qaUserId = await this.resolveAssignableMemberUserId(
+        projectId,
+        organizationId,
+        dto.qaUserId,
+      );
+    }
+    if (dto.developerUserId !== undefined) {
+      testCase.developerUserId = await this.resolveAssignableMemberUserId(
+        projectId,
+        organizationId,
+        dto.developerUserId,
+      );
+    }
+    if (dto.status !== undefined) {
+      const nextStatus = this.normalizeTestCaseStatus(dto.status);
+      testCase.status = nextStatus;
+      if (nextStatus === 'resolved') {
+        testCase.resolvedByUserId = userId;
+        testCase.resolvedAt = new Date();
+      } else {
+        testCase.resolvedByUserId = null;
+        testCase.resolvedAt = null;
+      }
+    }
+
+    testCase.updatedByUserId = userId;
+    await this.testSheetCaseRepo.save(testCase);
+
+    const afterSnapshot = this.serializeTestCase(testCase);
+    const changedFieldNames = Object.keys(afterSnapshot).filter((fieldName) => {
+      const previousValue = (beforeSnapshot as Record<string, unknown>)[fieldName];
+      const nextValue = (afterSnapshot as Record<string, unknown>)[fieldName];
+      return JSON.stringify(previousValue) !== JSON.stringify(nextValue);
+    });
+
+    if (changedFieldNames.length > 0) {
+      const beforeValue = Object.fromEntries(
+        changedFieldNames.map((fieldName) => [
+          fieldName,
+          (beforeSnapshot as Record<string, unknown>)[fieldName],
+        ]),
+      );
+      const afterValue = Object.fromEntries(
+        changedFieldNames.map((fieldName) => [
+          fieldName,
+          (afterSnapshot as Record<string, unknown>)[fieldName],
+        ]),
+      );
+
+      await this.createTestSheetChangeLog({
+        projectId,
+        organizationId,
+        changedByUserId: userId,
+        action: 'test_case_updated',
+        tabId: testCase.tabId,
+        testCaseId: testCase.id,
+        fieldName: changedFieldNames.join(','),
+        summary: `Updated test case "${testCase.title}"`,
+        beforeValue,
+        afterValue,
+      });
+    }
+
+    return this.buildTestSheetResponse(projectId, organizationId, 'standalone');
   }
 }

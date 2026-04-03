@@ -1,8 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards, ForbiddenException, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { CreateProjectTestSheetTabDto } from '../project/dto/create-project-test-sheet-tab.dto';
+import { UpdateProjectTestSheetTabDto } from '../project/dto/update-project-test-sheet-tab.dto';
+import { CreateProjectTestCaseDto } from '../project/dto/create-project-test-case.dto';
+import { UpdateProjectTestCaseDto } from '../project/dto/update-project-test-case.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
@@ -177,6 +181,92 @@ export class ProjectsController {
   @UseGuards(JwtAuthGuard)
   getProjectTasks(@Param('id') projectId: string) {
     return this.projectsService.getProjectTasks(projectId);
+  }
+
+  @Get(':id/test-sheet')
+  @ApiOperation({ summary: 'Get test sheet data for a client project' })
+  @UseGuards(JwtAuthGuard)
+  getTestSheet(@GetUser() user: JwtPayload, @Param('id') projectId: string) {
+    return this.projectsService.getTestSheet(
+      projectId,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
+  @Post(':id/test-sheet/tabs')
+  @ApiOperation({ summary: 'Create test sheet tab for a client project' })
+  @UseGuards(JwtAuthGuard)
+  createTestSheetTab(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Body() dto: CreateProjectTestSheetTabDto,
+  ) {
+    return this.projectsService.createTestSheetTab(
+      projectId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/tabs/:tabId')
+  @ApiOperation({ summary: 'Update test sheet tab for a client project' })
+  @UseGuards(JwtAuthGuard)
+  updateTestSheetTab(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('tabId') tabId: string,
+    @Body() dto: UpdateProjectTestSheetTabDto,
+  ) {
+    return this.projectsService.updateTestSheetTab(
+      projectId,
+      tabId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
+  @Post(':id/test-sheet/tabs/:tabId/cases')
+  @ApiOperation({ summary: 'Create test case row for a client project test sheet' })
+  @UseGuards(JwtAuthGuard)
+  createTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('tabId') tabId: string,
+    @Body() dto: CreateProjectTestCaseDto,
+  ) {
+    return this.projectsService.createTestCase(
+      projectId,
+      tabId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
+  }
+
+  @Patch(':id/test-sheet/cases/:caseId')
+  @ApiOperation({ summary: 'Update test case row for a client project test sheet' })
+  @UseGuards(JwtAuthGuard)
+  updateTestCase(
+    @GetUser() user: JwtPayload,
+    @Param('id') projectId: string,
+    @Param('caseId') caseId: string,
+    @Body() dto: UpdateProjectTestCaseDto,
+  ) {
+    return this.projectsService.updateTestCase(
+      projectId,
+      caseId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdmin(user),
+    );
   }
 
   @Get('tasks/my')
