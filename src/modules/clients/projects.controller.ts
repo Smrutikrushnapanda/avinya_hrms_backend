@@ -119,12 +119,20 @@ export class ProjectsController {
   assignEmployees(
     @GetUser() user: JwtPayload,
     @Param('id') id: string,
-    @Body() body: { userIds: string[] },
+    @Body()
+    body: {
+      userIds?: string[];
+      assignments?: { userId: string; role?: string }[];
+    },
   ) {
     const isAdmin = this.isAdmin(user);
+    const assignments =
+      body?.assignments && Array.isArray(body.assignments)
+        ? body.assignments
+        : body?.userIds ?? [];
     return this.projectsService.assignEmployees(
       id,
-      body.userIds,
+      assignments,
       user.userId,
       user.organizationId,
       isAdmin,

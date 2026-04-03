@@ -11,6 +11,11 @@ import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Timesheet } from 'src/modules/workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
 
+type AssignEmployeeInput = {
+  userId: string;
+  role?: string;
+};
+
 @Injectable()
 export class ProjectsService implements OnModuleInit {
   constructor(
@@ -52,6 +57,13 @@ export class ProjectsService implements OnModuleInit {
     await this.projectRepo.query(
       `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS hourly_rate decimal(10,2)`,
     );
+  }
+
+  private sanitizeProjectMemberRole(role?: string): string {
+    const normalized = String(role ?? 'member').trim().toLowerCase();
+    if (!normalized) return 'member';
+    if (normalized.length > 30) return normalized.slice(0, 30);
+    return normalized;
   }
 
   private async generateProjectCode(): Promise<string> {
@@ -313,7 +325,7 @@ export class ProjectsService implements OnModuleInit {
 
   async assignEmployees(
     projectId: string,
-    userIds: string[],
+    assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
     isAdmin = false,
@@ -324,12 +336,29 @@ export class ProjectsService implements OnModuleInit {
       throw new ForbiddenException('You cannot assign employees to this project');
     }
 
-    const normalizedUserIds = Array.from(
-      new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean)),
+    const normalizedAssignmentsRaw = (Array.isArray(assignmentsOrUserIds)
+      ? assignmentsOrUserIds
+      : []
+    )
+      .map((entry) =>
+        typeof entry === 'string'
+          ? { userId: entry, role: 'member' }
+          : {
+              userId: entry?.userId,
+              role: this.sanitizeProjectMemberRole(entry?.role),
+            },
+      )
+      .filter((entry) => Boolean(entry.userId));
+
+    const uniqueAssignmentMap = new Map<string, AssignEmployeeInput>();
+    normalizedAssignmentsRaw.forEach((entry) => {
+      if (!entry.userId) return;
+      uniqueAssignmentMap.set(entry.userId, entry);
+    });
+    const assignableAssignments = Array.from(uniqueAssignmentMap.values()).filter(
+      (entry) => entry.userId !== requestingUserId,
     );
-    const assignableUserIds = normalizedUserIds.filter(
-      (userId) => userId !== requestingUserId,
-    );
+    const assignableUserIds = assignableAssignments.map((entry) => entry.userId);
     if (assignableUserIds.length === 0) {
       return this.getProjectEmployees(projectId);
     }
@@ -344,12 +373,17 @@ export class ProjectsService implements OnModuleInit {
       throw new ForbiddenException('Selected employees must belong to your organization');
     }
 
-    for (const userId of assignableUserIds) {
+    for (const assignment of assignableAssignments) {
+      const userId = assignment.userId;
+      const nextRole = this.sanitizeProjectMemberRole(assignment.role);
       const exists = await this.memberRepo.findOne({ where: { projectId, userId } });
       if (!exists) {
         await this.memberRepo.save(
-          this.memberRepo.create({ projectId, userId, role: 'member' }),
+          this.memberRepo.create({ projectId, userId, role: nextRole }),
         );
+      } else {
+        exists.role = nextRole;
+        await this.memberRepo.save(exists);
       }
     }
 
