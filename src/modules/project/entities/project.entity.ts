@@ -42,6 +42,12 @@ export class Project {
   @Column({ name: 'estimated_end_date', type: 'date', nullable: true })
   estimatedEndDate: string | null;
 
+  @Column({ name: 'project_cost', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  projectCost: number | null;
+
+  @Column({ name: 'hourly_rate', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  hourlyRate: number | null;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: 'created_by_user_id' })
   createdBy: User;

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsArray, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsArray, IsUUID, IsNumber } from 'class-validator';
 import { ProjectPriority, ProjectStatus } from '../entities/project.entity';
 
 export class CreateProjectDto {
@@ -25,4 +25,14 @@ export class CreateProjectDto {
   @IsArray()
   @IsUUID(undefined, { each: true })
   memberUserIds?: string[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  projectCost?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  hourlyRate?: number;
 }

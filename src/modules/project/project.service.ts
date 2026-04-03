@@ -1,10 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-  BadRequestException,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository } from 'typeorm';
 import { Project } from './entities/project.entity';
@@ -16,6 +10,7 @@ import { ProjectIssue, ProjectIssueStatus } from './entities/project-issue.entit
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
+import { MessageService } from '../message/message.service';
 
 type OrgEmployeeFilters = {
   search?: string;
@@ -48,6 +43,7 @@ export class ProjectService implements OnModuleInit {
     private employeeRepo: Repository<Employee>,
     @InjectRepository(Timesheet)
     private timesheetRepo: Repository<Timesheet>,
+    private messageService: MessageService,
   ) {}
 
   async onModuleInit() {
@@ -461,7 +457,37 @@ export class ProjectService implements OnModuleInit {
       }
     }
 
+    // Send notification to newly assigned employees
+    await this.sendAssignmentNotification(
+      project,
+      assignableAssignments,
+      requestingUserId,
+      organizationId,
+    );
+
     return this.getProjectEmployees(projectId);
+  }
+
+  private async sendAssignmentNotification(
+    project: Project,
+    assignments: AssignEmployeeInput[],
+    requestingUserId: string,
+    organizationId: string,
+  ) {
+    try {
+      const recipientUserIds = assignments.map((a) => a.userId);
+      const roleList = assignments.map((a) => a.role || 'member').join(', ');
+      
+      await this.messageService.createMessage(requestingUserId, {
+        organizationId,
+        recipientUserIds,
+        title: `Assigned to Project: ${project.name}`,
+        body: `You have been assigned to the project "${project.name}" as ${roleList}.\n\nProject Description: ${project.description || 'No description provided'}\n\nPlease check the project details and start working on it.`,
+        type: 'project_assignment',
+      });
+    } catch (error) {
+      console.error('Failed to send assignment notification:', error);
+    }
   }
 
   async removeEmployee(

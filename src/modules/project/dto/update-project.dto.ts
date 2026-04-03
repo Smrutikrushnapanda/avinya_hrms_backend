@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsNumber } from 'class-validator';
 import { ProjectPriority, ProjectStatus } from '../entities/project.entity';
 
 export class UpdateProjectDto {
@@ -27,4 +27,14 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsString()
   estimatedEndDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  projectCost?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  hourlyRate?: number;
 }

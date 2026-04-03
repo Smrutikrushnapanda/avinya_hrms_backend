@@ -11,9 +11,13 @@ import { ClientsController } from './clients.controller';
 import { ProjectsController } from './projects.controller';
 import { ClientsService } from './clients.service';
 import { ProjectsService } from './projects.service';
+import { MessageModule } from '../message/message.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client, ClientProject, ClientProjectMember, ProjectTask, Employee, User, Timesheet])],
+  imports: [
+    TypeOrmModule.forFeature([Client, ClientProject, ClientProjectMember, ProjectTask, Employee, User, Timesheet]),
+    MessageModule,
+  ],
   controllers: [ClientsController, ProjectsController],
   providers: [ClientsService, ProjectsService],
 })

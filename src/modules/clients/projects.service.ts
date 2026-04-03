@@ -9,6 +9,7 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Timesheet } from 'src/modules/workflow/timesheet/entities/timesheet.entity';
+import { MessageService } from '../message/message.service';
 
 @Injectable()
 export class ProjectsService implements OnModuleInit {
@@ -25,6 +26,7 @@ export class ProjectsService implements OnModuleInit {
     private userRepo: Repository<User>,
     @InjectRepository(Timesheet)
     private timesheetRepo: Repository<Timesheet>,
+    private messageService: MessageService,
   ) {}
 
   async onModuleInit() {
@@ -351,7 +353,34 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
+    // Send notification to newly assigned employees
+    await this.sendAssignmentNotification(
+      project,
+      assignableUserIds,
+      requestingUserId,
+      organizationId,
+    );
+
     return this.getProjectEmployees(projectId);
+  }
+
+  private async sendAssignmentNotification(
+    project: ClientProject,
+    userIds: string[],
+    requestingUserId: string,
+    organizationId: string,
+  ) {
+    try {
+      await this.messageService.createMessage(requestingUserId, {
+        organizationId,
+        recipientUserIds: userIds,
+        title: `Assigned to Project: ${project.projectName}`,
+        body: `You have been assigned to the project "${project.projectName}".\n\nProject Description: ${project.description || 'No description provided'}\n\nPlease check the project details and start working on it.`,
+        type: 'project_assignment',
+      });
+    } catch (error) {
+      console.error('Failed to send assignment notification:', error);
+    }
   }
 
   async removeEmployee(projectId: string, userId: string) {
@@ -422,7 +451,45 @@ export class ProjectsService implements OnModuleInit {
       status: TaskStatus.PENDING,
     });
 
-    return this.taskRepo.save(task);
+    const savedTask = await this.taskRepo.save(task);
+
+    // Send notification if task is assigned to an employee
+    if (data.assignedToUserId) {
+      await this.sendTaskAssignmentNotification(
+        project,
+        savedTask,
+        data.assignedToUserId,
+        data.assignedByUserId,
+        data.organizationId,
+      );
+    }
+
+    return savedTask;
+  }
+
+  private async sendTaskAssignmentNotification(
+    project: ClientProject,
+    task: ProjectTask,
+    assignedToUserId: string,
+    assignedByUserId: string,
+    organizationId: string,
+  ) {
+    try {
+      const dueDateText = task.dueDate
+        ? `\nDue Date: ${new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+        : '';
+      const priorityText = `\nPriority: ${task.priority || 'Medium'}`;
+
+      await this.messageService.createMessage(assignedByUserId, {
+        organizationId,
+        recipientUserIds: [assignedToUserId],
+        title: `New Task Assigned: ${task.title}`,
+        body: `You have been assigned a new task for project "${project.projectName}".\n\nTask: ${task.title}\nDescription: ${task.description || 'No description'}${dueDateText}${priorityText}\n\nPlease check your tasks and start working on it.`,
+        type: 'task_assignment',
+      });
+    } catch (error) {
+      console.error('Failed to send task assignment notification:', error);
+    }
   }
 
   async getProjectTasks(projectId: string) {
