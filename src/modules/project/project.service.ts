@@ -501,9 +501,14 @@ export class ProjectService implements OnModuleInit {
     organizationId: string,
   ) {
     try {
-      const recipientUserIds = assignments.map((a) => a.userId);
-      const roleList = assignments.map((a) => a.role || 'member').join(', ');
-      
+      // Filter out the requestingUserId to ensure they don't receive their own notification
+      const filteredAssignments = assignments.filter((a) => a.userId !== requestingUserId);
+      if (filteredAssignments.length === 0) {
+        return; // No recipients to notify
+      }
+      const recipientUserIds = filteredAssignments.map((a) => a.userId);
+      const roleList = filteredAssignments.map((a) => a.role || 'member').join(', ');
+
       await this.messageService.createMessage(requestingUserId, {
         organizationId,
         recipientUserIds,

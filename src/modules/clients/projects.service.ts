@@ -425,9 +425,14 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
   ) {
     try {
+      // Filter out the requestingUserId to ensure they don't receive their own notification
+      const filteredRecipientIds = userIds.filter((id) => id !== requestingUserId);
+      if (filteredRecipientIds.length === 0) {
+        return; // No recipients to notify
+      }
       await this.messageService.createMessage(requestingUserId, {
         organizationId,
-        recipientUserIds: userIds,
+        recipientUserIds: filteredRecipientIds,
         title: `Assigned to Project: ${project.projectName}`,
         body: `You have been assigned to the project "${project.projectName}".\n\nProject Description: ${project.description || 'No description provided'}\n\nPlease check the project details and start working on it.`,
         type: 'project_assignment',
@@ -529,6 +534,10 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
   ) {
     try {
+      // Don't send notification if assigning to yourself
+      if (assignedToUserId === assignedByUserId) {
+        return;
+      }
       const dueDateText = task.dueDate
         ? `\nDue Date: ${new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
         : '';

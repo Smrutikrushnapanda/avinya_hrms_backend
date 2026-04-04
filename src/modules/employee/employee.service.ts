@@ -82,12 +82,19 @@ export class EmployeeService {
 
   async create(dto: CreateEmployeeDto) {
     try {
-      if (!dto.loginUserName?.trim() || !dto.loginPassword?.trim()) {
-        throw new BadRequestException('loginUserName and loginPassword are required');
+      // If loginUserName is not provided, default to work email (before @)
+      let loginUserName = dto.loginUserName?.trim();
+      const { loginPassword, roleId, ...employeePayload } = dto;
+      
+      if (!loginPassword?.trim()) {
+        throw new BadRequestException('loginPassword is required');
       }
 
-      const { loginUserName: rawLoginUserName, loginPassword, roleId, ...employeePayload } = dto;
-      const loginUserName = rawLoginUserName.trim();
+      // Default username to work email prefix if not provided
+      if (!loginUserName) {
+        loginUserName = dto.workEmail.split('@')[0].toLowerCase();
+      }
+      
       await this.ensureShiftBelongsToOrganization(
         dto.organizationId,
         dto.shiftId ?? null,
