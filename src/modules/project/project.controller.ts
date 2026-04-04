@@ -172,6 +172,7 @@ export class ProjectController {
       assignments,
       user.userId,
       user.organizationId,
+      this.isAdminOrManager(user),
     );
   }
 

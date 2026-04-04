@@ -407,13 +407,15 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    // Send notification to newly assigned employees
-    await this.sendAssignmentNotification(
-      project,
-      assignableUserIds,
-      requestingUserId,
-      organizationId,
-    );
+    // Send notification to newly assigned employees (only send to employees, not to admin/manager)
+    if (!isAdmin) {
+      await this.sendAssignmentNotification(
+        project,
+        assignableUserIds,
+        requestingUserId,
+        organizationId,
+      );
+    }
 
     return this.getProjectEmployees(projectId);
   }

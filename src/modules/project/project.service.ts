@@ -418,6 +418,7 @@ export class ProjectService implements OnModuleInit {
     assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
+    isAdmin = false,
   ) {
     const project = await this.projectRepo.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
@@ -484,12 +485,15 @@ export class ProjectService implements OnModuleInit {
     }
 
     // Send notification to newly assigned employees
-    await this.sendAssignmentNotification(
-      project,
-      assignableAssignments,
-      requestingUserId,
-      organizationId,
-    );
+    // Only send notifications to newly assigned employees, not to the admin assigning them
+    if (!isAdmin) {
+      await this.sendAssignmentNotification(
+        project,
+        assignableAssignments,
+        requestingUserId,
+        organizationId,
+      );
+    }
 
     return this.getProjectEmployees(projectId);
   }
