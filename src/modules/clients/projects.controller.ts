@@ -8,6 +8,8 @@ import { UpdateProjectTestSheetTabDto } from '../project/dto/update-project-test
 import { UpdateProjectTestSheetColumnsDto } from '../project/dto/update-project-test-sheet-columns.dto';
 import { CreateProjectTestCaseDto } from '../project/dto/create-project-test-case.dto';
 import { UpdateProjectTestCaseDto } from '../project/dto/update-project-test-case.dto';
+import { CreateProjectDocumentDto } from '../project/dto/create-project-document.dto';
+import { UpdateProjectDocumentDto } from '../project/dto/update-project-document.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
@@ -152,6 +154,54 @@ export class ProjectsController {
     @Param('userId') userId: string,
   ) {
     return this.projectsService.removeEmployee(id, userId);
+  }
+
+  @Get(':id/documents')
+  @ApiOperation({ summary: 'Get documents for a client project' })
+  @UseGuards(JwtAuthGuard)
+  listDocuments(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.projectsService.listDocuments(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/documents')
+  @ApiOperation({ summary: 'Create a document for a client project' })
+  @UseGuards(JwtAuthGuard)
+  createDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateProjectDocumentDto,
+  ) {
+    return this.projectsService.createDocument(
+      id,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Patch(':id/documents/:documentId')
+  @ApiOperation({ summary: 'Update a document for a client project' })
+  @UseGuards(JwtAuthGuard)
+  updateDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body() dto: UpdateProjectDocumentDto,
+  ) {
+    return this.projectsService.updateDocument(
+      id,
+      documentId,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
   }
 
   // ─── Task Management ───────────────────────────────────────────────────

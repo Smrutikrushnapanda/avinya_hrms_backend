@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { ClientProject } from './entities/project.entity';
 import { ClientProjectMember } from './entities/client-project-member.entity';
 import { ProjectTask, TaskStatus, TaskPriority } from './entities/project-task.entity';
+import { ClientProjectDocument } from './entities/client-project-document.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
@@ -18,6 +19,8 @@ import { CreateProjectTestSheetTabDto } from '../project/dto/create-project-test
 import { UpdateProjectTestSheetTabDto } from '../project/dto/update-project-test-sheet-tab.dto';
 import { CreateProjectTestCaseDto } from '../project/dto/create-project-test-case.dto';
 import { UpdateProjectTestCaseDto } from '../project/dto/update-project-test-case.dto';
+import { CreateProjectDocumentDto } from '../project/dto/create-project-document.dto';
+import { UpdateProjectDocumentDto } from '../project/dto/update-project-document.dto';
 
 type AssignEmployeeInput = {
   userId: string;
@@ -35,6 +38,8 @@ export class ProjectsService implements OnModuleInit {
     private employeeRepo: Repository<Employee>,
     @InjectRepository(ProjectTask)
     private taskRepo: Repository<ProjectTask>,
+    @InjectRepository(ClientProjectDocument)
+    private documentRepo: Repository<ClientProjectDocument>,
     @InjectRepository(ProjectTestSheetTab)
     private testSheetTabRepo: Repository<ProjectTestSheetTab>,
     @InjectRepository(ProjectTestSheetCase)
@@ -77,6 +82,24 @@ export class ProjectsService implements OnModuleInit {
     await this.projectRepo.query(
       `ALTER TABLE "${schema}"."client_projects" ADD COLUMN IF NOT EXISTS test_sheet_column_headers jsonb`,
     );
+
+    await this.projectRepo.query(`
+      CREATE TABLE IF NOT EXISTS "${schema}"."client_project_documents" (
+        "id" uuid PRIMARY KEY,
+        "project_id" uuid NOT NULL REFERENCES "${schema}"."client_projects"("id") ON DELETE CASCADE,
+        "organization_id" uuid NOT NULL,
+        "title" varchar(255) NOT NULL,
+        "description" text NULL,
+        "file_url" text NOT NULL,
+        "file_name" varchar(255) NULL,
+        "mime_type" varchar(120) NULL,
+        "file_size" bigint NULL,
+        "uploaded_by_user_id" uuid NOT NULL,
+        "updated_by_user_id" uuid NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
   }
 
   private sanitizeProjectMemberRole(role?: string): string {
@@ -449,6 +472,196 @@ export class ProjectsService implements OnModuleInit {
     if (!member) throw new NotFoundException('Employee not found in this project');
     await this.memberRepo.remove(member);
     return { success: true };
+  }
+
+  private sanitizeDocumentText(value: unknown, maxLength: number): string {
+    const normalized =
+      typeof value === 'string'
+        ? value.trim()
+        : typeof value === 'number' || typeof value === 'boolean'
+          ? String(value).trim()
+          : '';
+    if (!normalized) return '';
+    if (normalized.length > maxLength) return normalized.slice(0, maxLength);
+    return normalized;
+  }
+
+  private sanitizeDocumentOptionalText(
+    value: unknown,
+    maxLength: number,
+  ): string | null {
+    const normalized = this.sanitizeDocumentText(value, maxLength);
+    return normalized || null;
+  }
+
+  private normalizeDocumentFileSize(value: unknown): string | null {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return null;
+    return String(Math.floor(numeric));
+  }
+
+  private formatDocument(document: ClientProjectDocument) {
+    return {
+      id: document.id,
+      projectId: document.projectId,
+      organizationId: document.organizationId,
+      title: document.title,
+      description: document.description,
+      fileUrl: document.fileUrl,
+      fileName: document.fileName,
+      mimeType: document.mimeType,
+      fileSize: document.fileSize !== null ? Number(document.fileSize) : null,
+      uploadedByUserId: document.uploadedByUserId,
+      updatedByUserId: document.updatedByUserId,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    };
+  }
+
+  private async canManageDocuments(
+    project: ClientProject,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    if (isAdminOrManager) return true;
+    const actorEmployee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['id'],
+    });
+    return Boolean(actorEmployee?.id && project.managerId === actorEmployee.id);
+  }
+
+  async listDocuments(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    const documents = await this.documentRepo.find({
+      where: { projectId, organizationId },
+      order: { createdAt: 'DESC' },
+    });
+    return documents.map((document) => this.formatDocument(document));
+  }
+
+  async createDocument(
+    projectId: string,
+    dto: CreateProjectDocumentDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    const canManage = await this.canManageDocuments(
+      project,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    if (!canManage) {
+      throw new ForbiddenException(
+        'Only admin/manager or assigned project manager can create project documents',
+      );
+    }
+
+    const title = this.sanitizeDocumentText(dto.title, 255);
+    const fileUrl = this.sanitizeDocumentText(dto.fileUrl, 3000);
+    if (!title || !fileUrl) {
+      throw new BadRequestException('title and fileUrl are required');
+    }
+
+    const document = await this.documentRepo.save(
+      this.documentRepo.create({
+        projectId,
+        organizationId: project.organizationId,
+        title,
+        description: this.sanitizeDocumentOptionalText(dto.description, 3000),
+        fileUrl,
+        fileName: this.sanitizeDocumentOptionalText(dto.fileName, 255),
+        mimeType: this.sanitizeDocumentOptionalText(dto.mimeType, 120),
+        fileSize: this.normalizeDocumentFileSize(dto.fileSize),
+        uploadedByUserId: userId,
+        updatedByUserId: userId,
+      }),
+    );
+
+    return this.formatDocument(document);
+  }
+
+  async updateDocument(
+    projectId: string,
+    documentId: string,
+    dto: UpdateProjectDocumentDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    const canManage = await this.canManageDocuments(
+      project,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    if (!canManage) {
+      throw new ForbiddenException(
+        'Only admin/manager or assigned project manager can update project documents',
+      );
+    }
+
+    const document = await this.documentRepo.findOne({
+      where: { id: documentId, projectId, organizationId },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+
+    if (dto.title !== undefined) {
+      const nextTitle = this.sanitizeDocumentText(dto.title, 255);
+      if (!nextTitle) {
+        throw new BadRequestException('title cannot be empty');
+      }
+      document.title = nextTitle;
+    }
+    if (dto.fileUrl !== undefined) {
+      const nextFileUrl = this.sanitizeDocumentText(dto.fileUrl, 3000);
+      if (!nextFileUrl) {
+        throw new BadRequestException('fileUrl cannot be empty');
+      }
+      document.fileUrl = nextFileUrl;
+    }
+    if (dto.description !== undefined) {
+      document.description = this.sanitizeDocumentOptionalText(dto.description, 3000);
+    }
+    if (dto.fileName !== undefined) {
+      document.fileName = this.sanitizeDocumentOptionalText(dto.fileName, 255);
+    }
+    if (dto.mimeType !== undefined) {
+      document.mimeType = this.sanitizeDocumentOptionalText(dto.mimeType, 120);
+    }
+    if (dto.fileSize !== undefined) {
+      document.fileSize = this.normalizeDocumentFileSize(dto.fileSize);
+    }
+    document.updatedByUserId = userId;
+
+    const saved = await this.documentRepo.save(document);
+    return this.formatDocument(saved);
   }
 
   // ─── Task Management ───────────────────────────────────────────────────────────────

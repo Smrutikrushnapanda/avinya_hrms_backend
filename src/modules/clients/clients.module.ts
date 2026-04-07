@@ -4,6 +4,7 @@ import { Client } from './entities/client.entity';
 import { ClientProject } from './entities/project.entity';
 import { ClientProjectMember } from './entities/client-project-member.entity';
 import { ProjectTask } from './entities/project-task.entity';
+import { ClientProjectDocument } from './entities/client-project-document.entity';
 import { Employee } from '../employee/entities/employee.entity';
 import { User } from '../auth-core/entities/user.entity';
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
@@ -24,6 +25,7 @@ import { LogReportModule } from '../log-report/log-report.module';
       ClientProject,
       ClientProjectMember,
       ProjectTask,
+      ClientProjectDocument,
       ProjectTestSheetTab,
       ProjectTestSheetCase,
       ProjectTestSheetChangeLog,
