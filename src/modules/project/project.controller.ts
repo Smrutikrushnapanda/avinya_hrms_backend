@@ -17,6 +17,8 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { CreateProjectDocumentDto } from './dto/create-project-document.dto';
+import { UpdateProjectDocumentDto } from './dto/update-project-document.dto';
 import { CreateProjectTestSheetTabDto } from './dto/create-project-test-sheet-tab.dto';
 import { UpdateProjectTestSheetTabDto } from './dto/update-project-test-sheet-tab.dto';
 import { UpdateProjectTestSheetColumnsDto } from './dto/update-project-test-sheet-columns.dto';
@@ -241,6 +243,50 @@ export class ProjectController {
       user.userId,
       user.organizationId,
       this.isAdminOrManager(user),
+    );
+  }
+
+  @Get(':id/documents')
+  listDocuments(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.service.listDocuments(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/documents')
+  createDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateProjectDocumentDto,
+  ) {
+    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    return this.service.createDocument(
+      id,
+      dto,
+      user.userId,
+      user.organizationId,
+      true,
+    );
+  }
+
+  @Patch(':id/documents/:documentId')
+  updateDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body() dto: UpdateProjectDocumentDto,
+  ) {
+    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    return this.service.updateDocument(
+      id,
+      documentId,
+      dto,
+      user.userId,
+      user.organizationId,
+      true,
     );
   }
 

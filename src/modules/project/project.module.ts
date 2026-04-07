@@ -13,6 +13,7 @@ import { ProjectTestSheetChangeLog } from './entities/project-test-sheet-log.ent
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { MessageModule } from '../message/message.module';
 import { LogReportModule } from '../log-report/log-report.module';
+import { ProjectDocument } from './entities/project-document.entity';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { LogReportModule } from '../log-report/log-report.module';
       Project,
       ProjectMember,
       ProjectIssue,
+      ProjectDocument,
       ProjectTestSheetTab,
       ProjectTestSheetCase,
       ProjectTestSheetChangeLog,

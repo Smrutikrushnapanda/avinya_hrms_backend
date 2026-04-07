@@ -7,8 +7,11 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from '../employee/entities/employee.entity';
 import { ProjectIssue, ProjectIssueStatus } from './entities/project-issue.entity';
+import { ProjectDocument } from './entities/project-document.entity';
 import { CreateProjectIssueDto } from './dto/create-project-issue.dto';
 import { UpdateProjectIssueDto } from './dto/update-project-issue.dto';
+import { CreateProjectDocumentDto } from './dto/create-project-document.dto';
+import { UpdateProjectDocumentDto } from './dto/update-project-document.dto';
 import { ProjectTestSheetTab, ProjectTestSheetSource } from './entities/project-test-sheet-tab.entity';
 import { ProjectTestSheetCase, ProjectTestCaseStatus } from './entities/project-test-sheet-case.entity';
 import { ProjectTestSheetChangeLog } from './entities/project-test-sheet-log.entity';
@@ -47,6 +50,8 @@ export class ProjectService implements OnModuleInit {
     private memberRepo: Repository<ProjectMember>,
     @InjectRepository(ProjectIssue)
     private issueRepo: Repository<ProjectIssue>,
+    @InjectRepository(ProjectDocument)
+    private documentRepo: Repository<ProjectDocument>,
     @InjectRepository(ProjectTestSheetTab)
     private testSheetTabRepo: Repository<ProjectTestSheetTab>,
     @InjectRepository(ProjectTestSheetCase)
@@ -84,6 +89,24 @@ export class ProjectService implements OnModuleInit {
         `ALTER TABLE "${schema}"."projects" ADD COLUMN IF NOT EXISTS test_sheet_column_headers jsonb`,
       );
     }
+
+    await this.projectRepo.query(`
+      CREATE TABLE IF NOT EXISTS "${schema}"."project_documents" (
+        "id" uuid PRIMARY KEY,
+        "project_id" uuid NOT NULL REFERENCES "${schema}"."projects"("id") ON DELETE CASCADE,
+        "organization_id" uuid NOT NULL,
+        "title" varchar(255) NOT NULL,
+        "description" text NULL,
+        "file_url" text NOT NULL,
+        "file_name" varchar(255) NULL,
+        "mime_type" varchar(120) NULL,
+        "file_size" bigint NULL,
+        "uploaded_by_user_id" uuid NOT NULL,
+        "updated_by_user_id" uuid NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
   }
 
   // ── Admin / Manager ─────────────────────────────────────────────────────────
@@ -356,6 +379,47 @@ export class ProjectService implements OnModuleInit {
     };
   }
 
+  private sanitizeDocumentText(value: unknown, maxLength: number): string {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return '';
+    return normalized.length > maxLength
+      ? normalized.slice(0, maxLength)
+      : normalized;
+  }
+
+  private sanitizeDocumentOptionalText(
+    value: unknown,
+    maxLength: number,
+  ): string | null {
+    const normalized = this.sanitizeDocumentText(value, maxLength);
+    return normalized || null;
+  }
+
+  private normalizeDocumentFileSize(value: unknown): string | null {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return null;
+    return String(Math.floor(numeric));
+  }
+
+  private formatDocument(document: ProjectDocument) {
+    return {
+      id: document.id,
+      projectId: document.projectId,
+      organizationId: document.organizationId,
+      title: document.title,
+      description: document.description,
+      fileUrl: document.fileUrl,
+      fileName: document.fileName,
+      mimeType: document.mimeType,
+      fileSize: document.fileSize !== null ? Number(document.fileSize) : null,
+      uploadedByUserId: document.uploadedByUserId,
+      updatedByUserId: document.updatedByUserId,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    };
+  }
+
   // ─── Employee Assignment (for managers) ─────────────────────────────────────
 
   async getProjectEmployees(
@@ -583,6 +647,113 @@ export class ProjectService implements OnModuleInit {
     member.role = this.sanitizeProjectMemberRole(role);
     await this.memberRepo.save(member);
     return this.getProjectEmployees(projectId);
+  }
+
+  async listDocuments(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureProjectAccess(projectId, userId, organizationId, isAdminOrManager);
+    const documents = await this.documentRepo.find({
+      where: { projectId, organizationId },
+      order: { createdAt: 'DESC' },
+    });
+    return documents.map((document) => this.formatDocument(document));
+  }
+
+  async createDocument(
+    projectId: string,
+    dto: CreateProjectDocumentDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    if (!isAdminOrManager) {
+      throw new ForbiddenException('Only admin/manager can create project documents');
+    }
+
+    const project = await this.ensureProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      true,
+    );
+
+    const title = this.sanitizeDocumentText(dto.title, 255);
+    const fileUrl = this.sanitizeDocumentText(dto.fileUrl, 3000);
+    if (!title || !fileUrl) {
+      throw new BadRequestException('title and fileUrl are required');
+    }
+
+    const document = await this.documentRepo.save(
+      this.documentRepo.create({
+        projectId,
+        organizationId: project.organizationId,
+        title,
+        description: this.sanitizeDocumentOptionalText(dto.description, 3000),
+        fileUrl,
+        fileName: this.sanitizeDocumentOptionalText(dto.fileName, 255),
+        mimeType: this.sanitizeDocumentOptionalText(dto.mimeType, 120),
+        fileSize: this.normalizeDocumentFileSize(dto.fileSize),
+        uploadedByUserId: userId,
+        updatedByUserId: userId,
+      }),
+    );
+
+    return this.formatDocument(document);
+  }
+
+  async updateDocument(
+    projectId: string,
+    documentId: string,
+    dto: UpdateProjectDocumentDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    if (!isAdminOrManager) {
+      throw new ForbiddenException('Only admin/manager can update project documents');
+    }
+
+    await this.ensureProjectAccess(projectId, userId, organizationId, true);
+
+    const document = await this.documentRepo.findOne({
+      where: { id: documentId, projectId, organizationId },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+
+    if (dto.title !== undefined) {
+      const nextTitle = this.sanitizeDocumentText(dto.title, 255);
+      if (!nextTitle) {
+        throw new BadRequestException('title cannot be empty');
+      }
+      document.title = nextTitle;
+    }
+    if (dto.fileUrl !== undefined) {
+      const nextFileUrl = this.sanitizeDocumentText(dto.fileUrl, 3000);
+      if (!nextFileUrl) {
+        throw new BadRequestException('fileUrl cannot be empty');
+      }
+      document.fileUrl = nextFileUrl;
+    }
+    if (dto.description !== undefined) {
+      document.description = this.sanitizeDocumentOptionalText(dto.description, 3000);
+    }
+    if (dto.fileName !== undefined) {
+      document.fileName = this.sanitizeDocumentOptionalText(dto.fileName, 255);
+    }
+    if (dto.mimeType !== undefined) {
+      document.mimeType = this.sanitizeDocumentOptionalText(dto.mimeType, 120);
+    }
+    if (dto.fileSize !== undefined) {
+      document.fileSize = this.normalizeDocumentFileSize(dto.fileSize);
+    }
+    document.updatedByUserId = userId;
+
+    const saved = await this.documentRepo.save(document);
+    return this.formatDocument(saved);
   }
 
   async listIssues(
