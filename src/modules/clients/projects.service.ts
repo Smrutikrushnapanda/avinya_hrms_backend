@@ -664,6 +664,40 @@ export class ProjectsService implements OnModuleInit {
     return this.formatDocument(saved);
   }
 
+  async deleteDocument(
+    projectId: string,
+    documentId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    const canManage = await this.canManageDocuments(
+      project,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    if (!canManage) {
+      throw new ForbiddenException(
+        'Only admin/manager or assigned project manager can delete project documents',
+      );
+    }
+
+    const document = await this.documentRepo.findOne({
+      where: { id: documentId, projectId, organizationId },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+
+    await this.documentRepo.remove(document);
+    return { success: true };
+  }
+
   // ─── Task Management ───────────────────────────────────────────────────────────────
 
   async createTask(

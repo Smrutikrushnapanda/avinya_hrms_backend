@@ -204,6 +204,23 @@ export class ProjectsController {
     );
   }
 
+  @Delete(':id/documents/:documentId')
+  @ApiOperation({ summary: 'Delete a document for a client project' })
+  @UseGuards(JwtAuthGuard)
+  deleteDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.projectsService.deleteDocument(
+      id,
+      documentId,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
   // ─── Task Management ───────────────────────────────────────────────────
 
   @Post(':id/tasks')

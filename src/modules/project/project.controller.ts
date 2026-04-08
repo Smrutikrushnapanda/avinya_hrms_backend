@@ -290,6 +290,22 @@ export class ProjectController {
     );
   }
 
+  @Delete(':id/documents/:documentId')
+  deleteDocument(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    return this.service.deleteDocument(
+      id,
+      documentId,
+      user.userId,
+      user.organizationId,
+      true,
+    );
+  }
+
   @Get(':id/test-sheet')
   getTestSheet(@GetUser() user: JwtPayload, @Param('id') id: string) {
     return this.service.getTestSheet(
