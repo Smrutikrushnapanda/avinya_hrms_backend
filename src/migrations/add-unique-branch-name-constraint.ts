@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddUniqueBranchNameConstraint1234567890123 implements MigrationInterface {
+export class AddUniqueBranchNameConstraint1234567890123
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     // First, clean up any existing duplicates by keeping the most recent one
     await queryRunner.query(`
@@ -19,6 +21,8 @@ export class AddUniqueBranchNameConstraint1234567890123 implements MigrationInte
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_branches_org_normalized_name`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_branches_org_normalized_name`,
+    );
   }
 }

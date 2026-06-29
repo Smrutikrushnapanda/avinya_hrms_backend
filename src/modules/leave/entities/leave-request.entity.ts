@@ -1,4 +1,4 @@
-import { User } from "src/modules/auth-core/entities/user.entity";
+import { User } from 'src/modules/auth-core/entities/user.entity';
 import {
   Column,
   CreateDateColumn,
@@ -7,10 +7,10 @@ import {
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
-  UpdateDateColumn
-} from "typeorm";
-import { LeaveType } from "./leave-type.entity";
-import { LeaveApproval } from "./leave-approval.entity";
+  UpdateDateColumn,
+} from 'typeorm';
+import { LeaveType } from './leave-type.entity';
+import { LeaveApproval } from './leave-approval.entity';
 
 @Entity('leave_requests')
 export class LeaveRequest {
@@ -45,7 +45,7 @@ export class LeaveRequest {
 
   @Column({
     name: 'status',
-    default: 'PENDING'
+    default: 'PENDING',
   })
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
@@ -62,7 +62,7 @@ export class LeaveRequest {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @OneToMany(() => LeaveApproval, approval => approval.leaveRequest, {
+  @OneToMany(() => LeaveApproval, (approval) => approval.leaveRequest, {
     cascade: true,
   })
   approvals: LeaveApproval[];

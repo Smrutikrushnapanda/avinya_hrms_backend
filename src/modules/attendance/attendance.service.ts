@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
@@ -123,7 +127,10 @@ export class AttendanceService {
     });
   }
 
-  async updateWifiLocation(id: string, dto: UpdateWifiLocationDto): Promise<WifiLocation> {
+  async updateWifiLocation(
+    id: string,
+    dto: UpdateWifiLocationDto,
+  ): Promise<WifiLocation> {
     const wifi = await this.wifiRepo.findOne({ where: { id } });
     if (!wifi) {
       throw new NotFoundException(`WiFi location with ID ${id} not found`);
@@ -341,10 +348,11 @@ export class AttendanceService {
         : 0;
 
       const anyAnomaly = sortedLogs.some((l) => l.anomalyFlag);
-      const anomalyReason = sortedLogs
-        .map((l) => l.anomalyReason)
-        .filter(Boolean)
-        .join(', ') || undefined;
+      const anomalyReason =
+        sortedLogs
+          .map((l) => l.anomalyReason)
+          .filter(Boolean)
+          .join(', ') || undefined;
 
       const status = this.determineAttendanceStatus(
         workingMinutes,
@@ -790,8 +798,11 @@ export class AttendanceService {
     });
 
     // Prefer corrected inTime/outTime from the Attendance record (set by timeslip approval)
-    const punchInTime = attendanceSummary?.inTime ?? (logs.length > 0 ? logs[0].timestamp : null);
-    const lastPunch = attendanceSummary?.outTime ?? (logs.length > 0 ? logs[logs.length - 1].timestamp : null);
+    const punchInTime =
+      attendanceSummary?.inTime ?? (logs.length > 0 ? logs[0].timestamp : null);
+    const lastPunch =
+      attendanceSummary?.outTime ??
+      (logs.length > 0 ? logs[logs.length - 1].timestamp : null);
     const { isOnBreak, activeBreakSince } = this.deriveBreakState(logs);
 
     return {
@@ -815,7 +826,10 @@ export class AttendanceService {
     data: AttendanceLog;
   }> {
     const actionTime = dto.timestamp ? new Date(dto.timestamp) : new Date();
-    const shiftConfig = await this.resolveShiftConfig(dto.organizationId, dto.userId);
+    const shiftConfig = await this.resolveShiftConfig(
+      dto.organizationId,
+      dto.userId,
+    );
     const { windowStart, windowEnd } = this.computeShiftWindow(
       actionTime,
       shiftConfig.workStartTime,
@@ -846,7 +860,10 @@ export class AttendanceService {
       .reverse()
       .find((log) => log.type === 'check-out');
 
-    if (!latestCheckIn || (latestCheckOut && latestCheckOut.timestamp > latestCheckIn.timestamp)) {
+    if (
+      !latestCheckIn ||
+      (latestCheckOut && latestCheckOut.timestamp > latestCheckIn.timestamp)
+    ) {
       throw new BadRequestException(
         'Please check in first before using break toggle.',
       );
@@ -884,7 +901,10 @@ export class AttendanceService {
     };
   }
 
-  async getCurrentBreakStatus(organizationId: string, userId: string): Promise<{
+  async getCurrentBreakStatus(
+    organizationId: string,
+    userId: string,
+  ): Promise<{
     organizationId: string;
     userId: string;
     isOnBreak: boolean;
@@ -901,7 +921,8 @@ export class AttendanceService {
       userId,
       isOnBreak: breakState.isOnBreak,
       activeBreakSince: breakState.activeBreakSince,
-      breakSessionsToday: logs.filter((log) => log.type === 'break-start').length,
+      breakSessionsToday: logs.filter((log) => log.type === 'break-start')
+        .length,
       activeBreakMinutes:
         breakState.isOnBreak && breakState.activeBreakSince
           ? Math.max(
@@ -1036,7 +1057,8 @@ export class AttendanceService {
       throw new NotFoundException(`Holiday with ID ${id} not found`);
     }
     if (dto.date) {
-      holiday.date = typeof dto.date === 'string' ? new Date(dto.date) : dto.date;
+      holiday.date =
+        typeof dto.date === 'string' ? new Date(dto.date) : dto.date;
     }
     if (dto.name !== undefined) holiday.name = dto.name;
     if (dto.description !== undefined) holiday.description = dto.description;
@@ -1207,7 +1229,7 @@ export class AttendanceService {
       const attendanceEntry = attendanceMap.get(dateStr);
       const logInfo = logMap.get(dateStr);
 
-      let status: Attendance['status'] | 'absent' | 'pending' =
+      const status: Attendance['status'] | 'absent' | 'pending' =
         attendanceEntry?.status ??
         (holidayInfo
           ? 'holiday'
@@ -1274,7 +1296,7 @@ export class AttendanceService {
     const results = await queryBuilder.getMany();
 
     // Transform the results to include userId at the root level and structured user info
-    return results.map(log => ({
+    return results.map((log) => ({
       id: log.id,
       userId: log.user?.id, // Add userId to root level
       timestamp: log.timestamp,
@@ -1299,7 +1321,7 @@ export class AttendanceService {
         email: log.user?.email,
         userName: log.user?.userName,
         // Add any other user fields you need from the User entity
-      }
+      },
     }));
   }
 
@@ -1360,7 +1382,11 @@ export class AttendanceService {
     primaryLat?: number | null,
     primaryLon?: number | null,
     defaultRadius?: number | null,
-    altLocations: { latitude: number; longitude: number; radiusMeters?: number }[] = [],
+    altLocations: {
+      latitude: number;
+      longitude: number;
+      radiusMeters?: number;
+    }[] = [],
   ): boolean {
     const locations: { lat: number; lon: number; radius: number }[] = [];
 
@@ -1386,7 +1412,12 @@ export class AttendanceService {
     if (locations.length === 0) return true;
 
     return locations.some((loc) => {
-      const dist = this.calculateDistance(latitude, longitude, loc.lat, loc.lon);
+      const dist = this.calculateDistance(
+        latitude,
+        longitude,
+        loc.lat,
+        loc.lon,
+      );
       return dist <= loc.radius;
     });
   }
@@ -1409,8 +1440,14 @@ export class AttendanceService {
     return dt;
   }
 
-  private isOvernightShift(workStartTime: string, workEndTime: string): boolean {
-    return this.parseTimeToMinutes(workEndTime) <= this.parseTimeToMinutes(workStartTime);
+  private isOvernightShift(
+    workStartTime: string,
+    workEndTime: string,
+  ): boolean {
+    return (
+      this.parseTimeToMinutes(workEndTime) <=
+      this.parseTimeToMinutes(workStartTime)
+    );
   }
 
   private getDayBoundsInZone(
@@ -1430,8 +1467,8 @@ export class AttendanceService {
     workStartTime: string,
     workEndTime: string,
   ): { windowStart: Date; windowEnd: Date; attendanceDate: string } {
-    let windowStart = this.combineDateTime(punchTime, workStartTime);
-    let windowEnd = this.combineDateTime(punchTime, workEndTime);
+    const windowStart = this.combineDateTime(punchTime, workStartTime);
+    const windowEnd = this.combineDateTime(punchTime, workEndTime);
     const crossesMidnight = windowEnd <= windowStart;
 
     if (crossesMidnight) {
@@ -1454,7 +1491,10 @@ export class AttendanceService {
     return safeH * 60 + safeM;
   }
 
-  private calculateShiftDurationMinutes(workStartTime: string, workEndTime: string): number {
+  private calculateShiftDurationMinutes(
+    workStartTime: string,
+    workEndTime: string,
+  ): number {
     const start = this.parseTimeToMinutes(workStartTime);
     const end = this.parseTimeToMinutes(workEndTime);
     let diff = end - start;
@@ -1469,7 +1509,8 @@ export class AttendanceService {
     );
     const start = this.parseTimeToMinutes(config.workStartTime);
     const cutoff =
-      typeof config.halfDayCutoffTime === 'string' && config.halfDayCutoffTime.trim()
+      typeof config.halfDayCutoffTime === 'string' &&
+      config.halfDayCutoffTime.trim()
         ? this.parseTimeToMinutes(config.halfDayCutoffTime)
         : start + Math.floor(fullShiftMinutes / 2);
 
@@ -1507,7 +1548,8 @@ export class AttendanceService {
       config.workStartTime,
       config.workEndTime,
     );
-    const lateAfterRaw = config.graceMinutes ?? config.lateThresholdMinutes ?? 0;
+    const lateAfterRaw =
+      config.graceMinutes ?? config.lateThresholdMinutes ?? 0;
     const lateAfterMinutes = Number(lateAfterRaw);
     const safeLateAfter = Math.max(0, lateAfterMinutes);
     const lateCutoff = new Date(windowStart.getTime() + safeLateAfter * 60_000);
@@ -1552,7 +1594,8 @@ export class AttendanceService {
           halfDayCutoffTime: shift.halfDayCutoffTime,
           workingDays: shift.workingDays,
           weekdayOffRules: shift.weekdayOffRules,
-          officeLatitude: activeBranch?.officeLatitude ?? settings?.officeLatitude ?? null,
+          officeLatitude:
+            activeBranch?.officeLatitude ?? settings?.officeLatitude ?? null,
           officeLongitude:
             activeBranch?.officeLongitude ?? settings?.officeLongitude ?? null,
           allowedRadiusMeters:
@@ -1769,218 +1812,36 @@ export class AttendanceService {
     }
   }
 
-async getAttendanceReport(
-  organizationId: string,
-  year: number,
-  month: number,
-  userIdsString: string = 'ALL',
-) {
-  // Parse userIds from string
-  const userIds = userIdsString === 'ALL' ? [] : userIdsString.split(',').map(id => id.trim()).filter(Boolean);
-
-  // Get date range for the month
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
-
-  const formatDateLocal = (date: Date): string => {
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  // Build attendance query with CORRECTED joins
-  let attendanceQuery = this.attendanceRepo
-    .createQueryBuilder('att')
-    .leftJoinAndSelect('att.user', 'user')
-    .leftJoin(
-      'employees',
-      'emp',
-      'emp.user_id = user.user_id AND emp.organization_id = :organizationId',
-      { organizationId },
-    )
-    .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
-    .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
-    // FIXED: Two-step join for manager
-    // 1. Join to get the manager employee record
-    .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to') 
-    // 2. Join to get the manager's user details  
-    .leftJoin('users', 'managerUser', 'managerUser.user_id = managerEmp.user_id')
-    .where('att.organization_id = :organizationId', { organizationId })
-    .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
-      startDate: formatDateLocal(startDate),
-      endDate: formatDateLocal(endDate),
-    });
-
-  // Apply user filter if specific users are selected
-  if (userIds.length > 0) {
-    attendanceQuery = attendanceQuery.andWhere('user.user_id IN (:...userIds)', {
-      userIds,
-    });
-  }
-
-  attendanceQuery = attendanceQuery
-    .addSelect([
-      'emp.employee_code AS "employeeCode"',
-      'emp.branch_id AS "branchId"',
-      'dept.name AS "departmentName"',
-      'desg.name AS "designationName"',
-      // FIXED: Use managerUser fields for concatenation
-      'CONCAT_WS(\' \', NULLIF(managerUser.first_name, \'\'), NULLIF(managerUser.middle_name, \'\'), NULLIF(managerUser.last_name, \'\')) AS "managerFullName"'
-    ])
-    .orderBy('user.first_name', 'ASC')
-    .addOrderBy('att.attendanceDate', 'ASC');
-
-  const rawResults = await attendanceQuery.getRawAndEntities();
-
-  // Get holidays for the organization and period
-  const holidays = await this.holidayRepo.find({
-    where: {
-      organizationId,
-      date: Between(startDate, endDate),
-    },
-  });
-
-  const holidaySet = new Set(
-    holidays.map((h) => formatDateLocal(new Date(h.date))),
-  );
-
-  const settings = await this.getOrCreateAttendanceSettings(organizationId);
-  const activeBranches = await this.branchRepo.find({
-    where: { organizationId, isActive: true },
-  });
-  const activeBranchMap = new Map(activeBranches.map((branch) => [branch.id, branch]));
-  const resolveWorkingDaySource = (branchId?: string | null): WorkingDayRuleSource => {
-    if (branchId && activeBranchMap.has(branchId)) {
-      return activeBranchMap.get(branchId)!;
-    }
-    return settings;
-  };
-  const isWorkingDayForBranch = (date: Date, branchId?: string | null) =>
-    this.isWorkingDayForDate(date, resolveWorkingDaySource(branchId));
-
-  // Generate all dates for the month
-  const allDates: string[] = [];
-  for (
-    let d = new Date(startDate);
-    d <= endDate;
-    d.setDate(d.getDate() + 1)
+  async getAttendanceReport(
+    organizationId: string,
+    year: number,
+    month: number,
+    userIdsString: string = 'ALL',
   ) {
-    allDates.push(formatDateLocal(new Date(d)));
-  }
+    // Parse userIds from string
+    const userIds =
+      userIdsString === 'ALL'
+        ? []
+        : userIdsString
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean);
 
-  // Calculate working days (excluding non-working days and holidays)
-  const organizationWorkingDays = allDates.filter((date) => {
-    return isWorkingDayForBranch(new Date(date), null) && !holidaySet.has(date);
-  }).length;
+    // Get date range for the month
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
 
-  // Group attendance records by user
-  const userAttendanceMap = new Map();
-
-  // Process raw results to build user map
-  rawResults.entities.forEach((entry, index) => {
-    const userId = entry.user.id;
-    const rawData = rawResults.raw[index];
-    const empCode = rawData?.employeeCode || 'N/A';
-    const branchId = (rawData?.branchId as string | null | undefined) || null;
-    const departmentName = rawData?.departmentName || '';
-    const designationName = rawData?.designationName || '';
-    
-    // Get the concatenated manager name from SQL and clean up spaces
-    let managerName = rawData?.managerFullName || '';
-    managerName = managerName.replace(/\s+/g, ' ').trim();
-
-    if (!userAttendanceMap.has(userId)) {
-      userAttendanceMap.set(userId, {
-        userId: userId,
-        userName: [
-          entry.user.firstName,
-          entry.user.middleName,
-          entry.user.lastName,
-        ]
-          .filter(Boolean)
-          .join(' '),
-        email: entry.user.email,
-        employeeCode: empCode,
-        branchId,
-        department: departmentName,
-        designation: designationName,
-        reportingTo: managerName,
-        dailyRecords: [],
-        totalWorkingDays: 0,
-        presentDays: 0,
-        absentDays: 0,
-        halfDays: 0,
-        onLeaveDays: 0,
-        totalWorkingMinutes: 0,
-      });
-    }
-
-    const userData = userAttendanceMap.get(userId);
-
-    // Format times using existing formatTime function
-    const formatTime = (date?: Date): string | null => {
-      if (!date) return null;
-      const local = DateTime.fromJSDate(date, { zone: 'utc' }).setZone(
-        'Asia/Kolkata',
-      );
-      const hours = local.hour.toString().padStart(2, '0');
-      const minutes = local.minute.toString().padStart(2, '0');
-      const formattedHour = (local.hour % 12 || 12)
-        .toString()
-        .padStart(2, '0');
-      const suffix = local.hour >= 12 ? 'PM' : 'AM';
-      return `${formattedHour}:${minutes} ${suffix}`;
+    const formatDateLocal = (date: Date): string => {
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
     };
 
-    const workingHours = entry.workingMinutes ? entry.workingMinutes / 60 : 0;
-
-    userData.dailyRecords.push({
-      date: entry.attendanceDate,
-      status: entry.status,
-      inTime: formatTime(entry.inTime),
-      outTime: formatTime(entry.outTime),
-      workingHours: Math.round(workingHours * 100) / 100,
-      isHoliday: holidaySet.has(entry.attendanceDate),
-      isSunday: !isWorkingDayForBranch(new Date(entry.attendanceDate), userData.branchId),
-    });
-
-    // Count status types
-    switch (entry.status) {
-      case 'present':
-        userData.presentDays++;
-        break;
-      case 'absent':
-        userData.absentDays++;
-        break;
-      case 'half-day':
-        userData.halfDays++;
-        break;
-      case 'on-leave':
-        userData.onLeaveDays++;
-        break;
-    }
-
-    if (entry.workingMinutes) {
-      userData.totalWorkingMinutes += entry.workingMinutes;
-    }
-  });
-
-  // If ALL users selected, get all unique users using GROUP BY
-  if (userIdsString === 'ALL') {
-    const allOrgUsers = await this.attendanceRepo
+    // Build attendance query with CORRECTED joins
+    let attendanceQuery = this.attendanceRepo
       .createQueryBuilder('att')
-      .select('user.user_id', 'userId')
-      .addSelect('user.first_name', 'firstName')
-      .addSelect('user.middle_name', 'middleName')
-      .addSelect('user.last_name', 'lastName')
-      .addSelect('user.email', 'email')
-      .addSelect('emp.employee_code', 'employeeCode')
-      .addSelect('emp.branch_id', 'branchId')
-      .addSelect('dept.name', 'departmentName')
-      .addSelect('desg.name', 'designationName')
-      .addSelect('CONCAT_WS(\' \', NULLIF(managerUser.first_name, \'\'), NULLIF(managerUser.middle_name, \'\'), NULLIF(managerUser.last_name, \'\')) AS "managerFullName"')
-      .leftJoin('att.user', 'user')
+      .leftJoinAndSelect('att.user', 'user')
       .leftJoin(
         'employees',
         'emp',
@@ -1990,42 +1851,122 @@ async getAttendanceReport(
       .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
       .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
       // FIXED: Two-step join for manager
+      // 1. Join to get the manager employee record
       .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to')
-      .leftJoin('users', 'managerUser', 'managerUser.user_id = managerEmp.user_id')
+      // 2. Join to get the manager's user details
+      .leftJoin(
+        'users',
+        'managerUser',
+        'managerUser.user_id = managerEmp.user_id',
+      )
       .where('att.organization_id = :organizationId', { organizationId })
       .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
         startDate: formatDateLocal(startDate),
         endDate: formatDateLocal(endDate),
-      })
-      .groupBy('user.user_id')
-      .addGroupBy('user.first_name')
-      .addGroupBy('user.middle_name')
-      .addGroupBy('user.last_name')
-      .addGroupBy('user.email')
-      .addGroupBy('emp.employee_code')
-      .addGroupBy('emp.branch_id')
-      .addGroupBy('dept.name')
-      .addGroupBy('desg.name')
-      .addGroupBy('managerUser.first_name')
-      .addGroupBy('managerUser.middle_name')
-      .addGroupBy('managerUser.last_name')
-      .getRawMany();
+      });
 
-    allOrgUsers.forEach((user) => {
-      if (!userAttendanceMap.has(user.userId)) {
-        let managerName = user.managerFullName || '';
-        managerName = managerName.replace(/\s+/g, ' ').trim();
+    // Apply user filter if specific users are selected
+    if (userIds.length > 0) {
+      attendanceQuery = attendanceQuery.andWhere(
+        'user.user_id IN (:...userIds)',
+        {
+          userIds,
+        },
+      );
+    }
 
-        userAttendanceMap.set(user.userId, {
-          userId: user.userId,
-          userName: [user.firstName, user.middleName, user.lastName]
+    attendanceQuery = attendanceQuery
+      .addSelect([
+        'emp.employee_code AS "employeeCode"',
+        'emp.branch_id AS "branchId"',
+        'dept.name AS "departmentName"',
+        'desg.name AS "designationName"',
+        // FIXED: Use managerUser fields for concatenation
+        "CONCAT_WS(' ', NULLIF(managerUser.first_name, ''), NULLIF(managerUser.middle_name, ''), NULLIF(managerUser.last_name, '')) AS \"managerFullName\"",
+      ])
+      .orderBy('user.first_name', 'ASC')
+      .addOrderBy('att.attendanceDate', 'ASC');
+
+    const rawResults = await attendanceQuery.getRawAndEntities();
+
+    // Get holidays for the organization and period
+    const holidays = await this.holidayRepo.find({
+      where: {
+        organizationId,
+        date: Between(startDate, endDate),
+      },
+    });
+
+    const holidaySet = new Set(
+      holidays.map((h) => formatDateLocal(new Date(h.date))),
+    );
+
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const activeBranches = await this.branchRepo.find({
+      where: { organizationId, isActive: true },
+    });
+    const activeBranchMap = new Map(
+      activeBranches.map((branch) => [branch.id, branch]),
+    );
+    const resolveWorkingDaySource = (
+      branchId?: string | null,
+    ): WorkingDayRuleSource => {
+      if (branchId && activeBranchMap.has(branchId)) {
+        return activeBranchMap.get(branchId)!;
+      }
+      return settings;
+    };
+    const isWorkingDayForBranch = (date: Date, branchId?: string | null) =>
+      this.isWorkingDayForDate(date, resolveWorkingDaySource(branchId));
+
+    // Generate all dates for the month
+    const allDates: string[] = [];
+    for (
+      let d = new Date(startDate);
+      d <= endDate;
+      d.setDate(d.getDate() + 1)
+    ) {
+      allDates.push(formatDateLocal(new Date(d)));
+    }
+
+    // Calculate working days (excluding non-working days and holidays)
+    const organizationWorkingDays = allDates.filter((date) => {
+      return (
+        isWorkingDayForBranch(new Date(date), null) && !holidaySet.has(date)
+      );
+    }).length;
+
+    // Group attendance records by user
+    const userAttendanceMap = new Map();
+
+    // Process raw results to build user map
+    rawResults.entities.forEach((entry, index) => {
+      const userId = entry.user.id;
+      const rawData = rawResults.raw[index];
+      const empCode = rawData?.employeeCode || 'N/A';
+      const branchId = (rawData?.branchId as string | null | undefined) || null;
+      const departmentName = rawData?.departmentName || '';
+      const designationName = rawData?.designationName || '';
+
+      // Get the concatenated manager name from SQL and clean up spaces
+      let managerName = rawData?.managerFullName || '';
+      managerName = managerName.replace(/\s+/g, ' ').trim();
+
+      if (!userAttendanceMap.has(userId)) {
+        userAttendanceMap.set(userId, {
+          userId: userId,
+          userName: [
+            entry.user.firstName,
+            entry.user.middleName,
+            entry.user.lastName,
+          ]
             .filter(Boolean)
             .join(' '),
-          email: user.email,
-          employeeCode: user.employeeCode || 'N/A',
-          branchId: user.branchId || null,
-          department: user.departmentName || '',
-          designation: user.designationName || '',
+          email: entry.user.email,
+          employeeCode: empCode,
+          branchId,
+          department: departmentName,
+          designation: designationName,
           reportingTo: managerName,
           dailyRecords: [],
           totalWorkingDays: 0,
@@ -2036,91 +1977,229 @@ async getAttendanceReport(
           totalWorkingMinutes: 0,
         });
       }
-    });
-  }
 
-  // Fill in missing dates for all users (rest of the method remains the same)
-  userAttendanceMap.forEach((userData) => {
-    userData.totalWorkingDays = allDates.filter((date) => {
-      return !holidaySet.has(date) && isWorkingDayForBranch(new Date(date), userData.branchId);
-    }).length;
-    const existingDates = new Set(userData.dailyRecords.map((r) => r.date));
+      const userData = userAttendanceMap.get(userId);
 
-    allDates.forEach((date) => {
-      if (!existingDates.has(date)) {
-        const isHoliday = holidaySet.has(date);
-        const isSunday = !isWorkingDayForBranch(new Date(date), userData.branchId);
-        const isPending = new Date(date) > new Date();
+      // Format times using existing formatTime function
+      const formatTime = (date?: Date): string | null => {
+        if (!date) return null;
+        const local = DateTime.fromJSDate(date, { zone: 'utc' }).setZone(
+          'Asia/Kolkata',
+        );
+        const hours = local.hour.toString().padStart(2, '0');
+        const minutes = local.minute.toString().padStart(2, '0');
+        const formattedHour = (local.hour % 12 || 12)
+          .toString()
+          .padStart(2, '0');
+        const suffix = local.hour >= 12 ? 'PM' : 'AM';
+        return `${formattedHour}:${minutes} ${suffix}`;
+      };
 
-        let status = 'absent';
-        if (isPending) status = 'pending';
-        else if (isHoliday) status = 'holiday';
-        else if (isSunday) status = 'weekend';
+      const workingHours = entry.workingMinutes ? entry.workingMinutes / 60 : 0;
 
-        userData.dailyRecords.push({
-          date: date,
-          status: status,
-          inTime: null,
-          outTime: null,
-          workingHours: 0,
-          isHoliday: isHoliday,
-          isSunday: isSunday,
-        });
+      userData.dailyRecords.push({
+        date: entry.attendanceDate,
+        status: entry.status,
+        inTime: formatTime(entry.inTime),
+        outTime: formatTime(entry.outTime),
+        workingHours: Math.round(workingHours * 100) / 100,
+        isHoliday: holidaySet.has(entry.attendanceDate),
+        isSunday: !isWorkingDayForBranch(
+          new Date(entry.attendanceDate),
+          userData.branchId,
+        ),
+      });
 
-        if (!isHoliday && !isSunday && !isPending) {
+      // Count status types
+      switch (entry.status) {
+        case 'present':
+          userData.presentDays++;
+          break;
+        case 'absent':
           userData.absentDays++;
-        }
+          break;
+        case 'half-day':
+          userData.halfDays++;
+          break;
+        case 'on-leave':
+          userData.onLeaveDays++;
+          break;
+      }
+
+      if (entry.workingMinutes) {
+        userData.totalWorkingMinutes += entry.workingMinutes;
       }
     });
 
-    userData.dailyRecords.sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-    );
-  });
+    // If ALL users selected, get all unique users using GROUP BY
+    if (userIdsString === 'ALL') {
+      const allOrgUsers = await this.attendanceRepo
+        .createQueryBuilder('att')
+        .select('user.user_id', 'userId')
+        .addSelect('user.first_name', 'firstName')
+        .addSelect('user.middle_name', 'middleName')
+        .addSelect('user.last_name', 'lastName')
+        .addSelect('user.email', 'email')
+        .addSelect('emp.employee_code', 'employeeCode')
+        .addSelect('emp.branch_id', 'branchId')
+        .addSelect('dept.name', 'departmentName')
+        .addSelect('desg.name', 'designationName')
+        .addSelect(
+          "CONCAT_WS(' ', NULLIF(managerUser.first_name, ''), NULLIF(managerUser.middle_name, ''), NULLIF(managerUser.last_name, '')) AS \"managerFullName\"",
+        )
+        .leftJoin('att.user', 'user')
+        .leftJoin(
+          'employees',
+          'emp',
+          'emp.user_id = user.user_id AND emp.organization_id = :organizationId',
+          { organizationId },
+        )
+        .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
+        .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
+        // FIXED: Two-step join for manager
+        .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to')
+        .leftJoin(
+          'users',
+          'managerUser',
+          'managerUser.user_id = managerEmp.user_id',
+        )
+        .where('att.organization_id = :organizationId', { organizationId })
+        .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
+          startDate: formatDateLocal(startDate),
+          endDate: formatDateLocal(endDate),
+        })
+        .groupBy('user.user_id')
+        .addGroupBy('user.first_name')
+        .addGroupBy('user.middle_name')
+        .addGroupBy('user.last_name')
+        .addGroupBy('user.email')
+        .addGroupBy('emp.employee_code')
+        .addGroupBy('emp.branch_id')
+        .addGroupBy('dept.name')
+        .addGroupBy('desg.name')
+        .addGroupBy('managerUser.first_name')
+        .addGroupBy('managerUser.middle_name')
+        .addGroupBy('managerUser.last_name')
+        .getRawMany();
 
-  // Format final report data
-  const reportData = Array.from(userAttendanceMap.values()).map((userData) => {
-    const totalWorkingHours = userData.totalWorkingMinutes / 60;
-    const attendedDays = userData.presentDays + userData.halfDays;
-    const attendancePercentage =
-      userData.totalWorkingDays > 0
-        ? (attendedDays / userData.totalWorkingDays) * 100
-        : 0;
+      allOrgUsers.forEach((user) => {
+        if (!userAttendanceMap.has(user.userId)) {
+          let managerName = user.managerFullName || '';
+          managerName = managerName.replace(/\s+/g, ' ').trim();
+
+          userAttendanceMap.set(user.userId, {
+            userId: user.userId,
+            userName: [user.firstName, user.middleName, user.lastName]
+              .filter(Boolean)
+              .join(' '),
+            email: user.email,
+            employeeCode: user.employeeCode || 'N/A',
+            branchId: user.branchId || null,
+            department: user.departmentName || '',
+            designation: user.designationName || '',
+            reportingTo: managerName,
+            dailyRecords: [],
+            totalWorkingDays: 0,
+            presentDays: 0,
+            absentDays: 0,
+            halfDays: 0,
+            onLeaveDays: 0,
+            totalWorkingMinutes: 0,
+          });
+        }
+      });
+    }
+
+    // Fill in missing dates for all users (rest of the method remains the same)
+    userAttendanceMap.forEach((userData) => {
+      userData.totalWorkingDays = allDates.filter((date) => {
+        return (
+          !holidaySet.has(date) &&
+          isWorkingDayForBranch(new Date(date), userData.branchId)
+        );
+      }).length;
+      const existingDates = new Set(userData.dailyRecords.map((r) => r.date));
+
+      allDates.forEach((date) => {
+        if (!existingDates.has(date)) {
+          const isHoliday = holidaySet.has(date);
+          const isSunday = !isWorkingDayForBranch(
+            new Date(date),
+            userData.branchId,
+          );
+          const isPending = new Date(date) > new Date();
+
+          let status = 'absent';
+          if (isPending) status = 'pending';
+          else if (isHoliday) status = 'holiday';
+          else if (isSunday) status = 'weekend';
+
+          userData.dailyRecords.push({
+            date: date,
+            status: status,
+            inTime: null,
+            outTime: null,
+            workingHours: 0,
+            isHoliday: isHoliday,
+            isSunday: isSunday,
+          });
+
+          if (!isHoliday && !isSunday && !isPending) {
+            userData.absentDays++;
+          }
+        }
+      });
+
+      userData.dailyRecords.sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+      );
+    });
+
+    // Format final report data
+    const reportData = Array.from(userAttendanceMap.values()).map(
+      (userData) => {
+        const totalWorkingHours = userData.totalWorkingMinutes / 60;
+        const attendedDays = userData.presentDays + userData.halfDays;
+        const attendancePercentage =
+          userData.totalWorkingDays > 0
+            ? (attendedDays / userData.totalWorkingDays) * 100
+            : 0;
+
+        return {
+          userId: userData.userId,
+          userName: userData.userName,
+          email: userData.email,
+          employeeCode: userData.employeeCode,
+          department: userData.department,
+          designation: userData.designation,
+          reportingTo: userData.reportingTo,
+          totalWorkingDays: userData.totalWorkingDays,
+          presentDays: userData.presentDays,
+          absentDays: userData.absentDays,
+          halfDays: userData.halfDays,
+          onLeaveDays: userData.onLeaveDays,
+          attendancePercentage: Math.round(attendancePercentage * 100) / 100,
+          totalWorkingHours: Math.round(totalWorkingHours * 100) / 100,
+          averageWorkingHours:
+            attendedDays > 0
+              ? Math.round((totalWorkingHours / attendedDays) * 100) / 100
+              : 0,
+          dailyRecords: userData.dailyRecords,
+        };
+      },
+    );
 
     return {
-      userId: userData.userId,
-      userName: userData.userName,
-      email: userData.email,
-      employeeCode: userData.employeeCode,
-      department: userData.department,
-      designation: userData.designation,
-      reportingTo: userData.reportingTo,
-      totalWorkingDays: userData.totalWorkingDays,
-      presentDays: userData.presentDays,
-      absentDays: userData.absentDays,
-      halfDays: userData.halfDays,
-      onLeaveDays: userData.onLeaveDays,
-      attendancePercentage: Math.round(attendancePercentage * 100) / 100,
-      totalWorkingHours: Math.round(totalWorkingHours * 100) / 100,
-      averageWorkingHours:
-        attendedDays > 0
-          ? Math.round((totalWorkingHours / attendedDays) * 100) / 100
-          : 0,
-      dailyRecords: userData.dailyRecords,
+      reportData,
+      summary: {
+        totalEmployees: reportData.length,
+        period: `${new Date(year, month - 1).toLocaleString('default', {
+          month: 'long',
+        })} ${year}`,
+        workingDays: organizationWorkingDays,
+        holidays: holidays.length,
+      },
     };
-  });
-
-  return {
-    reportData,
-    summary: {
-      totalEmployees: reportData.length,
-      period: `${new Date(year, month - 1).toLocaleString('default', {
-        month: 'long',
-      })} ${year}`,
-      workingDays: organizationWorkingDays,
-      holidays: holidays.length,
-    },
-  };
   }
 
   // ===== Branch Methods =====
@@ -2141,17 +2220,22 @@ async getAttendanceReport(
           this.canonicalBranchName(normalizedName),
       )
     ) {
-      throw new BadRequestException(`Branch "${normalizedName}" already exists`);
+      throw new BadRequestException(
+        `Branch "${normalizedName}" already exists`,
+      );
     }
 
-    const orgSettings = await this.getOrCreateAttendanceSettings(dto.organizationId);
+    const orgSettings = await this.getOrCreateAttendanceSettings(
+      dto.organizationId,
+    );
     const branch = this.branchRepo.create({
       ...dto,
       name: normalizedName,
       workStartTime: dto.workStartTime ?? orgSettings.workStartTime,
       workEndTime: dto.workEndTime ?? orgSettings.workEndTime,
       graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes,
-      lateThresholdMinutes: dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes,
+      lateThresholdMinutes:
+        dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes,
       halfDayCutoffTime: dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime,
       workingDays:
         Array.isArray(dto.workingDays) && dto.workingDays.length
@@ -2159,8 +2243,10 @@ async getAttendanceReport(
           : orgSettings.workingDays,
       weekdayOffRules: dto.weekdayOffRules ?? orgSettings.weekdayOffRules ?? {},
       officeLatitude: dto.officeLatitude ?? orgSettings.officeLatitude ?? null,
-      officeLongitude: dto.officeLongitude ?? orgSettings.officeLongitude ?? null,
-      allowedRadiusMeters: dto.allowedRadiusMeters ?? orgSettings.allowedRadiusMeters ?? 100,
+      officeLongitude:
+        dto.officeLongitude ?? orgSettings.officeLongitude ?? null,
+      allowedRadiusMeters:
+        dto.allowedRadiusMeters ?? orgSettings.allowedRadiusMeters ?? 100,
       altLocations: dto.altLocations ?? [],
       isActive: dto.isActive ?? true,
     });
@@ -2179,7 +2265,7 @@ async getAttendanceReport(
     if (!branch) {
       throw new NotFoundException(`Branch with ID ${id} not found`);
     }
-    
+
     // Only validate name if it's being changed
     if (dto.name !== undefined) {
       const normalizedName = this.normalizeBranchName(dto.name);
@@ -2201,12 +2287,14 @@ async getAttendanceReport(
             this.canonicalBranchName(item.name) === targetCanonicalName,
         );
         if (hasDuplicate) {
-          throw new BadRequestException(`Branch "${normalizedName}" already exists`);
+          throw new BadRequestException(
+            `Branch "${normalizedName}" already exists`,
+          );
         }
       }
       dto.name = normalizedName;
     }
-    
+
     Object.assign(branch, dto);
     return this.branchRepo.save(branch);
   }
@@ -2239,7 +2327,9 @@ async getAttendanceReport(
       throw new BadRequestException(`Shift "${normalizedName}" already exists`);
     }
 
-    const orgSettings = await this.getOrCreateAttendanceSettings(dto.organizationId);
+    const orgSettings = await this.getOrCreateAttendanceSettings(
+      dto.organizationId,
+    );
     const shift = this.shiftRepo.create({
       ...dto,
       name: normalizedName,
@@ -2249,8 +2339,7 @@ async getAttendanceReport(
       graceMinutes: dto.graceMinutes ?? orgSettings.graceMinutes,
       lateThresholdMinutes:
         dto.lateThresholdMinutes ?? orgSettings.lateThresholdMinutes,
-      halfDayCutoffTime:
-        dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime,
+      halfDayCutoffTime: dto.halfDayCutoffTime ?? orgSettings.halfDayCutoffTime,
       workingDays:
         Array.isArray(dto.workingDays) && dto.workingDays.length
           ? dto.workingDays
@@ -2294,7 +2383,9 @@ async getAttendanceReport(
             this.canonicalShiftName(item.name) === targetCanonicalName,
         );
         if (hasDuplicate) {
-          throw new BadRequestException(`Shift "${normalizedName}" already exists`);
+          throw new BadRequestException(
+            `Shift "${normalizedName}" already exists`,
+          );
         }
       }
 
@@ -2317,8 +2408,10 @@ async getAttendanceReport(
   }
 
   // ===== Attendance Settings Methods =====
-  
-  async getOrCreateAttendanceSettings(organizationId: string): Promise<AttendanceSettings> {
+
+  async getOrCreateAttendanceSettings(
+    organizationId: string,
+  ): Promise<AttendanceSettings> {
     let settings = await this.attendanceSettingsRepo.findOne({
       where: { organizationId },
     });
@@ -2416,7 +2509,9 @@ async getAttendanceReport(
     return this.attendanceSettingsRepo.save(settings);
   }
 
-  async getAttendanceSettings(organizationId: string): Promise<AttendanceSettings> {
+  async getAttendanceSettings(
+    organizationId: string,
+  ): Promise<AttendanceSettings> {
     return this.getOrCreateAttendanceSettings(organizationId);
   }
 }

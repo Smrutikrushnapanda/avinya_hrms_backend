@@ -42,10 +42,22 @@ export class Project {
   @Column({ name: 'estimated_end_date', type: 'date', nullable: true })
   estimatedEndDate: string | null;
 
-  @Column({ name: 'project_cost', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  @Column({
+    name: 'project_cost',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
   projectCost: number | null;
 
-  @Column({ name: 'hourly_rate', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({
+    name: 'hourly_rate',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   hourlyRate: number | null;
 
   @Column({ name: 'test_sheet_column_headers', type: 'jsonb', nullable: true })

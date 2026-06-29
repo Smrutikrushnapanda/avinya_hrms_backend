@@ -30,7 +30,9 @@ export class ProjectTask {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => ClientProject, (project) => project.tasks, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ClientProject, (project) => project.tasks, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'project_id' })
   project: ClientProject;
 
@@ -43,10 +45,20 @@ export class ProjectTask {
   @Column({ name: 'description', type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ name: 'status', type: 'varchar', length: 50, default: TaskStatus.PENDING })
+  @Column({
+    name: 'status',
+    type: 'varchar',
+    length: 50,
+    default: TaskStatus.PENDING,
+  })
   status: TaskStatus;
 
-  @Column({ name: 'priority', type: 'varchar', length: 50, default: TaskPriority.MEDIUM })
+  @Column({
+    name: 'priority',
+    type: 'varchar',
+    length: 50,
+    default: TaskPriority.MEDIUM,
+  })
   priority: TaskPriority;
 
   @ManyToOne(() => User)

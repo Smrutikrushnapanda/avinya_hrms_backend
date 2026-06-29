@@ -64,10 +64,6 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
     DesignationService,
     StorageService,
   ],
-  exports: [
-    EmployeeService,
-    DepartmentService,
-    DesignationService,
-  ],
+  exports: [EmployeeService, DepartmentService, DesignationService],
 })
 export class EmployeeModule {}

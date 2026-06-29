@@ -7,7 +7,7 @@ export interface OptionBreakdownDto {
 
 export interface UserResponseDto {
   user_id: string;
-  employee_name: string;  // ADDED
+  employee_name: string; // ADDED
   selected_options: string[];
   response_text?: string;
   response_rating?: number;
@@ -43,12 +43,12 @@ export interface PollSummaryDto {
   end_time?: Date;
   is_anonymous: boolean;
   created_by: string;
-  created_by_name: string;  // ADDED
+  created_by_name: string; // ADDED
   created_at: Date;
   updated_at: Date;
   total_responses: number;
   is_active: boolean | undefined;
-  questions: number;  // ADDED
+  questions: number; // ADDED
 }
 export interface SimpleEmployeeResponseDto {
   employee_id: string;

@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  Inject,
+} from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
@@ -85,7 +91,7 @@ export class EmployeeService {
       // If loginUserName is not provided, default to work email (before @)
       let loginUserName = dto.loginUserName?.trim();
       const { loginPassword, roleId, ...employeePayload } = dto;
-      
+
       if (!loginPassword?.trim()) {
         throw new BadRequestException('loginPassword is required');
       }
@@ -94,7 +100,7 @@ export class EmployeeService {
       if (!loginUserName) {
         loginUserName = dto.workEmail.split('@')[0].toLowerCase();
       }
-      
+
       await this.ensureShiftBelongsToOrganization(
         dto.organizationId,
         dto.shiftId ?? null,
@@ -107,20 +113,23 @@ export class EmployeeService {
       const normalizedWorkEmail = dto.workEmail.trim().toLowerCase();
       const normalizedContactNumber = dto.contactNumber?.trim() || undefined;
 
-      const [existingUserByEmail, existingUserByUserName, existingUserByMobile] =
-        await Promise.all([
-          this.userRepository.findOne({
-            where: { email: normalizedWorkEmail },
-          }),
-          this.userRepository.findOne({
-            where: { userName: loginUserName },
-          }),
-          normalizedContactNumber
-            ? this.userRepository.findOne({
-                where: { mobileNumber: normalizedContactNumber },
-              })
-            : Promise.resolve(null),
-        ]);
+      const [
+        existingUserByEmail,
+        existingUserByUserName,
+        existingUserByMobile,
+      ] = await Promise.all([
+        this.userRepository.findOne({
+          where: { email: normalizedWorkEmail },
+        }),
+        this.userRepository.findOne({
+          where: { userName: loginUserName },
+        }),
+        normalizedContactNumber
+          ? this.userRepository.findOne({
+              where: { mobileNumber: normalizedContactNumber },
+            })
+          : Promise.resolve(null),
+      ]);
 
       const matchedUsers = [
         existingUserByEmail,
@@ -136,11 +145,15 @@ export class EmployeeService {
           existingUserByEmail &&
           uniqueMatchedUsers.some((user) => user.id !== existingUserByEmail.id)
         ) {
-          throw new ConflictException('Work email is already linked to another user');
+          throw new ConflictException(
+            'Work email is already linked to another user',
+          );
         }
         if (
           existingUserByUserName &&
-          uniqueMatchedUsers.some((user) => user.id !== existingUserByUserName.id)
+          uniqueMatchedUsers.some(
+            (user) => user.id !== existingUserByUserName.id,
+          )
         ) {
           throw new ConflictException('Username already in use');
         }
@@ -148,7 +161,9 @@ export class EmployeeService {
           existingUserByMobile &&
           uniqueMatchedUsers.some((user) => user.id !== existingUserByMobile.id)
         ) {
-          throw new ConflictException('Contact number is already linked to another user');
+          throw new ConflictException(
+            'Contact number is already linked to another user',
+          );
         }
       }
 
@@ -235,19 +250,21 @@ export class EmployeeService {
             savedEmployee.employmentType,
           );
         }
-        
+
         // Invalidate cache after creating employee
         await this.invalidateEmployeeCache(dto.organizationId);
 
         await this.sendCredentialsEmailSafely({
           organizationId: dto.organizationId,
           employeeEmail: dto.workEmail,
-          employeeName: [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() || dto.firstName,
+          employeeName:
+            [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() ||
+            dto.firstName,
           userName: loginUserName,
           password: loginPassword,
           reason: 'created',
         });
-        
+
         return this.findOne(savedEmployee.id);
       }
 
@@ -272,23 +289,30 @@ export class EmployeeService {
           savedEmployee.employmentType,
         );
       }
-      
+
       // Invalidate cache after creating employee
       await this.invalidateEmployeeCache(dto.organizationId);
 
       await this.sendCredentialsEmailSafely({
         organizationId: dto.organizationId,
         employeeEmail: dto.workEmail,
-        employeeName: [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() || dto.firstName,
+        employeeName:
+          [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() ||
+          dto.firstName,
         userName: loginUserName,
         password: loginPassword,
         reason: 'created',
       });
-      
+
       return this.findOne(savedEmployee.id);
     } catch (error) {
-      if (error instanceof QueryFailedError && (error as any).code === '23505') {
-        throw new ConflictException('Employee already exists with provided unique details');
+      if (
+        error instanceof QueryFailedError &&
+        (error as any).code === '23505'
+      ) {
+        throw new ConflictException(
+          'Employee already exists with provided unique details',
+        );
       }
       throw error;
     }
@@ -297,7 +321,15 @@ export class EmployeeService {
   async findByUserId(userId: string): Promise<any | null> {
     const employee = await this.employeeRepository.findOne({
       where: { userId },
-      relations: ['user', 'organization', 'department', 'designation', 'manager', 'branch', 'shift'],
+      relations: [
+        'user',
+        'organization',
+        'department',
+        'designation',
+        'manager',
+        'branch',
+        'shift',
+      ],
     });
     if (!employee) return null;
 
@@ -328,57 +360,71 @@ export class EmployeeService {
 
   findAll(organizationId: string) {
     const cacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
-    
+
     return this.cacheManager.get(cacheKey).then(async (cached) => {
       if (cached) {
         console.log('📦 Returning cached employees for org:', organizationId);
         return cached;
       }
-      
+
       const emps = await this.employeeRepository.find({
         where: { organizationId },
-        relations: ['department', 'designation', 'manager', 'user', 'branch', 'shift'],
+        relations: [
+          'department',
+          'designation',
+          'manager',
+          'user',
+          'branch',
+          'shift',
+        ],
         order: { firstName: 'ASC' },
       });
-      
+
       // Use Promise.all for parallel photo signing
       const employees = await Promise.all(
-        emps.map((e) => this.addSignedProfilePhoto(e))
+        emps.map((e) => this.addSignedProfilePhoto(e)),
       );
-      
+
       // Cache for 5 minutes
       await this.cacheManager.set(cacheKey, employees, 300);
       console.log('💾 Cached employees for org:', organizationId);
-      
+
       return employees;
     });
   }
 
   async findOne(id: string) {
     const cacheKey = `${CACHE_KEYS.EMPLOYEE}:${id}`;
-    
+
     // Check cache first
     const cached = await this.cacheManager.get(cacheKey);
     if (cached) {
       console.log('📦 Returning cached employee:', id);
       return cached;
     }
-    
+
     const employee = await this.employeeRepository.findOne({
       where: { id },
-      relations: ['department', 'designation', 'manager', 'user', 'branch', 'shift'],
+      relations: [
+        'department',
+        'designation',
+        'manager',
+        'user',
+        'branch',
+        'shift',
+      ],
     });
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
-    
+
     // Parallel photo signing for better performance
     const [photoUrl, managerPhotoUrl, userRoles] = await Promise.all([
       this.signIfNeeded(this.getProfilePhotoKey(employee)),
       this.signIfNeeded(this.getProfilePhotoKey(employee.manager as any)),
       this.getUserRolesMap([employee.userId]),
     ]);
-    
+
     const roles = userRoles.get(employee.userId) || [];
 
     const result = {
@@ -392,10 +438,10 @@ export class EmployeeService {
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
     };
-    
+
     // Cache for 10 minutes
     await this.cacheManager.set(cacheKey, result, 600);
-    
+
     return result;
   }
 
@@ -420,7 +466,9 @@ export class EmployeeService {
     let effectiveUserName = '';
 
     if (loginUserName || loginPassword) {
-      const user = await this.userRepository.findOne({ where: { id: employee.userId } });
+      const user = await this.userRepository.findOne({
+        where: { id: employee.userId },
+      });
       if (!user) {
         throw new NotFoundException(`User for employee ${id} not found`);
       }
@@ -465,7 +513,10 @@ export class EmployeeService {
 
     if (credentialsUpdated && loginPassword) {
       const employeeName =
-        [employee.firstName, employee.lastName].filter(Boolean).join(' ').trim() ||
+        [employee.firstName, employee.lastName]
+          .filter(Boolean)
+          .join(' ')
+          .trim() ||
         employee.firstName ||
         'Employee';
 
@@ -517,7 +568,9 @@ export class EmployeeService {
 
     try {
       // Find employees who report to this employee
-      const reportingEmployees = await this.employeeRepository.find({ where: { reportingTo: id } });
+      const reportingEmployees = await this.employeeRepository.find({
+        where: { reportingTo: id },
+      });
 
       // Set their manager to null and save them
       for (const reportingEmployee of reportingEmployees) {
@@ -526,11 +579,13 @@ export class EmployeeService {
       }
 
       // Clean up related records before deleting the employee
-      
+
       // 1. Delete resignation requests for this employee
       await this.resignationRepository.delete({ employeeId: id });
-      await this.resignationRepository.delete({ employeeUserId: employee.userId });
-      
+      await this.resignationRepository.delete({
+        employeeUserId: employee.userId,
+      });
+
       // 2. Delete workflow assignments for this employee
       await this.workflowAssignmentRepository.delete({ employeeId: id });
       // Also clear approver_id where this employee is set as approver
@@ -540,10 +595,10 @@ export class EmployeeService {
         .set({ approverId: null })
         .where('approverId = :employeeId', { employeeId: id })
         .execute();
-      
+
       // 3. Delete timesheets for this employee
       await this.timesheetRepository.delete({ employeeId: id });
-      
+
       // 4. Delete timeslips for this employee (use query builder since no direct employeeId column)
       await this.timeslipRepository
         .createQueryBuilder()
@@ -554,14 +609,13 @@ export class EmployeeService {
 
       // Now, it should be safe to remove the employee
       await this.employeeRepository.remove(employee);
-      
+
       if (employee.userId) {
         await this.userService.remove(employee.userId);
       }
 
       // Invalidate cache after deletion
       await this.invalidateEmployeeCache(employee.organizationId, id);
-
     } catch (error) {
       if (error instanceof QueryFailedError) {
         throw new ConflictException(
@@ -575,16 +629,23 @@ export class EmployeeService {
   // --- ENHANCED DASHBOARD STATS ---
   async getDashboardStats(organizationId: string) {
     try {
-      console.log('🚀 Getting enhanced dashboard stats for organization:', organizationId);
+      console.log(
+        '🚀 Getting enhanced dashboard stats for organization:',
+        organizationId,
+      );
 
       const nowIst = DateTime.now().setZone('Asia/Kolkata');
       const todayStr = nowIst.toFormat('yyyy-MM-dd');
-      const lastMonthStart = nowIst.minus({ months: 1 }).startOf('month').toFormat('yyyy-MM-dd');
+      const lastMonthStart = nowIst
+        .minus({ months: 1 })
+        .startOf('month')
+        .toFormat('yyyy-MM-dd');
       const thisMonthStart = nowIst.startOf('month').toFormat('yyyy-MM-dd');
       const thisMonthPayPeriod = nowIst.toFormat('yyyy-MM');
 
       // Single consolidated query — uses only 1 connection instead of 9
-      const [row] = await this.entityManager.query(`
+      const [row] = await this.entityManager.query(
+        `
         WITH
           emp_stats AS (
             SELECT
@@ -627,7 +688,15 @@ export class EmployeeService {
           l.on_leave_today, l.pending_leaves,
           p.payroll_paid
         FROM emp_stats e, attendance_stats a, leave_stats l, payroll_stats p
-      `, [organizationId, thisMonthStart, lastMonthStart, todayStr, thisMonthPayPeriod]);
+      `,
+        [
+          organizationId,
+          thisMonthStart,
+          lastMonthStart,
+          todayStr,
+          thisMonthPayPeriod,
+        ],
+      );
 
       const totalEmployees = parseInt(row.total_employees) || 0;
       const activeEmployees = parseInt(row.active_employees) || 0;
@@ -641,10 +710,20 @@ export class EmployeeService {
       const desigCount = parseInt(row.desig_count) || 0;
       const payrollDue = parseFloat(row.payroll_paid) || 0;
 
-      const absent = Math.max(0, activeEmployees - presentToday - halfDay - onLeaveToday);
-      const newJoinersChange = newJoinersLastMonth > 0
-        ? Math.round(((newJoinersThisMonth - newJoinersLastMonth) / newJoinersLastMonth) * 100)
-        : newJoinersThisMonth > 0 ? 100 : 0;
+      const absent = Math.max(
+        0,
+        activeEmployees - presentToday - halfDay - onLeaveToday,
+      );
+      const newJoinersChange =
+        newJoinersLastMonth > 0
+          ? Math.round(
+              ((newJoinersThisMonth - newJoinersLastMonth) /
+                newJoinersLastMonth) *
+                100,
+            )
+          : newJoinersThisMonth > 0
+            ? 100
+            : 0;
 
       const result = {
         totalEmployees: { value: totalEmployees, change: 0 },
@@ -653,7 +732,10 @@ export class EmployeeService {
         onLeaveToday: { value: onLeaveToday, change: 0 },
         pendingLeaveRequests: { value: pendingLeaveRequests, change: 0 },
         payrollDue: { value: payrollDue, change: 0 },
-        newJoinersThisMonth: { value: newJoinersThisMonth, change: newJoinersChange },
+        newJoinersThisMonth: {
+          value: newJoinersThisMonth,
+          change: newJoinersChange,
+        },
         departments: { value: deptCount, change: 0 },
         designations: { value: desigCount, change: 0 },
         attendanceBreakdown: {
@@ -679,39 +761,54 @@ export class EmployeeService {
 
     // Get all employees with birthdays
     const employees = await this.employeeRepository.find({
-      where: { 
+      where: {
         organizationId,
-        status: 'active'
+        status: 'active',
       },
       relations: ['department'],
       select: [
-        'id', 'firstName', 'lastName', 'dateOfBirth',
-        'photoUrl', 'passportPhotoUrl', 'workEmail'
+        'id',
+        'firstName',
+        'lastName',
+        'dateOfBirth',
+        'photoUrl',
+        'passportPhotoUrl',
+        'workEmail',
       ],
     });
 
     // Filter employees with birthdays in the next N days
     const upcomingBirthdays = employees
-      .filter(employee => employee.dateOfBirth)
-      .map(employee => {
+      .filter((employee) => employee.dateOfBirth)
+      .map((employee) => {
         const birthDate = new Date(employee.dateOfBirth);
         const thisYear = today.getFullYear();
-        const birthdayThisYear = new Date(thisYear, birthDate.getMonth(), birthDate.getDate());
-        
+        const birthdayThisYear = new Date(
+          thisYear,
+          birthDate.getMonth(),
+          birthDate.getDate(),
+        );
+
         // If birthday already passed this year, check next year
         if (birthdayThisYear < today) {
           birthdayThisYear.setFullYear(thisYear + 1);
         }
-        
-        const daysUntil = Math.ceil((birthdayThisYear.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        
+
+        const daysUntil = Math.ceil(
+          (birthdayThisYear.getTime() - today.getTime()) /
+            (1000 * 60 * 60 * 24),
+        );
+
         return {
           ...employee,
           daysUntilBirthday: daysUntil,
           upcomingBirthdayDate: birthdayThisYear,
         };
       })
-      .filter(employee => employee.daysUntilBirthday <= days && employee.daysUntilBirthday >= 0)
+      .filter(
+        (employee) =>
+          employee.daysUntilBirthday <= days && employee.daysUntilBirthday >= 0,
+      )
       .sort((a, b) => a.daysUntilBirthday - b.daysUntilBirthday);
 
     return Promise.all(
@@ -749,22 +846,32 @@ export class EmployeeService {
 
     // Add status filter
     if (status !== 'all') {
-      queryBuilder = queryBuilder.andWhere('employee.status = :status', { status });
+      queryBuilder = queryBuilder.andWhere('employee.status = :status', {
+        status,
+      });
     }
 
     // Add department filter
     if (department !== 'all') {
-      queryBuilder = queryBuilder.andWhere('employee.departmentId = :departmentId', { departmentId: department });
+      queryBuilder = queryBuilder.andWhere(
+        'employee.departmentId = :departmentId',
+        { departmentId: department },
+      );
     }
 
     // Add designation filter
     if (designation !== 'all') {
-      queryBuilder = queryBuilder.andWhere('employee.designationId = :designationId', { designationId: designation });
+      queryBuilder = queryBuilder.andWhere(
+        'employee.designationId = :designationId',
+        { designationId: designation },
+      );
     }
 
     // Add branch filter
     if (branch && branch !== 'all') {
-      queryBuilder = queryBuilder.andWhere('employee.branchId = :branchId', { branchId: branch });
+      queryBuilder = queryBuilder.andWhere('employee.branchId = :branchId', {
+        branchId: branch,
+      });
     }
 
     // Add join date filter
@@ -772,20 +879,33 @@ export class EmployeeService {
       const now = new Date();
       switch (joinDateFilter) {
         case 'last30':
-          const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          queryBuilder = queryBuilder.andWhere('employee.dateOfJoining > :thirtyDaysAgo', { thirtyDaysAgo });
+          const thirtyDaysAgo = new Date(
+            now.getTime() - 30 * 24 * 60 * 60 * 1000,
+          );
+          queryBuilder = queryBuilder.andWhere(
+            'employee.dateOfJoining > :thirtyDaysAgo',
+            { thirtyDaysAgo },
+          );
           break;
         case 'last90':
-          const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-          queryBuilder = queryBuilder.andWhere('employee.dateOfJoining > :ninetyDaysAgo', { ninetyDaysAgo });
+          const ninetyDaysAgo = new Date(
+            now.getTime() - 90 * 24 * 60 * 60 * 1000,
+          );
+          queryBuilder = queryBuilder.andWhere(
+            'employee.dateOfJoining > :ninetyDaysAgo',
+            { ninetyDaysAgo },
+          );
           break;
         case 'thisYear':
           const startOfYear = new Date(now.getFullYear(), 0, 1);
           const endOfYear = new Date(now.getFullYear(), 11, 31);
-          queryBuilder = queryBuilder.andWhere('employee.dateOfJoining BETWEEN :startOfYear AND :endOfYear', {
-            startOfYear,
-            endOfYear,
-          });
+          queryBuilder = queryBuilder.andWhere(
+            'employee.dateOfJoining BETWEEN :startOfYear AND :endOfYear',
+            {
+              startOfYear,
+              endOfYear,
+            },
+          );
           break;
       }
     }
@@ -794,18 +914,26 @@ export class EmployeeService {
     if (search && search.trim()) {
       queryBuilder = queryBuilder.andWhere(
         '(employee.firstName ILIKE :search OR employee.lastName ILIKE :search OR employee.workEmail ILIKE :search OR employee.employeeCode ILIKE :search)',
-        { search: `%${search.trim()}%` }
+        { search: `%${search.trim()}%` },
       );
     }
 
     // Add sorting
-    const sortColumn = sortBy === 'department' ? 'department.name' :
-                      sortBy === 'designation' ? 'designation.name' :
-                      sortBy === 'manager' ? 'manager.firstName' :
-                      sortBy === 'branch' ? 'branch.name' :
-                      `employee.${sortBy}`;
-    
-    queryBuilder = queryBuilder.orderBy(sortColumn, sortOrder.toUpperCase() as 'ASC' | 'DESC');
+    const sortColumn =
+      sortBy === 'department'
+        ? 'department.name'
+        : sortBy === 'designation'
+          ? 'designation.name'
+          : sortBy === 'manager'
+            ? 'manager.firstName'
+            : sortBy === 'branch'
+              ? 'branch.name'
+              : `employee.${sortBy}`;
+
+    queryBuilder = queryBuilder.orderBy(
+      sortColumn,
+      sortOrder.toUpperCase() as 'ASC' | 'DESC',
+    );
 
     // Get total count for pagination
     const total = await queryBuilder.getCount();
@@ -856,7 +984,7 @@ export class EmployeeService {
   }
 
   // --- NEW: FIND MANAGERS ---
-async findManagers(organizationId: string) {
+  async findManagers(organizationId: string) {
     try {
       const cacheKey = `managers:${organizationId}`;
       const cached = await this.cacheManager.get(cacheKey);
@@ -867,7 +995,7 @@ async findManagers(organizationId: string) {
 
       // Return ALL active employees as potential managers (broader selection)
       const managers = await this.employeeRepository.find({
-        where: { 
+        where: {
           organizationId,
           status: 'active',
         },
@@ -877,13 +1005,15 @@ async findManagers(organizationId: string) {
 
       // Sign profile photos in parallel
       const managersWithPhotos = await Promise.all(
-        managers.map(emp => this.addSignedProfilePhoto(emp))
+        managers.map((emp) => this.addSignedProfilePhoto(emp)),
       );
 
       // Cache for 10 minutes
       await this.cacheManager.set(cacheKey, managersWithPhotos, 600);
-      console.log(`✅ Loaded ${managersWithPhotos.length} potential managers for org: ${organizationId}`);
-      
+      console.log(
+        `✅ Loaded ${managersWithPhotos.length} potential managers for org: ${organizationId}`,
+      );
+
       return managersWithPhotos;
     } catch (error) {
       console.error('❌ Error finding managers:', error);
@@ -921,12 +1051,20 @@ async findManagers(organizationId: string) {
         order: { dateOfJoining: 'DESC' },
         take: 10, // Limit to latest 10
         select: [
-          'id', 'firstName', 'lastName', 'employeeCode',
-          'dateOfJoining', 'photoUrl', 'passportPhotoUrl', 'workEmail'
+          'id',
+          'firstName',
+          'lastName',
+          'employeeCode',
+          'dateOfJoining',
+          'photoUrl',
+          'passportPhotoUrl',
+          'workEmail',
         ],
       });
 
-      console.log(`📅 Found ${recentJoiners.length} recent joiners in last ${days} days`);
+      console.log(
+        `📅 Found ${recentJoiners.length} recent joiners in last ${days} days`,
+      );
       return Promise.all(
         recentJoiners.map(async (emp) => this.addSignedProfilePhoto(emp)),
       );
@@ -946,8 +1084,8 @@ async findManagers(organizationId: string) {
           'department.id as departmentId',
           'department.name as departmentName',
           'COUNT(employee.id) as totalEmployees',
-          'COUNT(CASE WHEN employee.status = \'active\' THEN 1 END) as activeEmployees',
-          'COUNT(CASE WHEN employee.status = \'inactive\' THEN 1 END) as inactiveEmployees',
+          "COUNT(CASE WHEN employee.status = 'active' THEN 1 END) as activeEmployees",
+          "COUNT(CASE WHEN employee.status = 'inactive' THEN 1 END) as inactiveEmployees",
         ])
         .where('employee.organizationId = :organizationId', { organizationId })
         .andWhere('department.id IS NOT NULL')
@@ -967,7 +1105,8 @@ async findManagers(organizationId: string) {
     try {
       const analytics = await Promise.all([
         // Age distribution
-        this.entityManager.query(`
+        this.entityManager.query(
+          `
           SELECT 
             CASE 
               WHEN EXTRACT(YEAR FROM AGE(date_of_birth)) < 25 THEN 'Under 25'
@@ -981,10 +1120,13 @@ async findManagers(organizationId: string) {
           WHERE organization_id = $1 AND date_of_birth IS NOT NULL AND status = 'active'
           GROUP BY age_group
           ORDER BY count DESC
-        `, [organizationId]),
+        `,
+          [organizationId],
+        ),
 
         // Gender distribution
-        this.entityManager.query(`
+        this.entityManager.query(
+          `
           SELECT 
             COALESCE(gender, 'Not Specified') as gender,
             COUNT(*) as count
@@ -992,10 +1134,13 @@ async findManagers(organizationId: string) {
           WHERE organization_id = $1 AND status = 'active'
           GROUP BY gender
           ORDER BY count DESC
-        `, [organizationId]),
+        `,
+          [organizationId],
+        ),
 
         // Employment type distribution
-        this.entityManager.query(`
+        this.entityManager.query(
+          `
           SELECT 
             COALESCE(employment_type, 'Not Specified') as employment_type,
             COUNT(*) as count
@@ -1003,10 +1148,13 @@ async findManagers(organizationId: string) {
           WHERE organization_id = $1 AND status = 'active'
           GROUP BY employment_type
           ORDER BY count DESC
-        `, [organizationId]),
+        `,
+          [organizationId],
+        ),
 
         // Tenure distribution
-        this.entityManager.query(`
+        this.entityManager.query(
+          `
           SELECT 
             CASE 
               WHEN EXTRACT(YEAR FROM AGE(date_of_joining)) < 1 THEN 'Less than 1 year'
@@ -1020,15 +1168,17 @@ async findManagers(organizationId: string) {
           WHERE organization_id = $1 AND status = 'active'
           GROUP BY tenure_group
           ORDER BY count DESC
-        `, [organizationId]),
+        `,
+          [organizationId],
+        ),
       ]);
 
-        return {
-      ageDistribution: analytics[0],
-      genderDistribution: analytics[1],
-      employmentTypeDistribution: analytics[2],
-      tenureDistribution: analytics[3],
-    };
+      return {
+        ageDistribution: analytics[0],
+        genderDistribution: analytics[1],
+        employmentTypeDistribution: analytics[2],
+        tenureDistribution: analytics[3],
+      };
     } catch (error) {
       console.error('Error getting employee analytics:', error);
       return {
@@ -1041,7 +1191,10 @@ async findManagers(organizationId: string) {
   }
 
   // --- NEW: BULK UPDATE EMPLOYEES ---
-  async bulkUpdateEmployees(employeeIds: string[], updateData: Partial<UpdateEmployeeDto>) {
+  async bulkUpdateEmployees(
+    employeeIds: string[],
+    updateData: Partial<UpdateEmployeeDto>,
+  ) {
     try {
       const updateResult = await this.employeeRepository
         .createQueryBuilder()
@@ -1059,7 +1212,11 @@ async findManagers(organizationId: string) {
   }
 
   // --- NEW: EMPLOYEE SEARCH SUGGESTIONS ---
-  async getEmployeeSearchSuggestions(organizationId: string, query: string, limit: number = 5) {
+  async getEmployeeSearchSuggestions(
+    organizationId: string,
+    query: string,
+    limit: number = 5,
+  ) {
     try {
       if (!query || query.trim().length < 2) {
         return [];
@@ -1078,13 +1235,13 @@ async findManagers(organizationId: string) {
           'employee.photoUrl',
           'employee.passportPhotoUrl',
           'department.name',
-          'designation.name'
+          'designation.name',
         ])
         .where('employee.organizationId = :organizationId', { organizationId })
         .andWhere('employee.status = :status', { status: 'active' })
         .andWhere(
           '(employee.firstName ILIKE :query OR employee.lastName ILIKE :query OR employee.employeeCode ILIKE :query)',
-          { query: `%${query.trim()}%` }
+          { query: `%${query.trim()}%` },
         )
         .orderBy('employee.firstName', 'ASC')
         .take(limit)
@@ -1155,7 +1312,7 @@ async findManagers(organizationId: string) {
     }
   }
 
-// --- NEW: VALIDATE MANAGER ASSIGNMENT ---
+  // --- NEW: VALIDATE MANAGER ASSIGNMENT ---
   async validateManagerAssignment(dto: {
     organizationId: string;
     employeeId?: string;
@@ -1176,15 +1333,22 @@ async findManagers(organizationId: string) {
       });
 
       if (!manager) {
-        errors.push('Selected manager does not exist, is inactive, or belongs to different organization');
+        errors.push(
+          'Selected manager does not exist, is inactive, or belongs to different organization',
+        );
         return { isValid: false, errors };
       }
 
       // Check circular reference
       if (employeeId && employeeId !== reportingTo) {
-        const isCircular = await this.checkCircularReporting(employeeId, reportingTo);
+        const isCircular = await this.checkCircularReporting(
+          employeeId,
+          reportingTo,
+        );
         if (isCircular) {
-          errors.push('Cannot assign manager - creates circular reporting structure');
+          errors.push(
+            'Cannot assign manager - creates circular reporting structure',
+          );
         }
       }
 
@@ -1193,8 +1357,11 @@ async findManagers(organizationId: string) {
         where: { reportingTo, organizationId },
       });
 
-      if (directReports >= 50) { // Arbitrary limit, configurable
-        errors.push('Manager already has too many direct reports (50+). Consider restructuring.');
+      if (directReports >= 50) {
+        // Arbitrary limit, configurable
+        errors.push(
+          'Manager already has too many direct reports (50+). Consider restructuring.',
+        );
       }
 
       return {
@@ -1202,7 +1369,9 @@ async findManagers(organizationId: string) {
         errors,
         manager: {
           id: manager.id,
-          name: `${manager.firstName} ${manager.lastName || ''}`.trim() || manager.workEmail,
+          name:
+            `${manager.firstName} ${manager.lastName || ''}`.trim() ||
+            manager.workEmail,
           currentDirectReports: directReports,
           employeeCount: directReports + (employeeId ? 1 : 0),
         },
@@ -1279,7 +1448,9 @@ async findManagers(organizationId: string) {
     });
 
     if (!shift) {
-      throw new BadRequestException('Selected shift was not found for this organization');
+      throw new BadRequestException(
+        'Selected shift was not found for this organization',
+      );
     }
   }
 
@@ -1330,7 +1501,10 @@ async findManagers(organizationId: string) {
   }
 
   // --- HELPER: CHECK CIRCULAR REPORTING ---
-  private async checkCircularReporting(employeeId: string, managerId: string): Promise<boolean> {
+  private async checkCircularReporting(
+    employeeId: string,
+    managerId: string,
+  ): Promise<boolean> {
     if (employeeId === managerId) {
       return true;
     }
@@ -1348,12 +1522,18 @@ async findManagers(organizationId: string) {
   }
 
   // --- CACHE INVALIDATION HELPER ---
-  private async invalidateEmployeeCache(organizationId: string, employeeId?: string) {
+  private async invalidateEmployeeCache(
+    organizationId: string,
+    employeeId?: string,
+  ) {
     try {
       // Invalidate employee list cache for the organization
       const orgCacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
       await this.cacheManager.del(orgCacheKey);
-      console.log('🗑️ Invalidated employee list cache for org:', organizationId);
+      console.log(
+        '🗑️ Invalidated employee list cache for org:',
+        organizationId,
+      );
 
       // Invalidate specific employee cache if provided
       if (employeeId) {
@@ -1365,7 +1545,10 @@ async findManagers(organizationId: string) {
       // Invalidate dashboard stats cache
       const statsCacheKey = `${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`;
       await this.cacheManager.del(statsCacheKey);
-      console.log('🗑️ Invalidated dashboard stats cache for org:', organizationId);
+      console.log(
+        '🗑️ Invalidated dashboard stats cache for org:',
+        organizationId,
+      );
     } catch (error) {
       console.error('❌ Error invalidating cache:', error);
       // Don't throw - cache invalidation failure shouldn't break the operation
@@ -1384,14 +1567,18 @@ async findManagers(organizationId: string) {
     }
   }
 
-  private getProfilePhotoKey(employee?: Pick<Employee, 'passportPhotoUrl' | 'photoUrl'> | null) {
+  private getProfilePhotoKey(
+    employee?: Pick<Employee, 'passportPhotoUrl' | 'photoUrl'> | null,
+  ) {
     if (!employee) return null;
     return employee.passportPhotoUrl || employee.photoUrl || null;
   }
 
   private async addSignedProfilePhoto<
-    T extends { passportPhotoUrl?: string | null; photoUrl?: string | null }
-  >(entity: T): Promise<
+    T extends { passportPhotoUrl?: string | null; photoUrl?: string | null },
+  >(
+    entity: T,
+  ): Promise<
     T & {
       photoUrl: string | null;
       passportPhotoUrl?: string | null;

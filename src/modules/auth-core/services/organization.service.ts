@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from '../entities/organization.entity';
@@ -7,7 +14,12 @@ import { PricingType } from '../entities/pricing-type.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
-import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto, StartTrialDto } from '../dto/organization.dto';
+import {
+  CreateOrganizationDto,
+  UpdateOrganizationDto,
+  ChangeCredentialsDto,
+  StartTrialDto,
+} from '../dto/organization.dto';
 import { RoleType } from '../enums/role-type.enum';
 import { LeaveService } from '../../leave/leave.service';
 import { WfhService } from '../../wfh/wfh.service';
@@ -76,7 +88,9 @@ export class OrganizationService {
       suffix += 1;
     }
 
-    throw new ConflictException('Unable to allocate default admin username right now.');
+    throw new ConflictException(
+      'Unable to allocate default admin username right now.',
+    );
   }
 
   private mapPricingTypeToPlanType(pricingTypeId: number): PlanType {
@@ -114,20 +128,35 @@ export class OrganizationService {
 
     const settings = new OrganizationSettings();
     settings.organizationId = org.id;
-    settings.homeHeaderBackgroundColor = this.normalizeNullableText(data.homeHeaderBackgroundColor);
-    settings.homeHeaderMediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
-    settings.homeHeaderMediaStartDate = this.normalizeNullableText(data.homeHeaderMediaStartDate);
-    settings.homeHeaderMediaEndDate = this.normalizeNullableText(data.homeHeaderMediaEndDate);
-    settings.resignationPolicy = this.normalizeNullableText(data.resignationPolicy);
-    settings.resignationNoticePeriodDays = Number(data.resignationNoticePeriodDays ?? 30) || 30;
-    settings.allowEarlyRelievingByAdmin = Boolean(data.allowEarlyRelievingByAdmin);
+    settings.homeHeaderBackgroundColor = this.normalizeNullableText(
+      data.homeHeaderBackgroundColor,
+    );
+    settings.homeHeaderMediaUrl = this.normalizeNullableText(
+      data.homeHeaderMediaUrl,
+    );
+    settings.homeHeaderMediaStartDate = this.normalizeNullableText(
+      data.homeHeaderMediaStartDate,
+    );
+    settings.homeHeaderMediaEndDate = this.normalizeNullableText(
+      data.homeHeaderMediaEndDate,
+    );
+    settings.resignationPolicy = this.normalizeNullableText(
+      data.resignationPolicy,
+    );
+    settings.resignationNoticePeriodDays =
+      Number(data.resignationNoticePeriodDays ?? 30) || 30;
+    settings.allowEarlyRelievingByAdmin = Boolean(
+      data.allowEarlyRelievingByAdmin,
+    );
     settings.sessionStartMonth = Number(data.sessionStartMonth ?? 4) || 4;
     settings.leaveCarryForwardEnabled = Boolean(data.leaveCarryForwardEnabled);
     settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
     await this.orgSettingsRepo.save(settings);
 
     // Ensure ADMIN role exists for this org
-    let adminRole = await this.roleRepo.findOne({ where: { roleName: 'ADMIN' } });
+    let adminRole = await this.roleRepo.findOne({
+      where: { roleName: 'ADMIN' },
+    });
     if (!adminRole) {
       adminRole = await this.roleRepo.save(
         this.roleRepo.create({
@@ -140,7 +169,7 @@ export class OrganizationService {
     }
 
     // Ensure HR role exists
-    let hrRole = await this.roleRepo.findOne({ where: { roleName: 'HR' } });
+    const hrRole = await this.roleRepo.findOne({ where: { roleName: 'HR' } });
     if (!hrRole) {
       await this.roleRepo.save(
         this.roleRepo.create({
@@ -153,7 +182,9 @@ export class OrganizationService {
     }
 
     // Ensure EMPLOYEE role exists
-    let employeeRole = await this.roleRepo.findOne({ where: { roleName: 'EMPLOYEE' } });
+    const employeeRole = await this.roleRepo.findOne({
+      where: { roleName: 'EMPLOYEE' },
+    });
     if (!employeeRole) {
       await this.roleRepo.save(
         this.roleRepo.create({
@@ -182,7 +213,11 @@ export class OrganizationService {
     );
 
     await this.userRoleRepo.save(
-      this.userRoleRepo.create({ user: adminUser, role: adminRole, isActive: true }),
+      this.userRoleRepo.create({
+        user: adminUser,
+        role: adminRole,
+        isActive: true,
+      }),
     );
 
     return {
@@ -220,7 +255,9 @@ export class OrganizationService {
     const existingOrganization = await this.orgRepo
       .createQueryBuilder('organization')
       .select('organization.id')
-      .where('LOWER(organization.organizationName) = LOWER(:companyName)', { companyName })
+      .where('LOWER(organization.organizationName) = LOWER(:companyName)', {
+        companyName,
+      })
       .getRawOne();
 
     if (existingOrganization) {
@@ -273,7 +310,8 @@ export class OrganizationService {
     });
 
     return {
-      message: 'Organization created successfully. Username and password have been sent to your email.',
+      message:
+        'Organization created successfully. Username and password have been sent to your email.',
       organizationId: organization.id,
       credentialsSent: true,
       adminUserName: organization.adminUserName,
@@ -314,7 +352,9 @@ export class OrganizationService {
       );
     }
     if (data.homeHeaderMediaUrl !== undefined) {
-      settings.homeHeaderMediaUrl = this.normalizeNullableText(data.homeHeaderMediaUrl);
+      settings.homeHeaderMediaUrl = this.normalizeNullableText(
+        data.homeHeaderMediaUrl,
+      );
     }
     if (data.homeHeaderMediaStartDate !== undefined) {
       settings.homeHeaderMediaStartDate = this.normalizeNullableText(
@@ -327,10 +367,13 @@ export class OrganizationService {
       );
     }
     if (data.resignationPolicy !== undefined) {
-      settings.resignationPolicy = this.normalizeNullableText(data.resignationPolicy);
+      settings.resignationPolicy = this.normalizeNullableText(
+        data.resignationPolicy,
+      );
     }
     if (data.resignationNoticePeriodDays !== undefined) {
-      settings.resignationNoticePeriodDays = Number(data.resignationNoticePeriodDays) || 0;
+      settings.resignationNoticePeriodDays =
+        Number(data.resignationNoticePeriodDays) || 0;
     }
     if (data.allowEarlyRelievingByAdmin !== undefined) {
       settings.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
@@ -340,7 +383,9 @@ export class OrganizationService {
       settings.sessionStartMonth = Number(data.sessionStartMonth);
     }
     if (data.leaveCarryForwardEnabled !== undefined) {
-      settings.leaveCarryForwardEnabled = Boolean(data.leaveCarryForwardEnabled);
+      settings.leaveCarryForwardEnabled = Boolean(
+        data.leaveCarryForwardEnabled,
+      );
     }
     if (data.wfhCarryForwardEnabled !== undefined) {
       settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
@@ -368,12 +413,20 @@ export class OrganizationService {
     return this.findOne(id);
   }
 
-  async changeCredentials(orgId: string, adminUserId: string, dto: ChangeCredentialsDto) {
-    const user = await this.userRepo.findOne({ where: { id: adminUserId, organizationId: orgId } });
+  async changeCredentials(
+    orgId: string,
+    adminUserId: string,
+    dto: ChangeCredentialsDto,
+  ) {
+    const user = await this.userRepo.findOne({
+      where: { id: adminUserId, organizationId: orgId },
+    });
     if (!user) throw new NotFoundException('Admin user not found');
 
     if (dto.newUserName) {
-      const existing = await this.userRepo.findOne({ where: { userName: dto.newUserName } });
+      const existing = await this.userRepo.findOne({
+        where: { userName: dto.newUserName },
+      });
       if (existing && existing.id !== adminUserId) {
         throw new BadRequestException('Username already taken');
       }
@@ -394,20 +447,24 @@ export class OrganizationService {
 
     try {
       await this.orgRepo.manager.transaction(async (manager) => {
-        const [{ schema }] = await manager.query('SELECT current_schema() AS schema');
+        const [{ schema }] = await manager.query(
+          'SELECT current_schema() AS schema',
+        );
 
         // Delete all rows from organization-scoped tables first to avoid FK violations.
-        const orgScopedTables: Array<{ table_schema: string; table_name: string }> =
-          await manager.query(
-            `
+        const orgScopedTables: Array<{
+          table_schema: string;
+          table_name: string;
+        }> = await manager.query(
+          `
               SELECT table_schema, table_name
               FROM information_schema.columns
               WHERE column_name = 'organization_id'
                 AND table_schema = $1
                 AND table_name <> 'organizations'
             `,
-            [schema],
-          );
+          [schema],
+        );
 
         for (const { table_schema, table_name } of orgScopedTables) {
           await manager.query(
@@ -448,12 +505,14 @@ export class OrganizationService {
     return {
       ...org,
       name: org.organizationName,
-      homeHeaderBackgroundColor: org.settings?.homeHeaderBackgroundColor || null,
+      homeHeaderBackgroundColor:
+        org.settings?.homeHeaderBackgroundColor || null,
       homeHeaderMediaUrl: org.settings?.homeHeaderMediaUrl || null,
       homeHeaderMediaStartDate: org.settings?.homeHeaderMediaStartDate || null,
       homeHeaderMediaEndDate: org.settings?.homeHeaderMediaEndDate || null,
       resignationPolicy: org.settings?.resignationPolicy || null,
-      resignationNoticePeriodDays: org.settings?.resignationNoticePeriodDays ?? 30,
+      resignationNoticePeriodDays:
+        org.settings?.resignationNoticePeriodDays ?? 30,
       allowEarlyRelievingByAdmin:
         org.settings?.allowEarlyRelievingByAdmin ?? false,
       sessionStartMonth: Number(org.settings?.sessionStartMonth || 4),

@@ -1,4 +1,11 @@
-import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 import { ResignationStatus } from '../entities/resignation-request.entity';
 
 export class CreateResignationRequestDto {
@@ -27,4 +34,3 @@ export class ReviewResignationRequestDto {
   @IsBoolean()
   allowEarlyRelieving?: boolean;
 }
-

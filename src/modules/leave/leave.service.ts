@@ -24,7 +24,10 @@ import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
 import { CreateLeaveAssignmentDto } from './dto/create-leave-assignment.dto';
 import { InitializeBalanceDto } from './dto/initialize-balance.dto';
 import { SetLeaveBalanceTemplatesDto } from './dto/set-leave-balance-templates.dto';
-import { SetEmployeeLeaveLimitDto, UpdateEmployeeLeaveLimitDto } from './dto/set-employee-leave-limit.dto';
+import {
+  SetEmployeeLeaveLimitDto,
+  UpdateEmployeeLeaveLimitDto,
+} from './dto/set-employee-leave-limit.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MessageService } from '../message/message.service';
 import { MailService } from '../mail/mail.service';
@@ -65,7 +68,9 @@ export class LeaveService {
     if (!gender) return all;
     // Filter out types that are restricted to a different gender
     return all.filter(
-      (lt) => !lt.genderRestriction || lt.genderRestriction.toLowerCase() === gender.toLowerCase(),
+      (lt) =>
+        !lt.genderRestriction ||
+        lt.genderRestriction.toLowerCase() === gender.toLowerCase(),
     );
   }
 
@@ -81,7 +86,10 @@ export class LeaveService {
     return this.leaveTypeRepo.save(leaveType);
   }
 
-  async updateLeaveType(id: string, dto: UpdateLeaveTypeDto): Promise<LeaveType> {
+  async updateLeaveType(
+    id: string,
+    dto: UpdateLeaveTypeDto,
+  ): Promise<LeaveType> {
     const leaveType = await this.leaveTypeRepo.findOne({ where: { id } });
     if (!leaveType) throw new NotFoundException('Leave type not found');
     Object.assign(leaveType, dto);
@@ -115,7 +123,9 @@ export class LeaveService {
     });
   }
 
-  async initializeLeaveBalance(dto: InitializeBalanceDto): Promise<LeaveBalance> {
+  async initializeLeaveBalance(
+    dto: InitializeBalanceDto,
+  ): Promise<LeaveBalance> {
     const existing = await this.balanceRepo.findOne({
       where: { user: { id: dto.userId }, leaveType: { id: dto.leaveTypeId } },
     });
@@ -123,7 +133,11 @@ export class LeaveService {
     if (existing) {
       existing.openingBalance = dto.openingBalance;
       existing.closingBalance =
-        dto.openingBalance + existing.accrued - existing.consumed + existing.carriedForward - existing.encashed;
+        dto.openingBalance +
+        existing.accrued -
+        existing.consumed +
+        existing.carriedForward -
+        existing.encashed;
       return this.balanceRepo.save(existing);
     }
 
@@ -137,13 +151,23 @@ export class LeaveService {
 
   // ─── Credit Earned Leave ───
 
-  async creditEarnedLeave(userId: string, days: number, organizationId: string): Promise<LeaveBalance> {
+  async creditEarnedLeave(
+    userId: string,
+    days: number,
+    organizationId: string,
+  ): Promise<LeaveBalance> {
     // Find the org's earned leave type
     const earnedType = await this.leaveTypeRepo.findOne({
-      where: { organization: { id: organizationId }, isEarned: true, isActive: true },
+      where: {
+        organization: { id: organizationId },
+        isEarned: true,
+        isActive: true,
+      },
     });
     if (!earnedType) {
-      throw new NotFoundException('No earned leave type configured for this organization');
+      throw new NotFoundException(
+        'No earned leave type configured for this organization',
+      );
     }
 
     let balance = await this.balanceRepo.findOne({
@@ -197,7 +221,10 @@ export class LeaveService {
     return results;
   }
 
-  async getLeaveBalanceTemplates(organizationId: string, employmentType?: string) {
+  async getLeaveBalanceTemplates(
+    organizationId: string,
+    employmentType?: string,
+  ) {
     const where: any = { organization: { id: organizationId } };
     if (employmentType) {
       where.employmentType = employmentType;
@@ -209,7 +236,11 @@ export class LeaveService {
     });
   }
 
-  async applyTemplatesToUser(userId: string, organizationId: string, employmentType: string) {
+  async applyTemplatesToUser(
+    userId: string,
+    organizationId: string,
+    employmentType: string,
+  ) {
     if (!employmentType) return;
     const templates = await this.templateRepo.find({
       where: {
@@ -249,12 +280,15 @@ export class LeaveService {
     });
     if (!templates.length) return { updated: 0 };
 
-    const templatesByEmploymentType = templates.reduce((acc, t) => {
-      const key = t.employmentType || '';
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(t);
-      return acc;
-    }, {} as Record<string, LeaveBalanceTemplate[]>);
+    const templatesByEmploymentType = templates.reduce(
+      (acc, t) => {
+        const key = t.employmentType || '';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(t);
+        return acc;
+      },
+      {} as Record<string, LeaveBalanceTemplate[]>,
+    );
 
     let updated = 0;
 
@@ -400,9 +434,14 @@ export class LeaveService {
 
       const orgId = employee?.organizationId;
       if (orgId) {
-        const hrUserId = await this.findHrUserIdInOrg(orgId, employee?.branchId);
+        const hrUserId = await this.findHrUserIdInOrg(
+          orgId,
+          employee?.branchId,
+        );
         if (hrUserId) {
-          const already = fallbackApprovers.find((a) => a.approverId === hrUserId);
+          const already = fallbackApprovers.find(
+            (a) => a.approverId === hrUserId,
+          );
           if (!already) {
             fallbackApprovers.push({
               approverId: hrUserId,
@@ -469,7 +508,7 @@ export class LeaveService {
     if (isAdmin) {
       // Admin bypass: approve/reject all pending steps directly
       const now = new Date();
-      
+
       // If there are approval entities, process them
       if (request.approvals && request.approvals.length > 0) {
         for (const ap of request.approvals) {
@@ -498,12 +537,20 @@ export class LeaveService {
           type: 'leave',
         });
         if (request.user.email) {
-          this.mailService.sendLeaveStatus(
-            { email: request.user.email, firstName: request.user.firstName },
-            'REJECTED',
-            { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-            request.user.organizationId,
-          ).catch(() => undefined);
+          this.mailService
+            .sendLeaveStatus(
+              { email: request.user.email, firstName: request.user.firstName },
+              'REJECTED',
+              {
+                leaveType: request.leaveType?.name ?? 'Leave',
+                startDate: request.startDate,
+                endDate: request.endDate,
+                numberOfDays: request.numberOfDays,
+                remarks,
+              },
+              request.user.organizationId,
+            )
+            .catch(() => undefined);
         }
         return { message: 'Leave rejected' };
       }
@@ -515,7 +562,7 @@ export class LeaveService {
       await this.requestRepo.save(request);
 
       // Deduct leave balance
-      let balance = await this.balanceRepo.findOne({
+      const balance = await this.balanceRepo.findOne({
         where: {
           user: { id: request.user.id },
           leaveType: { id: request.leaveType.id },
@@ -524,14 +571,12 @@ export class LeaveService {
 
       if (balance) {
         const hasExplicitPaidSplit =
-          Number(request.paidDays ?? 0) > 0 || Number(request.unpaidDays ?? 0) > 0;
+          Number(request.paidDays ?? 0) > 0 ||
+          Number(request.unpaidDays ?? 0) > 0;
         const payableDays = hasExplicitPaidSplit
           ? Number(request.paidDays ?? 0)
           : Number(request.numberOfDays ?? 0);
-        const daysToDeduct = Math.max(
-          0,
-          payableDays,
-        );
+        const daysToDeduct = Math.max(0, payableDays);
         if (daysToDeduct > 0) {
           balance.consumed += daysToDeduct;
           balance.closingBalance -= daysToDeduct;
@@ -552,12 +597,20 @@ export class LeaveService {
         type: 'leave',
       });
       if (request.user.email) {
-        this.mailService.sendLeaveStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'APPROVED',
-          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendLeaveStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'APPROVED',
+            {
+              leaveType: request.leaveType?.name ?? 'Leave',
+              startDate: request.startDate,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
 
       return { message: 'Leave approved' };
@@ -594,12 +647,20 @@ export class LeaveService {
         type: 'leave',
       });
       if (request.user.email) {
-        this.mailService.sendLeaveStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'REJECTED',
-          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendLeaveStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'REJECTED',
+            {
+              leaveType: request.leaveType?.name ?? 'Leave',
+              startDate: request.startDate,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
 
       return { message: 'Leave rejected' };
@@ -643,7 +704,8 @@ export class LeaveService {
       }
 
       const hasExplicitPaidSplit =
-        Number(request.paidDays ?? 0) > 0 || Number(request.unpaidDays ?? 0) > 0;
+        Number(request.paidDays ?? 0) > 0 ||
+        Number(request.unpaidDays ?? 0) > 0;
       const payableDays = hasExplicitPaidSplit
         ? Number(request.paidDays ?? 0)
         : Number(request.numberOfDays ?? 0);
@@ -667,12 +729,20 @@ export class LeaveService {
         type: 'leave',
       });
       if (request.user.email) {
-        this.mailService.sendLeaveStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'APPROVED',
-          { leaveType: request.leaveType?.name ?? 'Leave', startDate: request.startDate, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendLeaveStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'APPROVED',
+            {
+              leaveType: request.leaveType?.name ?? 'Leave',
+              startDate: request.startDate,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
     }
 
@@ -712,7 +782,10 @@ export class LeaveService {
     });
   }
 
-  async deleteLeaveRequestByUser(requestId: string, userId: string): Promise<void> {
+  async deleteLeaveRequestByUser(
+    requestId: string,
+    userId: string,
+  ): Promise<void> {
     const request = await this.requestRepo.findOne({
       where: { id: requestId },
       relations: ['user'],
@@ -722,11 +795,15 @@ export class LeaveService {
     }
 
     if (request.user?.id !== userId) {
-      throw new ForbiddenException('You can only delete your own leave request');
+      throw new ForbiddenException(
+        'You can only delete your own leave request',
+      );
     }
 
     if (request.status !== 'PENDING') {
-      throw new BadRequestException('Only pending leave requests can be deleted');
+      throw new BadRequestException(
+        'Only pending leave requests can be deleted',
+      );
     }
 
     const today = new Date();
@@ -738,7 +815,9 @@ export class LeaveService {
       );
     }
 
-    await this.approvalRepo.delete({ leaveRequest: { id: requestId } as LeaveRequest });
+    await this.approvalRepo.delete({
+      leaveRequest: { id: requestId } as LeaveRequest,
+    });
     await this.requestRepo.delete(requestId);
   }
 
@@ -782,7 +861,9 @@ export class LeaveService {
     return this.assignmentRepo.save(assignment);
   }
 
-  async getApprovalAssignments(userId: string): Promise<LeaveApprovalAssignment[]> {
+  async getApprovalAssignments(
+    userId: string,
+  ): Promise<LeaveApprovalAssignment[]> {
     return this.assignmentRepo.find({
       where: { user: { id: userId }, isActive: true },
       relations: ['approver'],
@@ -790,7 +871,9 @@ export class LeaveService {
     });
   }
 
-  async getApprovalAssignmentsByOrg(orgId: string): Promise<LeaveApprovalAssignment[]> {
+  async getApprovalAssignmentsByOrg(
+    orgId: string,
+  ): Promise<LeaveApprovalAssignment[]> {
     return this.assignmentRepo.find({
       where: { organization: { id: orgId }, isActive: true },
       relations: ['approver', 'user'],
@@ -866,7 +949,9 @@ export class LeaveService {
       isEnabled,
     } = dto;
 
-    const user = await this.leaveTypeRepo.manager.findOne('User', { where: { id: userId } });
+    const user = await this.leaveTypeRepo.manager.findOne('User', {
+      where: { id: userId },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     const leaveType = await this.leaveTypeRepo.findOne({
@@ -928,11 +1013,15 @@ export class LeaveService {
       where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
     });
 
-    if (!limit) throw new NotFoundException('Leave limit not found for this employee');
+    if (!limit)
+      throw new NotFoundException('Leave limit not found for this employee');
 
-    if (dto.maxDaysPerMonth !== undefined) limit.maxDaysPerMonth = dto.maxDaysPerMonth;
-    if (dto.maxDaysPerYear !== undefined) limit.maxDaysPerYear = dto.maxDaysPerYear;
-    if (dto.maxDaysPerRequest !== undefined) limit.maxDaysPerRequest = dto.maxDaysPerRequest;
+    if (dto.maxDaysPerMonth !== undefined)
+      limit.maxDaysPerMonth = dto.maxDaysPerMonth;
+    if (dto.maxDaysPerYear !== undefined)
+      limit.maxDaysPerYear = dto.maxDaysPerYear;
+    if (dto.maxDaysPerRequest !== undefined)
+      limit.maxDaysPerRequest = dto.maxDaysPerRequest;
     if (dto.isEnabled !== undefined) limit.isEnabled = dto.isEnabled;
 
     return this.employeeLeaveLimitRepo.save(limit);
@@ -943,7 +1032,8 @@ export class LeaveService {
       where: { user: { id: userId }, leaveType: { id: leaveTypeId } },
     });
 
-    if (!limit) throw new NotFoundException('Leave limit not found for this employee');
+    if (!limit)
+      throw new NotFoundException('Leave limit not found for this employee');
 
     await this.employeeLeaveLimitRepo.remove(limit);
   }
@@ -953,9 +1043,18 @@ export class LeaveService {
     leaveTypeId: string,
     requestedDays: number,
     startDate?: string,
-  ): Promise<{ allowed: boolean; reason?: string; paidDays?: number; unpaidDays?: number }> {
+  ): Promise<{
+    allowed: boolean;
+    reason?: string;
+    paidDays?: number;
+    unpaidDays?: number;
+  }> {
     const limit = await this.employeeLeaveLimitRepo.findOne({
-      where: { user: { id: userId }, leaveType: { id: leaveTypeId }, isEnabled: true },
+      where: {
+        user: { id: userId },
+        leaveType: { id: leaveTypeId },
+        isEnabled: true,
+      },
     });
 
     if (!limit) {
@@ -1030,7 +1129,10 @@ export class LeaveService {
 
       const usedPaidDaysThisMonth = Number(usageRow?.total || 0);
       const monthlyPaidLimit = Number(limit.maxDaysPerMonth || 0);
-      const remainingPaidDays = Math.max(0, monthlyPaidLimit - usedPaidDaysThisMonth);
+      const remainingPaidDays = Math.max(
+        0,
+        monthlyPaidLimit - usedPaidDaysThisMonth,
+      );
 
       paidDays = Math.min(requestedDays, remainingPaidDays);
       unpaidDays = Math.max(0, requestedDays - paidDays);

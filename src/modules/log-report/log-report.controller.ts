@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { LogReportService } from './log-report.service';
 import { CreateLogReportDto } from './dto/log-report.dto';

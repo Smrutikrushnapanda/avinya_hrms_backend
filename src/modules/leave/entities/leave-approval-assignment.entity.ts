@@ -1,6 +1,13 @@
-import { Organization } from "src/modules/auth-core/entities/organization.entity";
-import { User } from "src/modules/auth-core/entities/user.entity";
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
+import { Organization } from 'src/modules/auth-core/entities/organization.entity';
+import { User } from 'src/modules/auth-core/entities/user.entity';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 
 @Entity('leave_approval_assignments')
 @Unique(['user', 'level'])

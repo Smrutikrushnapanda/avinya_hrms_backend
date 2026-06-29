@@ -12,7 +12,9 @@ export class PollOption {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => PollQuestion, (question) => question.options, { onDelete: 'CASCADE' })
+  @ManyToOne(() => PollQuestion, (question) => question.options, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'question_id' })
   question: PollQuestion;
 

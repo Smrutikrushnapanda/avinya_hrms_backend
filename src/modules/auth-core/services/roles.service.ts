@@ -173,8 +173,12 @@ export class RolesService {
     });
   }
 
-  private async ensureDefaultRolesForOrganization(orgId: string): Promise<void> {
-    const defaultRoleNames = RolesService.DEFAULT_ORG_ROLES.map((role) => role.roleName);
+  private async ensureDefaultRolesForOrganization(
+    orgId: string,
+  ): Promise<void> {
+    const defaultRoleNames = RolesService.DEFAULT_ORG_ROLES.map(
+      (role) => role.roleName,
+    );
     const existingRoles = await this.roleRepo.find({
       where: { organizationId: orgId, roleName: In(defaultRoleNames) },
       select: ['roleName'],
@@ -201,7 +205,10 @@ export class RolesService {
     );
   }
 
-  async updateRole(id: string, dto: { roleName?: string; description?: string }): Promise<Role> {
+  async updateRole(
+    id: string,
+    dto: { roleName?: string; description?: string },
+  ): Promise<Role> {
     const role = await this.roleRepo.findOne({ where: { id } });
     if (!role) throw new NotFoundException('Role not found');
     if (dto.roleName !== undefined) role.roleName = dto.roleName;

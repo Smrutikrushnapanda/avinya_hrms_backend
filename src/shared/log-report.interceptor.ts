@@ -44,7 +44,9 @@ export class LogReportInterceptor implements NestInterceptor {
         userName,
         actionType: method,
         module: controllerName.toLowerCase(),
-        description: errorMessage ? `${method} ${path} failed` : `${method} ${path}`,
+        description: errorMessage
+          ? `${method} ${path} failed`
+          : `${method} ${path}`,
         metadata: {
           statusCode,
           path,

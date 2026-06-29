@@ -1,9 +1,24 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { WorkflowService } from './workflow.service';
 import { Workflow } from './entities/workflow.entity';
 import { WorkflowStep } from './entities/workflow-step.entity';
 import { WorkflowAssignment } from './entities/workflow-assignment.entity';
-import { ApiBadRequestResponse, ApiBody, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBody,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+} from '@nestjs/swagger';
 
 @Controller('workflows')
 export class WorkflowController {
@@ -37,12 +52,18 @@ export class WorkflowController {
 
   /** ---- Steps ---- */
   @Post(':workflowId/steps')
-  addStep(@Param('workflowId') workflowId: string, @Body() dto: Partial<WorkflowStep>) {
+  addStep(
+    @Param('workflowId') workflowId: string,
+    @Body() dto: Partial<WorkflowStep>,
+  ) {
     return this.workflowService.addStep(workflowId, dto);
   }
 
   @Put('steps/:stepId')
-  updateStep(@Param('stepId') stepId: string, @Body() dto: Partial<WorkflowStep>) {
+  updateStep(
+    @Param('stepId') stepId: string,
+    @Body() dto: Partial<WorkflowStep>,
+  ) {
     return this.workflowService.updateStep(stepId, dto);
   }
 
@@ -53,12 +74,18 @@ export class WorkflowController {
 
   /** ---- Assignments ---- */
   @Post('steps/:stepId/assignments')
-  addAssignment(@Param('stepId') stepId: string, @Body() dto: Partial<WorkflowAssignment>) {
+  addAssignment(
+    @Param('stepId') stepId: string,
+    @Body() dto: Partial<WorkflowAssignment>,
+  ) {
     return this.workflowService.addAssignment(stepId, dto);
   }
 
   @Put('assignments/:id')
-  updateAssignment(@Param('id') id: string, @Body() dto: Partial<WorkflowAssignment>) {
+  updateAssignment(
+    @Param('id') id: string,
+    @Body() dto: Partial<WorkflowAssignment>,
+  ) {
     return this.workflowService.updateAssignment(id, dto);
   }
 
@@ -67,28 +94,26 @@ export class WorkflowController {
     return this.workflowService.deleteAssignment(id);
   }
 
-//New
-@Put('steps/:stepId/approver')
-@ApiOperation({ 
-  summary: 'Update approver for workflow step',
-  description: 'Replace the current approver with a new one'
-})
-@ApiParam({ name: 'stepId', description: 'Workflow Step ID (UUID)' })
-@ApiBody({
-  schema: {
-    type: 'object',
-    properties: {
-      approverId: { type: 'string', format: 'uuid' }
+  //New
+  @Put('steps/:stepId/approver')
+  @ApiOperation({
+    summary: 'Update approver for workflow step',
+    description: 'Replace the current approver with a new one',
+  })
+  @ApiParam({ name: 'stepId', description: 'Workflow Step ID (UUID)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        approverId: { type: 'string', format: 'uuid' },
+      },
+      required: ['approverId'],
     },
-    required: ['approverId']
+  })
+  async updateStepApprover(
+    @Param('stepId') stepId: string,
+    @Body() body: { approverId: string },
+  ) {
+    return this.workflowService.updateStepApprover(stepId, body.approverId);
   }
-})
-async updateStepApprover(
-  @Param('stepId') stepId: string,
-  @Body() body: { approverId: string }
-) {
-  return this.workflowService.updateStepApprover(stepId, body.approverId);
-}
-
-
 }

@@ -1,5 +1,22 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards, ForbiddenException, Patch } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+  ForbiddenException,
+  Patch,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -37,22 +54,37 @@ export class ProjectsController {
   }
 
   private isAdminOrManager(user: JwtPayload) {
-    return this.hasAnyRole(user, ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN', 'MANAGER']);
+    return this.hasAnyRole(user, [
+      'ADMIN',
+      'SUPER_ADMIN',
+      'ORG_ADMIN',
+      'MANAGER',
+    ]);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create project' })
   @UseGuards(JwtAuthGuard)
   create(@GetUser() user: JwtPayload, @Body() dto: CreateProjectDto) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
-    return this.projectsService.create({ ...dto, organizationId: user.organizationId });
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
+    return this.projectsService.create({
+      ...dto,
+      organizationId: user.organizationId,
+    });
   }
 
   @Get('my')
-  @ApiOperation({ summary: 'Get client projects relevant to current user (managed + assigned)' })
+  @ApiOperation({
+    summary:
+      'Get client projects relevant to current user (managed + assigned)',
+  })
   @UseGuards(JwtAuthGuard)
   findMyProjects(@GetUser() user: JwtPayload) {
-    return this.projectsService.findManagedByUserId(user.userId, user.organizationId);
+    return this.projectsService.findManagedByUserId(
+      user.userId,
+      user.organizationId,
+    );
   }
 
   @Get()
@@ -72,10 +104,7 @@ export class ProjectsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a client project by id' })
   @UseGuards(JwtAuthGuard)
-  findOne(
-    @GetUser() user: JwtPayload,
-    @Param('id') id: string,
-  ) {
+  findOne(@GetUser() user: JwtPayload, @Param('id') id: string) {
     return this.projectsService.findOneForUser(
       id,
       user.userId,
@@ -87,27 +116,40 @@ export class ProjectsController {
   @Put(':id')
   @ApiOperation({ summary: 'Update project' })
   @UseGuards(JwtAuthGuard)
-  update(@GetUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateProjectDto) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+  update(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateProjectDto,
+  ) {
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.projectsService.update(id, dto);
   }
 
   @Put(':id/completion')
-  @ApiOperation({ summary: 'Update project completion percent (for assigned manager)' })
+  @ApiOperation({
+    summary: 'Update project completion percent (for assigned manager)',
+  })
   @UseGuards(JwtAuthGuard)
   updateCompletion(
     @GetUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() body: { completionPercent: number },
   ) {
-    return this.projectsService.updateCompletionByManager(id, user.userId, user.organizationId, body.completionPercent);
+    return this.projectsService.updateCompletionByManager(
+      id,
+      user.userId,
+      user.organizationId,
+      body.completionPercent,
+    );
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete project' })
   @UseGuards(JwtAuthGuard)
   remove(@GetUser() user: JwtPayload, @Param('id') id: string) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.projectsService.remove(id);
   }
 
@@ -136,7 +178,7 @@ export class ProjectsController {
     const assignments =
       body?.assignments && Array.isArray(body.assignments)
         ? body.assignments
-        : body?.userIds ?? [];
+        : (body?.userIds ?? []);
     return this.projectsService.assignEmployees(
       id,
       assignments,
@@ -149,10 +191,7 @@ export class ProjectsController {
   @Delete(':id/employees/:userId')
   @ApiOperation({ summary: 'Remove an employee from a client project' })
   @UseGuards(JwtAuthGuard)
-  removeEmployee(
-    @Param('id') id: string,
-    @Param('userId') userId: string,
-  ) {
+  removeEmployee(@Param('id') id: string, @Param('userId') userId: string) {
     return this.projectsService.removeEmployee(id, userId);
   }
 
@@ -229,7 +268,8 @@ export class ProjectsController {
   createTask(
     @GetUser() user: JwtPayload,
     @Param('id') projectId: string,
-    @Body() body: {
+    @Body()
+    body: {
       title: string;
       description?: string;
       assignedToUserId?: string;
@@ -281,7 +321,9 @@ export class ProjectsController {
   }
 
   @Patch(':id/test-sheet/columns')
-  @ApiOperation({ summary: 'Update test sheet column headers for a client project' })
+  @ApiOperation({
+    summary: 'Update test sheet column headers for a client project',
+  })
   @UseGuards(JwtAuthGuard)
   updateTestSheetColumns(
     @GetUser() user: JwtPayload,
@@ -317,7 +359,9 @@ export class ProjectsController {
   }
 
   @Post(':id/test-sheet/tabs/:tabId/cases')
-  @ApiOperation({ summary: 'Create test case row for a client project test sheet' })
+  @ApiOperation({
+    summary: 'Create test case row for a client project test sheet',
+  })
   @UseGuards(JwtAuthGuard)
   createTestCase(
     @GetUser() user: JwtPayload,
@@ -336,7 +380,9 @@ export class ProjectsController {
   }
 
   @Patch(':id/test-sheet/cases/:caseId')
-  @ApiOperation({ summary: 'Update test case row for a client project test sheet' })
+  @ApiOperation({
+    summary: 'Update test case row for a client project test sheet',
+  })
   @UseGuards(JwtAuthGuard)
   updateTestCase(
     @GetUser() user: JwtPayload,
@@ -355,7 +401,9 @@ export class ProjectsController {
   }
 
   @Delete(':id/test-sheet/cases/:caseId')
-  @ApiOperation({ summary: 'Delete test case row for a client project test sheet' })
+  @ApiOperation({
+    summary: 'Delete test case row for a client project test sheet',
+  })
   @UseGuards(JwtAuthGuard)
   deleteTestCase(
     @GetUser() user: JwtPayload,
@@ -375,7 +423,10 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Get tasks assigned to current user' })
   @UseGuards(JwtAuthGuard)
   getMyTasks(@GetUser() user: JwtPayload) {
-    return this.projectsService.getMyAssignedTasks(user.userId, user.organizationId);
+    return this.projectsService.getMyAssignedTasks(
+      user.userId,
+      user.organizationId,
+    );
   }
 
   @Put(':id/tasks/:taskId/status')
@@ -387,7 +438,11 @@ export class ProjectsController {
     @Param('taskId') taskId: string,
     @Body() body: { status: TaskStatus },
   ) {
-    return this.projectsService.updateTaskStatus(taskId, user.userId, body.status);
+    return this.projectsService.updateTaskStatus(
+      taskId,
+      user.userId,
+      body.status,
+    );
   }
 
   @Delete(':id/tasks/:taskId')
@@ -398,7 +453,11 @@ export class ProjectsController {
     @Param('id') projectId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.projectsService.deleteTask(taskId, user.userId, user.organizationId);
+    return this.projectsService.deleteTask(
+      taskId,
+      user.userId,
+      user.organizationId,
+    );
   }
 
   // ─── Timesheets Summary ───────────────────────────────────────────────────

@@ -8,7 +8,13 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { UploadService, UploadResponseDto } from './upload.service';
 
 /**
@@ -59,7 +65,10 @@ export class UploadController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid file type or file too large' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid file type or file too large',
+  })
   @ApiResponse({ status: 500, description: 'Upload failed' })
   @UseInterceptors(
     FileInterceptor('file', {
@@ -85,7 +94,9 @@ export class UploadController {
       },
     }),
   )
-  async uploadImage(@UploadedFile() file: Express.Multer.File): Promise<UploadResponseDto> {
+  async uploadImage(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<UploadResponseDto> {
     this.logger.log(`Received upload request for file: ${file?.originalname}`);
 
     if (!file) {
@@ -95,4 +106,3 @@ export class UploadController {
     return await this.uploadService.uploadImage(file);
   }
 }
-

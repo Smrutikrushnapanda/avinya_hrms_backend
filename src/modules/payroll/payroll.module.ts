@@ -10,7 +10,15 @@ import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PayrollRecord, PayrollSettings, PayrollNotification, Employee, Organization])],
+  imports: [
+    TypeOrmModule.forFeature([
+      PayrollRecord,
+      PayrollSettings,
+      PayrollNotification,
+      Employee,
+      Organization,
+    ]),
+  ],
   controllers: [PayrollController],
   providers: [PayrollService, MailService],
 })

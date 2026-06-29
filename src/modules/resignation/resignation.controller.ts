@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ResignationService } from './resignation.service';
 import {
   CreateResignationRequestDto,
@@ -13,7 +22,10 @@ export class ResignationController {
   constructor(private readonly resignationService: ResignationService) {}
 
   @Post('request')
-  createRequest(@GetUser() user: any, @Body() dto: CreateResignationRequestDto) {
+  createRequest(
+    @GetUser() user: any,
+    @Body() dto: CreateResignationRequestDto,
+  ) {
     return this.resignationService.createRequest(user, dto);
   }
 
@@ -36,4 +48,3 @@ export class ResignationController {
     return this.resignationService.reviewRequest(id, user, dto);
   }
 }
-

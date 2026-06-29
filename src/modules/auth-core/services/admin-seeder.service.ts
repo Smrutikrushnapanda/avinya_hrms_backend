@@ -133,6 +133,8 @@ export class AdminSeederService implements OnModuleInit {
       }),
     );
     this.logger.log('Admin role assigned. Seed complete!');
-    this.logger.log('Default admin credentials -> userName: "avinya_hrms", password: "password"');
+    this.logger.log(
+      'Default admin credentials -> userName: "avinya_hrms", password: "password"',
+    );
   }
 }

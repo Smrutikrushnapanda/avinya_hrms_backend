@@ -14,7 +14,9 @@ export class PricingPlanSeederService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await this.pricingPlanRepository.upsert(DEFAULT_PRICING_PLANS, ['planType']);
+    await this.pricingPlanRepository.upsert(DEFAULT_PRICING_PLANS, [
+      'planType',
+    ]);
     this.logger.log('Pricing plans ensured: Basic, Pro Launch, Enterprise.');
   }
 }

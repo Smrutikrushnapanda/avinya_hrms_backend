@@ -33,4 +33,3 @@ export const configureCloudinary = (configService: ConfigService) => {
  * Get the configured Cloudinary instance
  */
 export const getCloudinary = () => cloudinary;
-

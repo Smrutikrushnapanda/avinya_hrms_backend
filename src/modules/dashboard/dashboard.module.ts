@@ -5,8 +5,8 @@ import { AuthCoreModule } from '../auth-core/auth-core.module';
 
 @Module({
   imports: [
-    EmployeeModule,    // Import to use EmployeeService, DepartmentService, DesignationService
-    AuthCoreModule,    // For authentication guards and decorators
+    EmployeeModule, // Import to use EmployeeService, DepartmentService, DesignationService
+    AuthCoreModule, // For authentication guards and decorators
   ],
   controllers: [DashboardController],
 })

@@ -44,13 +44,15 @@ export class ProjectController {
 
   @Post()
   create(@GetUser() user: JwtPayload, @Body() dto: CreateProjectDto) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.create(user.organizationId, user.userId, dto);
   }
 
   @Get()
   findAll(@GetUser() user: JwtPayload) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.findAll(user.organizationId);
   }
 
@@ -113,13 +115,15 @@ export class ProjectController {
     @Param('id') id: string,
     @Body() dto: UpdateProjectDto,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   remove(@GetUser() user: JwtPayload, @Param('id') id: string) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.remove(id);
   }
 
@@ -129,7 +133,8 @@ export class ProjectController {
     @Param('id') id: string,
     @Body() body: { userIds: string[] },
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.assignMembers(id, body.userIds);
   }
 
@@ -139,7 +144,8 @@ export class ProjectController {
     @Param('id') id: string,
     @Param('userId') userId: string,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.removeMember(id, userId);
   }
 
@@ -168,7 +174,7 @@ export class ProjectController {
     const assignments =
       body?.assignments && Array.isArray(body.assignments)
         ? body.assignments
-        : body?.userIds ?? [];
+        : (body?.userIds ?? []);
     return this.service.assignEmployees(
       id,
       assignments,
@@ -200,8 +206,14 @@ export class ProjectController {
     @Param('userId') userId: string,
     @Body() dto: UpdateProjectMemberRoleDto,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
-    return this.service.updateMemberRole(id, userId, dto.role, user.organizationId);
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
+    return this.service.updateMemberRole(
+      id,
+      userId,
+      dto.role,
+      user.organizationId,
+    );
   }
 
   @Get(':id/issues')
@@ -262,7 +274,8 @@ export class ProjectController {
     @Param('id') id: string,
     @Body() dto: CreateProjectDocumentDto,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.createDocument(
       id,
       dto,
@@ -279,7 +292,8 @@ export class ProjectController {
     @Param('documentId') documentId: string,
     @Body() dto: UpdateProjectDocumentDto,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.updateDocument(
       id,
       documentId,
@@ -296,7 +310,8 @@ export class ProjectController {
     @Param('id') id: string,
     @Param('documentId') documentId: string,
   ) {
-    if (!this.isAdminOrManager(user)) throw new ForbiddenException('Access denied');
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     return this.service.deleteDocument(
       id,
       documentId,
@@ -411,5 +426,4 @@ export class ProjectController {
       this.isAdminOrManager(user),
     );
   }
-
 }

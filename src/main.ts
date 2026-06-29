@@ -9,7 +9,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as bodyParser from 'body-parser';
 import * as dotenv from 'dotenv';
 
-
 dotenv.config();
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -57,10 +56,14 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   // Start server
-await app.listen(process.env.PORT || 8080, '0.0.0.0');
+  await app.listen(process.env.PORT || 8080, '0.0.0.0');
 
-  console.log(`Server running on: http://localhost:${process.env.PORT || 8080}`);
-  console.log(`Swagger docs: http://localhost:${process.env.PORT || 8080}/docs`);
+  console.log(
+    `Server running on: http://localhost:${process.env.PORT || 8080}`,
+  );
+  console.log(
+    `Swagger docs: http://localhost:${process.env.PORT || 8080}/docs`,
+  );
 }
 
 bootstrap();

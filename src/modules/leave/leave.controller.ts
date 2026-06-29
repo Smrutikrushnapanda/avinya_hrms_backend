@@ -18,8 +18,17 @@ import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
 import { CreateLeaveAssignmentDto } from './dto/create-leave-assignment.dto';
 import { InitializeBalanceDto } from './dto/initialize-balance.dto';
 import { SetLeaveBalanceTemplatesDto } from './dto/set-leave-balance-templates.dto';
-import { SetEmployeeLeaveLimitDto, UpdateEmployeeLeaveLimitDto } from './dto/set-employee-leave-limit.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import {
+  SetEmployeeLeaveLimitDto,
+  UpdateEmployeeLeaveLimitDto,
+} from './dto/set-employee-leave-limit.dto';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+} from '@nestjs/swagger';
 @Controller('leave')
 export class LeaveController {
   constructor(private readonly leaveService: LeaveService) {}
@@ -45,7 +54,10 @@ export class LeaveController {
   @Put('types/:id')
   @ApiOperation({ summary: 'Update a leave type' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
-  async updateLeaveType(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateLeaveTypeDto) {
+  async updateLeaveType(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateLeaveTypeDto,
+  ) {
     return this.leaveService.updateLeaveType(id, dto);
   }
 
@@ -76,13 +88,19 @@ export class LeaveController {
   }
 
   @Post('credit-earned/:userId')
-  @ApiOperation({ summary: 'Credit earned leave when employee works on weekend/holiday' })
+  @ApiOperation({
+    summary: 'Credit earned leave when employee works on weekend/holiday',
+  })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
   async creditEarnedLeave(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() body: { days: number; organizationId: string },
   ) {
-    return this.leaveService.creditEarnedLeave(userId, body.days, body.organizationId);
+    return this.leaveService.creditEarnedLeave(
+      userId,
+      body.days,
+      body.organizationId,
+    );
   }
 
   // ─── Leave Balance Templates ───
@@ -146,14 +164,18 @@ export class LeaveController {
   @Get('pending/:approverId')
   @ApiOperation({ summary: 'Get pending approvals for an approver' })
   @ApiParam({ name: 'approverId', type: 'string', format: 'uuid' })
-  async getPendingApprovals(@Param('approverId', ParseUUIDPipe) approverId: string) {
+  async getPendingApprovals(
+    @Param('approverId', ParseUUIDPipe) approverId: string,
+  ) {
     return this.leaveService.getPendingApprovalsForUser(approverId);
   }
 
   @Get('my-approvals/:approverId')
   @ApiOperation({ summary: 'Get all approvals for an approver' })
   @ApiParam({ name: 'approverId', type: 'string', format: 'uuid' })
-  async getAllApprovals(@Param('approverId', ParseUUIDPipe) approverId: string) {
+  async getAllApprovals(
+    @Param('approverId', ParseUUIDPipe) approverId: string,
+  ) {
     return this.leaveService.getAllApprovalsForUser(approverId);
   }
 
@@ -169,7 +191,9 @@ export class LeaveController {
   }
 
   @Delete('requests/:requestId/:userId')
-  @ApiOperation({ summary: 'Delete a pending leave request before leave start date' })
+  @ApiOperation({
+    summary: 'Delete a pending leave request before leave start date',
+  })
   @ApiParam({ name: 'requestId', type: 'string', format: 'uuid' })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
   async deleteLeaveRequest(
@@ -204,7 +228,9 @@ export class LeaveController {
   }
 
   @Get('approval-assignments/org/:orgId')
-  @ApiOperation({ summary: 'Get leave approval assignments for an organization' })
+  @ApiOperation({
+    summary: 'Get leave approval assignments for an organization',
+  })
   @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
   async getAssignmentsByOrg(@Param('orgId', ParseUUIDPipe) orgId: string) {
     return this.leaveService.getApprovalAssignmentsByOrg(orgId);

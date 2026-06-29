@@ -13,7 +13,7 @@ export class UserActivity {
   @PrimaryGeneratedColumn('uuid', { name: 'activity_id' })
   id: string;
 
-  @Column({ name: 'user_id', type: 'uuid'})
+  @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
@@ -35,10 +35,20 @@ export class UserActivity {
   @Column({ name: 'module', type: 'varchar', length: 100, nullable: true })
   module?: string;
 
-  @Column({ name: 'action_taken', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'action_taken',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   actionTaken?: string;
 
-  @Column({ name: 'performed_by', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'performed_by',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   performedBy?: string;
 
   @Column({ name: 'is_success', type: 'boolean', default: true })

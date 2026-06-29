@@ -1,5 +1,14 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID, IsNumber, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsNumber,
+  ValidateNested,
+} from 'class-validator';
 import { PayrollStatus } from '../entities/payroll-record.entity';
 
 export class CreatePayrollRecordDto {

@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { posix as pathPosix } from 'path';
@@ -19,7 +23,9 @@ export class Common {
     isPublic = true,
   ): Promise<string> {
     if (!isPublic) {
-      this.logger.warn('Private uploads are not supported in Common service with Cloudinary; uploading as public');
+      this.logger.warn(
+        'Private uploads are not supported in Common service with Cloudinary; uploading as public',
+      );
     }
 
     const normalizedDestination = destination
@@ -62,7 +68,8 @@ export class Common {
 
       return result.secure_url;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown upload error';
+      const message =
+        error instanceof Error ? error.message : 'Unknown upload error';
       this.logger.error(`Cloudinary upload failed: ${message}`);
       throw new InternalServerErrorException('File upload failed');
     }
@@ -74,7 +81,9 @@ export class Common {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
 
     if (!cloudName || !apiKey || !apiSecret) {
-      this.logger.error('Cloudinary credentials are missing in environment variables');
+      this.logger.error(
+        'Cloudinary credentials are missing in environment variables',
+      );
       throw new Error(
         'Cloudinary credentials are missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
       );

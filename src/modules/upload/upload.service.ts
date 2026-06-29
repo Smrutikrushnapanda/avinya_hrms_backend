@@ -5,7 +5,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { UploadApiResponse, UploadApiErrorResponse, v2 as cloudinary } from 'cloudinary';
+import {
+  UploadApiResponse,
+  UploadApiErrorResponse,
+  v2 as cloudinary,
+} from 'cloudinary';
 
 /**
  * Allowed MIME types for image uploads
@@ -52,7 +56,9 @@ export class UploadService {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
 
     if (!cloudName || !apiKey || !apiSecret) {
-      this.logger.error('Cloudinary credentials are missing in environment variables');
+      this.logger.error(
+        'Cloudinary credentials are missing in environment variables',
+      );
       throw new Error(
         'Cloudinary credentials are missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
       );
@@ -103,12 +109,12 @@ export class UploadService {
         {
           folder: CLOUDINARY_FOLDER,
           resource_type: 'image',
-          transformation: [
-            { quality: 'auto:best' },
-            { fetch_format: 'auto' },
-          ],
+          transformation: [{ quality: 'auto:best' }, { fetch_format: 'auto' }],
         },
-        (err: UploadApiErrorResponse | undefined, result: UploadApiResponse | undefined) => {
+        (
+          err: UploadApiErrorResponse | undefined,
+          result: UploadApiResponse | undefined,
+        ) => {
           if (err) {
             this.logger.error(`Cloudinary upload failed: ${err.message}`);
             reject(
@@ -122,7 +128,9 @@ export class UploadService {
           if (!result) {
             this.logger.error('Cloudinary upload returned no result');
             reject(
-              new InternalServerErrorException('Failed to upload image: No result returned'),
+              new InternalServerErrorException(
+                'Failed to upload image: No result returned',
+              ),
             );
             return;
           }
@@ -151,10 +159,10 @@ export class UploadService {
       this.logger.log(`Image deleted: ${publicId}, result: ${result.result}`);
       return result.result === 'ok';
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to delete image: ${errorMessage}`);
       throw new InternalServerErrorException('Failed to delete image');
     }
   }
 }
-

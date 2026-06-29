@@ -216,7 +216,7 @@ export class UsersService {
 
       // Delete all user roles
       await this.userRoleRepository.delete({ user: { id: userId } });
-      
+
       // Delete all user activities
       await this.userActivitiesService.remove(userId);
 

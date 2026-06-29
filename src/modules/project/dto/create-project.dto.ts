@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsIn, IsInt, Min, Max, IsArray, IsUUID, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsIn,
+  IsInt,
+  Min,
+  Max,
+  IsArray,
+  IsUUID,
+  IsNumber,
+} from 'class-validator';
 import { ProjectPriority, ProjectStatus } from '../entities/project.entity';
 
 export class CreateProjectDto {

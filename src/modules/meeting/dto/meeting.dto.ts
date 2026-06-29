@@ -1,4 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsNumber, IsArray, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateMeetingDto {
   @IsString()
@@ -28,7 +36,6 @@ export class CreateMeetingDto {
   @IsUUID()
   @IsNotEmpty()
   createdById: string;
-
 }
 
 export class UpdateMeetingDto {
@@ -56,7 +63,6 @@ export class UpdateMeetingDto {
   @IsString()
   @IsOptional()
   status?: string;
-
 }
 
 export class SendMeetingNotificationDto {
@@ -64,4 +70,3 @@ export class SendMeetingNotificationDto {
   @IsNotEmpty()
   meetingId: string;
 }
-

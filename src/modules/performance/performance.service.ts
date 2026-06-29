@@ -83,7 +83,10 @@ export class PerformanceService {
 
   // ─── Manager check ────────────────────────────────────────────────────────
 
-  async checkIsManager(userId: string, orgId: string): Promise<{ isManager: boolean }> {
+  async checkIsManager(
+    userId: string,
+    orgId: string,
+  ): Promise<{ isManager: boolean }> {
     const emp = await this.employeeRepo.findOne({
       where: { userId, organizationId: orgId },
       select: ['id'],
@@ -177,11 +180,13 @@ export class PerformanceService {
       whereClause.branchId = hrEmp.branchId;
     }
 
-    const employees = (await this.employeeRepo.find({
-      where: whereClause,
-      select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
-      order: { firstName: 'ASC' },
-    })).filter((emp) => emp.userId !== reviewerUserId);
+    const employees = (
+      await this.employeeRepo.find({
+        where: whereClause,
+        select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
+        order: { firstName: 'ASC' },
+      })
+    ).filter((emp) => emp.userId !== reviewerUserId);
 
     return Promise.all(
       employees.map(async (emp) => {
@@ -231,7 +236,11 @@ export class PerformanceService {
   async submitSelfReview(userId: string, dto: SubmitReviewDto) {
     if (dto.period) {
       const existing = await this.reviewRepo.findOne({
-        where: { employee: { id: userId }, reviewType: 'SELF', period: dto.period },
+        where: {
+          employee: { id: userId },
+          reviewType: 'SELF',
+          period: dto.period,
+        },
       });
       if (existing) {
         existing.answers = dto.answers ?? existing.answers;
@@ -253,7 +262,8 @@ export class PerformanceService {
   }
 
   async submitManagerReview(reviewerUserId: string, dto: SubmitReviewDto) {
-    if (!dto.employeeId) throw new NotFoundException('employeeId required for manager review');
+    if (!dto.employeeId)
+      throw new NotFoundException('employeeId required for manager review');
     const existing = await this.reviewRepo.findOne({
       where: {
         employee: { id: dto.employeeId },
@@ -281,7 +291,8 @@ export class PerformanceService {
   }
 
   async submitHrReview(reviewerUserId: string, dto: SubmitReviewDto) {
-    if (!dto.employeeId) throw new NotFoundException('employeeId required for HR review');
+    if (!dto.employeeId)
+      throw new NotFoundException('employeeId required for HR review');
     const existing = await this.reviewRepo.findOne({
       where: {
         employee: { id: dto.employeeId },
@@ -357,12 +368,17 @@ export class PerformanceService {
         ]);
 
         const ratings: number[] = [];
-        if (selfReview?.overallRating != null) ratings.push(selfReview.overallRating);
-        if (managerReview?.overallRating != null) ratings.push(managerReview.overallRating);
-        if (hrReview?.overallRating != null) ratings.push(hrReview.overallRating);
+        if (selfReview?.overallRating != null)
+          ratings.push(selfReview.overallRating);
+        if (managerReview?.overallRating != null)
+          ratings.push(managerReview.overallRating);
+        if (hrReview?.overallRating != null)
+          ratings.push(hrReview.overallRating);
         const overallRating =
           ratings.length > 0
-            ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
+            ? Math.round(
+                (ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10,
+              ) / 10
             : null;
 
         return {

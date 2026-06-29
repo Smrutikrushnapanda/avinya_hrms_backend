@@ -9,8 +9,13 @@ export class MailService {
   private readonly isConfigured: boolean;
 
   constructor(private readonly configService: ConfigService) {
-    const host = this.configService.get<string>('BREVO_SMTP_HOST', 'smtp-relay.brevo.com');
-    const port = Number(this.configService.get<number | string>('BREVO_SMTP_PORT', 587));
+    const host = this.configService.get<string>(
+      'BREVO_SMTP_HOST',
+      'smtp-relay.brevo.com',
+    );
+    const port = Number(
+      this.configService.get<number | string>('BREVO_SMTP_PORT', 587),
+    );
     const user = this.configService.get<string>('BREVO_SMTP_USER');
     const pass = this.configService.get<string>('BREVO_SMTP_PASSWORD');
     this.isConfigured = Boolean(host && port && user && pass);
@@ -20,7 +25,8 @@ export class MailService {
       secure: port === 465,
       auth: user && pass ? { user, pass } : undefined,
     });
-    if (!this.isConfigured) this.logger.warn('Brevo SMTP not configured. Email sending disabled.');
+    if (!this.isConfigured)
+      this.logger.warn('Brevo SMTP not configured. Email sending disabled.');
   }
 
   async sendPayslipEmail(params: {
@@ -36,8 +42,14 @@ export class MailService {
       return false;
     }
 
-    const fromName = this.configService.get<string>('MAIL_FROM_NAME', 'HRMS Notifications');
-    const fromEmail = this.configService.get<string>('MAIL_FROM_EMAIL') || this.configService.get<string>('BREVO_SMTP_USER') || 'noreply@yourdomain.com';
+    const fromName = this.configService.get<string>(
+      'MAIL_FROM_NAME',
+      'HRMS Notifications',
+    );
+    const fromEmail =
+      this.configService.get<string>('MAIL_FROM_EMAIL') ||
+      this.configService.get<string>('BREVO_SMTP_USER') ||
+      'noreply@yourdomain.com';
 
     const msg: nodemailer.SendMailOptions = {
       to: params.to,

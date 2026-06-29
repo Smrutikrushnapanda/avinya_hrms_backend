@@ -72,22 +72,26 @@ export class AuthService {
         return false;
       }
 
-      const [timeslipApproval, hasDirectReports, leaveApprovalAssignment, wfhApprovalAssignment] =
-        await Promise.all([
-          this.timeslipApprovalRepository.findOne({
-            where: { approver_id: employee.id },
-          }),
-          this.employeeRepository.findOne({
-            where: { reportingTo: employee.id },
-            select: ['id'],
-          }),
-          this.leaveApprovalAssignmentRepository.findOne({
-            where: { approver: { id: userId }, isActive: true },
-          }),
-          this.wfhApprovalAssignmentRepository.findOne({
-            where: { approver: { id: userId }, isActive: true },
-          }),
-        ]);
+      const [
+        timeslipApproval,
+        hasDirectReports,
+        leaveApprovalAssignment,
+        wfhApprovalAssignment,
+      ] = await Promise.all([
+        this.timeslipApprovalRepository.findOne({
+          where: { approver_id: employee.id },
+        }),
+        this.employeeRepository.findOne({
+          where: { reportingTo: employee.id },
+          select: ['id'],
+        }),
+        this.leaveApprovalAssignmentRepository.findOne({
+          where: { approver: { id: userId }, isActive: true },
+        }),
+        this.wfhApprovalAssignmentRepository.findOne({
+          where: { approver: { id: userId }, isActive: true },
+        }),
+      ]);
 
       return Boolean(
         timeslipApproval ||
@@ -179,7 +183,8 @@ export class AuthService {
     });
 
     if (latestEmployee?.organizationId) {
-      const previousOrganizationId = user.organizationId ?? user.organization?.id;
+      const previousOrganizationId =
+        user.organizationId ?? user.organization?.id;
       user.organizationId = latestEmployee.organizationId;
       user.organization = { id: latestEmployee.organizationId } as any;
 

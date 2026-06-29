@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddHomeHeaderConfigToOrganizations1741680000000 implements MigrationInterface {
+export class AddHomeHeaderConfigToOrganizations1741680000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS organization_mobile_header_settings (
@@ -106,7 +108,11 @@ export class AddHomeHeaderConfigToOrganizations1741680000000 implements Migratio
       WHERE s.organization_id = o.organization_id
     `);
 
-    await queryRunner.query(`DROP TABLE IF EXISTS organization_resignation_settings`);
-    await queryRunner.query(`DROP TABLE IF EXISTS organization_mobile_header_settings`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS organization_resignation_settings`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS organization_mobile_header_settings`,
+    );
   }
 }

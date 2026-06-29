@@ -1,9 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ClientProject } from './entities/project.entity';
 import { ClientProjectMember } from './entities/client-project-member.entity';
-import { ProjectTask, TaskStatus, TaskPriority } from './entities/project-task.entity';
+import {
+  ProjectTask,
+  TaskStatus,
+  TaskPriority,
+} from './entities/project-task.entity';
 import { ClientProjectDocument } from './entities/client-project-document.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -12,8 +22,14 @@ import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Timesheet } from 'src/modules/workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
 import { LogReportService } from '../log-report/log-report.service';
-import { ProjectTestSheetTab, ProjectTestSheetSource } from '../project/entities/project-test-sheet-tab.entity';
-import { ProjectTestSheetCase, ProjectTestCaseStatus } from '../project/entities/project-test-sheet-case.entity';
+import {
+  ProjectTestSheetTab,
+  ProjectTestSheetSource,
+} from '../project/entities/project-test-sheet-tab.entity';
+import {
+  ProjectTestSheetCase,
+  ProjectTestCaseStatus,
+} from '../project/entities/project-test-sheet-case.entity';
 import { ProjectTestSheetChangeLog } from '../project/entities/project-test-sheet-log.entity';
 import { CreateProjectTestSheetTabDto } from '../project/dto/create-project-test-sheet-tab.dto';
 import { UpdateProjectTestSheetTabDto } from '../project/dto/update-project-test-sheet-tab.dto';
@@ -103,7 +119,9 @@ export class ProjectsService implements OnModuleInit {
   }
 
   private sanitizeProjectMemberRole(role?: string): string {
-    const normalized = String(role ?? 'member').trim().toLowerCase();
+    const normalized = String(role ?? 'member')
+      .trim()
+      .toLowerCase();
     if (!normalized) return 'member';
     if (normalized.length > 30) return normalized.slice(0, 30);
     return normalized;
@@ -115,7 +133,9 @@ export class ProjectsService implements OnModuleInit {
         .toString(36)
         .slice(2, 6)
         .toUpperCase()}`;
-      const exists = await this.projectRepo.findOne({ where: { projectCode: code } });
+      const exists = await this.projectRepo.findOne({
+        where: { projectCode: code },
+      });
       if (!exists) return code;
     }
     return `PRJ-${Date.now().toString(36).toUpperCase()}`;
@@ -124,14 +144,19 @@ export class ProjectsService implements OnModuleInit {
   create(dto: CreateProjectDto) {
     const saveProject = async () => {
       if (dto.managerId) {
-        const mgr = await this.employeeRepo.findOne({ where: { id: dto.managerId } });
+        const mgr = await this.employeeRepo.findOne({
+          where: { id: dto.managerId },
+        });
         if (!mgr) throw new BadRequestException('Manager not found');
         if (mgr.organizationId !== dto.organizationId) {
-          throw new BadRequestException('Manager must belong to the same organization');
+          throw new BadRequestException(
+            'Manager must belong to the same organization',
+          );
         }
       }
 
-      const projectCode = dto.projectCode?.trim() || (await this.generateProjectCode());
+      const projectCode =
+        dto.projectCode?.trim() || (await this.generateProjectCode());
       const project = this.projectRepo.create({
         ...dto,
         projectCode,
@@ -149,7 +174,13 @@ export class ProjectsService implements OnModuleInit {
         organizationId,
         ...(clientId ? { clientId } : {}),
       },
-      relations: ['client', 'manager', 'manager.user', 'members', 'members.user'],
+      relations: [
+        'client',
+        'manager',
+        'manager.user',
+        'members',
+        'members.user',
+      ],
       order: { projectName: 'ASC' },
     });
   }
@@ -162,19 +193,31 @@ export class ProjectsService implements OnModuleInit {
   ) {
     const project = await this.projectRepo.findOne({
       where: { id },
-      relations: ['client', 'manager', 'manager.user', 'members', 'members.user'],
+      relations: [
+        'client',
+        'manager',
+        'manager.user',
+        'members',
+        'members.user',
+      ],
     });
     if (!project) throw new NotFoundException('Project not found');
     if (project.organizationId !== organizationId) {
-      throw new ForbiddenException('Project does not belong to your organization');
+      throw new ForbiddenException(
+        'Project does not belong to your organization',
+      );
     }
 
     if (isAdminOrManager) {
       return project;
     }
 
-    const isManager = Boolean(project.manager?.userId && project.manager.userId === userId);
-    const isMember = (project.members ?? []).some((member) => member.userId === userId);
+    const isManager = Boolean(
+      project.manager?.userId && project.manager.userId === userId,
+    );
+    const isMember = (project.members ?? []).some(
+      (member) => member.userId === userId,
+    );
 
     if (!isManager && !isMember) {
       throw new ForbiddenException('You are not assigned to this project');
@@ -188,11 +231,15 @@ export class ProjectsService implements OnModuleInit {
     if (!project) throw new NotFoundException('Project not found');
 
     if (dto.managerId) {
-        const mgr = await this.employeeRepo.findOne({ where: { id: dto.managerId } });
-        if (!mgr) throw new BadRequestException('Manager not found');
-        if (mgr.organizationId !== project.organizationId) {
-          throw new BadRequestException('Manager must belong to the same organization');
-        }
+      const mgr = await this.employeeRepo.findOne({
+        where: { id: dto.managerId },
+      });
+      if (!mgr) throw new BadRequestException('Manager not found');
+      if (mgr.organizationId !== project.organizationId) {
+        throw new BadRequestException(
+          'Manager must belong to the same organization',
+        );
+      }
     }
     Object.assign(project, dto);
     return this.projectRepo.save(project);
@@ -204,7 +251,12 @@ export class ProjectsService implements OnModuleInit {
     return this.projectRepo.remove(project);
   }
 
-  async updateCompletionByManager(id: string, userId: string, organizationId: string, completionPercent: number) {
+  async updateCompletionByManager(
+    id: string,
+    userId: string,
+    organizationId: string,
+    completionPercent: number,
+  ) {
     const project = await this.projectRepo.findOne({ where: { id } });
     if (!project) throw new NotFoundException('Project not found');
 
@@ -213,7 +265,9 @@ export class ProjectsService implements OnModuleInit {
       select: ['id'],
     });
     if (!employee || project.managerId !== employee.id) {
-      throw new NotFoundException('Project not found or you are not the manager');
+      throw new NotFoundException(
+        'Project not found or you are not the manager',
+      );
     }
 
     project.completionPercent = Math.min(100, Math.max(0, completionPercent));
@@ -230,8 +284,8 @@ export class ProjectsService implements OnModuleInit {
     // instead of userId in client_project_members.user_id.
     const membershipLookupIds = Array.from(
       new Set(
-        [userId, employee?.userId, employee?.id].filter(
-          (id): id is string => Boolean(id),
+        [userId, employee?.userId, employee?.id].filter((id): id is string =>
+          Boolean(id),
         ),
       ),
     );
@@ -267,9 +321,13 @@ export class ProjectsService implements OnModuleInit {
         { managerId: employee.id, memberProjectIds },
       );
     } else if (employee?.id) {
-      query.andWhere('project.managerId = :managerId', { managerId: employee.id });
+      query.andWhere('project.managerId = :managerId', {
+        managerId: employee.id,
+      });
     } else if (memberProjectIds.length > 0) {
-      query.andWhere('project.id IN (:...memberProjectIds)', { memberProjectIds });
+      query.andWhere('project.id IN (:...memberProjectIds)', {
+        memberProjectIds,
+      });
     } else {
       return [];
     }
@@ -312,7 +370,8 @@ export class ProjectsService implements OnModuleInit {
           designation: emp?.designation?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
           managerName: emp?.manager
-            ? `${emp.manager.firstName} ${emp.manager.lastName}`.trim() || emp.manager.workEmail
+            ? `${emp.manager.firstName} ${emp.manager.lastName}`.trim() ||
+              emp.manager.workEmail
             : null,
         };
       }),
@@ -327,9 +386,14 @@ export class ProjectsService implements OnModuleInit {
           assignedAt: project.createdAt,
           employeeId: managerEmployee?.id ?? null,
           employeeCode: managerEmployee?.employeeCode ?? null,
-          firstName: managerEmployee?.firstName ?? managerEmployee?.user?.firstName ?? '',
-          lastName: managerEmployee?.lastName ?? managerEmployee?.user?.lastName ?? '',
-          email: managerEmployee?.user?.email ?? managerEmployee?.workEmail ?? '',
+          firstName:
+            managerEmployee?.firstName ??
+            managerEmployee?.user?.firstName ??
+            '',
+          lastName:
+            managerEmployee?.lastName ?? managerEmployee?.user?.lastName ?? '',
+          email:
+            managerEmployee?.user?.email ?? managerEmployee?.workEmail ?? '',
           workEmail: managerEmployee?.workEmail ?? '',
           designation: null,
           reportingTo: managerEmployee?.reportingTo ?? null,
@@ -373,15 +437,18 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+    });
     if (!project) throw new NotFoundException('Project not found');
     if (project.organizationId !== organizationId) {
-      throw new ForbiddenException('You cannot assign employees to this project');
+      throw new ForbiddenException(
+        'You cannot assign employees to this project',
+      );
     }
 
-    const normalizedAssignmentsRaw = (Array.isArray(assignmentsOrUserIds)
-      ? assignmentsOrUserIds
-      : []
+    const normalizedAssignmentsRaw = (
+      Array.isArray(assignmentsOrUserIds) ? assignmentsOrUserIds : []
     )
       .map((entry) =>
         typeof entry === 'string'
@@ -398,10 +465,12 @@ export class ProjectsService implements OnModuleInit {
       if (!entry.userId) return;
       uniqueAssignmentMap.set(entry.userId, entry);
     });
-    const assignableAssignments = Array.from(uniqueAssignmentMap.values()).filter(
-      (entry) => entry.userId !== requestingUserId,
+    const assignableAssignments = Array.from(
+      uniqueAssignmentMap.values(),
+    ).filter((entry) => entry.userId !== requestingUserId);
+    const assignableUserIds = assignableAssignments.map(
+      (entry) => entry.userId,
     );
-    const assignableUserIds = assignableAssignments.map((entry) => entry.userId);
     if (assignableUserIds.length === 0) {
       return this.getProjectEmployees(projectId);
     }
@@ -411,15 +480,21 @@ export class ProjectsService implements OnModuleInit {
       select: ['id', 'userId', 'reportingTo'],
     });
     const selectedUserIds = new Set(selectedEmployees.map((emp) => emp.userId));
-    const outOfOrgUsers = assignableUserIds.filter((uid) => !selectedUserIds.has(uid));
+    const outOfOrgUsers = assignableUserIds.filter(
+      (uid) => !selectedUserIds.has(uid),
+    );
     if (outOfOrgUsers.length > 0) {
-      throw new ForbiddenException('Selected employees must belong to your organization');
+      throw new ForbiddenException(
+        'Selected employees must belong to your organization',
+      );
     }
 
     for (const assignment of assignableAssignments) {
       const userId = assignment.userId;
       const nextRole = this.sanitizeProjectMemberRole(assignment.role);
-      const exists = await this.memberRepo.findOne({ where: { projectId, userId } });
+      const exists = await this.memberRepo.findOne({
+        where: { projectId, userId },
+      });
       if (!exists) {
         await this.memberRepo.save(
           this.memberRepo.create({ projectId, userId, role: nextRole }),
@@ -451,7 +526,9 @@ export class ProjectsService implements OnModuleInit {
   ) {
     try {
       // Filter out the requestingUserId to ensure they don't receive their own notification
-      const filteredRecipientIds = userIds.filter((id) => id !== requestingUserId);
+      const filteredRecipientIds = userIds.filter(
+        (id) => id !== requestingUserId,
+      );
       if (filteredRecipientIds.length === 0) {
         return; // No recipients to notify
       }
@@ -468,8 +545,11 @@ export class ProjectsService implements OnModuleInit {
   }
 
   async removeEmployee(projectId: string, userId: string) {
-    const member = await this.memberRepo.findOne({ where: { projectId, userId } });
-    if (!member) throw new NotFoundException('Employee not found in this project');
+    const member = await this.memberRepo.findOne({
+      where: { projectId, userId },
+    });
+    if (!member)
+      throw new NotFoundException('Employee not found in this project');
     await this.memberRepo.remove(member);
     return { success: true };
   }
@@ -647,7 +727,10 @@ export class ProjectsService implements OnModuleInit {
       document.fileUrl = nextFileUrl;
     }
     if (dto.description !== undefined) {
-      document.description = this.sanitizeDocumentOptionalText(dto.description, 3000);
+      document.description = this.sanitizeDocumentOptionalText(
+        dto.description,
+        3000,
+      );
     }
     if (dto.fileName !== undefined) {
       document.fileName = this.sanitizeDocumentOptionalText(dto.fileName, 255);
@@ -712,7 +795,9 @@ export class ProjectsService implements OnModuleInit {
       priority?: TaskPriority;
     },
   ) {
-    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+    });
     if (!project) throw new NotFoundException('Project not found');
 
     const actingEmployee = await this.employeeRepo.findOne({
@@ -723,7 +808,9 @@ export class ProjectsService implements OnModuleInit {
       select: ['id'],
     });
     if (!actingEmployee || project.managerId !== actingEmployee.id) {
-      throw new ForbiddenException('Only the assigned project manager can create tasks');
+      throw new ForbiddenException(
+        'Only the assigned project manager can create tasks',
+      );
     }
 
     if (data.assignedToUserId) {
@@ -741,10 +828,13 @@ export class ProjectsService implements OnModuleInit {
       ]);
 
       const isAssignedManager = Boolean(
-        managerEmployee?.userId && managerEmployee.userId === data.assignedToUserId,
+        managerEmployee?.userId &&
+          managerEmployee.userId === data.assignedToUserId,
       );
       if (!memberRecord && !isAssignedManager) {
-        throw new ForbiddenException('Task can be assigned only to project members');
+        throw new ForbiddenException(
+          'Task can be assigned only to project members',
+        );
       }
     }
 
@@ -841,11 +931,7 @@ export class ProjectsService implements OnModuleInit {
     return tasks;
   }
 
-  async updateTaskStatus(
-    taskId: string,
-    userId: string,
-    status: TaskStatus,
-  ) {
+  async updateTaskStatus(taskId: string, userId: string, status: TaskStatus) {
     const task = await this.taskRepo.findOne({
       where: { id: taskId },
       relations: ['project'],
@@ -897,7 +983,9 @@ export class ProjectsService implements OnModuleInit {
 
   async getTimesheetsSummary(projectId: string) {
     // Get project by ID to get project name and cost info
-    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+    });
     if (!project) {
       throw new NotFoundException('Project not found');
     }
@@ -913,14 +1001,17 @@ export class ProjectsService implements OnModuleInit {
       .getMany();
 
     // Calculate summary
-    const totalMinutes = timesheets.reduce((sum, ts) => sum + (ts.workingMinutes || 0), 0);
+    const totalMinutes = timesheets.reduce(
+      (sum, ts) => sum + (ts.workingMinutes || 0),
+      0,
+    );
     const totalHours = totalMinutes / 60;
     const actualCost = hourlyRate > 0 ? totalHours * hourlyRate : 0;
     const profitLoss = projectCost - actualCost;
     const isProfit = profitLoss >= 0;
 
     // Get unique employee count
-    const uniqueEmployeeIds = new Set(timesheets.map(ts => ts.employeeId));
+    const uniqueEmployeeIds = new Set(timesheets.map((ts) => ts.employeeId));
     const employeeCount = uniqueEmployeeIds.size;
 
     return {
@@ -941,10 +1032,15 @@ export class ProjectsService implements OnModuleInit {
   private sanitizeTestSheetText(value: unknown, maxLength: number): string {
     const normalized = String(value ?? '').trim();
     if (!normalized) return '';
-    return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
+    return normalized.length > maxLength
+      ? normalized.slice(0, maxLength)
+      : normalized;
   }
 
-  private normalizeOptionalText(value: unknown, maxLength: number): string | null {
+  private normalizeOptionalText(
+    value: unknown,
+    maxLength: number,
+  ): string | null {
     const normalized = this.sanitizeTestSheetText(value, maxLength);
     return normalized || null;
   }
@@ -968,7 +1064,10 @@ export class ProjectsService implements OnModuleInit {
       'updatedAt',
     ]);
     const sanitized: Record<string, string> = {};
-    const entries = Object.entries(input as Record<string, unknown>).slice(0, 40);
+    const entries = Object.entries(input as Record<string, unknown>).slice(
+      0,
+      40,
+    );
 
     entries.forEach(([rawKey, rawValue]) => {
       const key = String(rawKey ?? '').trim();
@@ -983,8 +1082,12 @@ export class ProjectsService implements OnModuleInit {
     return sanitized;
   }
 
-  private normalizeTestCaseStatus(status?: string | null): ProjectTestCaseStatus {
-    return String(status ?? '').trim().toLowerCase() === 'resolved'
+  private normalizeTestCaseStatus(
+    status?: string | null,
+  ): ProjectTestCaseStatus {
+    return String(status ?? '')
+      .trim()
+      .toLowerCase() === 'resolved'
       ? 'resolved'
       : 'pending';
   }
@@ -1010,7 +1113,8 @@ export class ProjectsService implements OnModuleInit {
       select: ['firstName', 'lastName', 'workEmail'],
     });
     if (!employee) return null;
-    const fullName = `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
+    const fullName =
+      `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
     return fullName || employee.workEmail || null;
   }
 
@@ -1089,7 +1193,9 @@ export class ProjectsService implements OnModuleInit {
     );
 
     try {
-      const enabled = await this.logReportService.isEnabled(payload.organizationId);
+      const enabled = await this.logReportService.isEnabled(
+        payload.organizationId,
+      );
       if (enabled) {
         await this.logReportService.create({
           organizationId: payload.organizationId,
@@ -1261,7 +1367,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
     await this.ensureDefaultTestSheetTab(projectId, organizationId, userId);
     return this.buildTestSheetResponse(projectId, organizationId, 'client');
   }
@@ -1314,7 +1425,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
 
     const requestedName = this.sanitizeTestSheetText(dto.name, 120);
     if (!requestedName) {
@@ -1328,7 +1444,8 @@ export class ProjectsService implements OnModuleInit {
     const tabName = this.makeUniqueTabName(requestedName, existingTabs);
     const nextOrderIndex =
       existingTabs.length > 0
-        ? Math.max(...existingTabs.map((tab) => Number(tab.orderIndex || 0))) + 1
+        ? Math.max(...existingTabs.map((tab) => Number(tab.orderIndex || 0))) +
+          1
         : 0;
 
     const tab = await this.testSheetTabRepo.save(
@@ -1363,7 +1480,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
 
     const tab = await this.testSheetTabRepo.findOne({
       where: {
@@ -1420,7 +1542,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
 
     const tab = await this.testSheetTabRepo.findOne({
       where: { id: tabId, projectId, organizationId, projectSource: 'client' },
@@ -1432,7 +1559,11 @@ export class ProjectsService implements OnModuleInit {
     const title = this.sanitizeTestSheetText(dto.title, 250);
 
     const [qaUserId, developerUserId] = await Promise.all([
-      this.resolveClientProjectMemberUserId(projectId, organizationId, dto.qaUserId),
+      this.resolveClientProjectMemberUserId(
+        projectId,
+        organizationId,
+        dto.qaUserId,
+      ),
       this.resolveClientProjectMemberUserId(
         projectId,
         organizationId,
@@ -1444,7 +1575,9 @@ export class ProjectsService implements OnModuleInit {
       .createQueryBuilder('row')
       .where('row.projectId = :projectId', { projectId })
       .andWhere('row.organizationId = :organizationId', { organizationId })
-      .andWhere('row.projectSource = :projectSource', { projectSource: 'client' })
+      .andWhere('row.projectSource = :projectSource', {
+        projectSource: 'client',
+      })
       .andWhere('row.tabId = :tabId', { tabId })
       .orderBy('row.rowIndex', 'DESC')
       .addOrderBy('row.createdAt', 'DESC')
@@ -1497,7 +1630,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
 
     const testCase = await this.testSheetCaseRepo.findOne({
       where: {
@@ -1523,10 +1661,16 @@ export class ProjectsService implements OnModuleInit {
       testCase.steps = this.normalizeOptionalText(dto.steps, 10000);
     }
     if (dto.expectedResult !== undefined) {
-      testCase.expectedResult = this.normalizeOptionalText(dto.expectedResult, 10000);
+      testCase.expectedResult = this.normalizeOptionalText(
+        dto.expectedResult,
+        10000,
+      );
     }
     if (dto.actualResult !== undefined) {
-      testCase.actualResult = this.normalizeOptionalText(dto.actualResult, 10000);
+      testCase.actualResult = this.normalizeOptionalText(
+        dto.actualResult,
+        10000,
+      );
     }
     if (dto.qaUserId !== undefined) {
       testCase.qaUserId = await this.resolveClientProjectMemberUserId(
@@ -1559,7 +1703,9 @@ export class ProjectsService implements OnModuleInit {
 
     const afterSnapshot = this.serializeTestCase(testCase);
     const changedFieldNames = Object.keys(afterSnapshot).filter((fieldName) => {
-      const previousValue = (beforeSnapshot as Record<string, unknown>)[fieldName];
+      const previousValue = (beforeSnapshot as Record<string, unknown>)[
+        fieldName
+      ];
       const nextValue = (afterSnapshot as Record<string, unknown>)[fieldName];
       return JSON.stringify(previousValue) !== JSON.stringify(nextValue);
     });
@@ -1602,7 +1748,12 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
     isAdmin = false,
   ) {
-    await this.ensureClientProjectAccess(projectId, userId, organizationId, isAdmin);
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdmin,
+    );
 
     const testCase = await this.testSheetCaseRepo.findOne({
       where: {

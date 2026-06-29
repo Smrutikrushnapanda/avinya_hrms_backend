@@ -1,7 +1,14 @@
-import { Organization } from "src/modules/auth-core/entities/organization.entity";
-import { Role } from "src/modules/auth-core/entities/role.entity";
-import { User } from "src/modules/auth-core/entities/user.entity";
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
+import { Organization } from 'src/modules/auth-core/entities/organization.entity';
+import { Role } from 'src/modules/auth-core/entities/role.entity';
+import { User } from 'src/modules/auth-core/entities/user.entity';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 
 @Entity('leave_workflow_configs')
 @Unique(['organization', 'level'])

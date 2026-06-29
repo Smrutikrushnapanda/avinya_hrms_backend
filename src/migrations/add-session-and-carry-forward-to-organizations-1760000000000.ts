@@ -21,4 +21,3 @@ export class AddSessionAndCarryForwardToOrganizations1760000000000
     `);
   }
 }
-

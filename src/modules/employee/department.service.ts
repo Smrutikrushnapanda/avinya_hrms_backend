@@ -29,14 +29,23 @@ export class DepartmentService {
     });
   }
 
-  async create(data: { name: string; code: string; organizationId: string }): Promise<Department> {
+  async create(data: {
+    name: string;
+    code: string;
+    organizationId: string;
+  }): Promise<Department> {
     const department = this.departmentRepository.create(data);
     return this.departmentRepository.save(department);
   }
 
-  async update(id: string, data: { name?: string; code?: string }): Promise<Department> {
+  async update(
+    id: string,
+    data: { name?: string; code?: string },
+  ): Promise<Department> {
     await this.departmentRepository.update(id, data);
-    const department = await this.departmentRepository.findOne({ where: { id } });
+    const department = await this.departmentRepository.findOne({
+      where: { id },
+    });
     if (!department) {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }

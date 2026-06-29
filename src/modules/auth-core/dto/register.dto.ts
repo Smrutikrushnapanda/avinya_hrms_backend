@@ -43,14 +43,14 @@ export class CreateRegisterDto {
 
   @IsNumber()
   mobileOtpId: number;
-  
+
   @IsNumber()
   @Min(100000)
   @Max(999999)
   mobileOTP: number;
 
   @IsNumber()
-  emailOtpId:string;
+  emailOtpId: string;
 
   @IsNumber()
   @Min(100000)

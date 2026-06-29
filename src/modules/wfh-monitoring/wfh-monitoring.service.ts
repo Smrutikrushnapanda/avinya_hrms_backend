@@ -105,7 +105,11 @@ export class WfhMonitoringService {
     }
 
     await this.activityRepo.save(log);
-    return { isLunch: log.isLunch, lunchStart: log.lunchStart, lunchEnd: log.lunchEnd };
+    return {
+      isLunch: log.isLunch,
+      lunchStart: log.lunchStart,
+      lunchEnd: log.lunchEnd,
+    };
   }
 
   async toggleWork(userId: string) {
@@ -179,17 +183,19 @@ export class WfhMonitoringService {
       relations: ['user'],
     });
     // Return zero-state instead of 404 so admin page can still render the row
-    return log ?? {
-      mouseEvents: 0,
-      keyboardEvents: 0,
-      tabSwitches: 0,
-      lastActiveAt: null,
-      isLunch: false,
-      lunchStart: null,
-      lunchEnd: null,
-      workStartedAt: null,
-      workEndedAt: null,
-    };
+    return (
+      log ?? {
+        mouseEvents: 0,
+        keyboardEvents: 0,
+        tabSwitches: 0,
+        lastActiveAt: null,
+        isLunch: false,
+        lunchStart: null,
+        lunchEnd: null,
+        workStartedAt: null,
+        workEndedAt: null,
+      }
+    );
   }
 
   /**
@@ -203,7 +209,9 @@ export class WfhMonitoringService {
     const buckets: string[] = [];
     for (let h = 0; h < 24; h++) {
       for (const m of [0, 30]) {
-        buckets.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+        buckets.push(
+          `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
+        );
       }
     }
 
@@ -227,19 +235,28 @@ export class WfhMonitoringService {
       .getMany();
 
     // Group snapshots by user
-    const userMap = new Map<string, {
-      userId: string;
-      name: string;
-      email: string;
-      bucketData: Record<string, { mouse: number; keyboard: number; tabs: number }>;
-    }>();
+    const userMap = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        email: string;
+        bucketData: Record<
+          string,
+          { mouse: number; keyboard: number; tabs: number }
+        >;
+      }
+    >();
 
     for (const snap of snapshots) {
       const uid = snap.user.id;
       if (!userMap.has(uid)) {
         userMap.set(uid, {
           userId: uid,
-          name: [snap.user.firstName, snap.user.lastName].filter(Boolean).join(' ') || snap.user.email,
+          name:
+            [snap.user.firstName, snap.user.lastName]
+              .filter(Boolean)
+              .join(' ') || snap.user.email,
           email: snap.user.email,
           bucketData: {},
         });
@@ -283,8 +300,16 @@ export class WfhMonitoringService {
       .where('user.organizationId = :orgId', { orgId: organizationId })
       .andWhere('req.status = :status', { status: 'APPROVED' })
       .andWhere('req.date <= :date', { date: targetDate })
-      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', { date: targetDate })
-      .select(['req.id', 'user.id', 'user.email', 'user.firstName', 'user.lastName'])
+      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', {
+        date: targetDate,
+      })
+      .select([
+        'req.id',
+        'user.id',
+        'user.email',
+        'user.firstName',
+        'user.lastName',
+      ])
       .getMany();
 
     if (approvedRequests.length === 0) return [];

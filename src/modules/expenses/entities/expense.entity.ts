@@ -38,7 +38,12 @@ export class Expense {
   @Column({ name: 'category', length: 100 })
   category: string;
 
-  @Column({ type: 'varchar', name: 'project_name', length: 200, nullable: true })
+  @Column({
+    type: 'varchar',
+    name: 'project_name',
+    length: 200,
+    nullable: true,
+  })
   projectName: string | null;
 
   @Column({ name: 'title', length: 200 })

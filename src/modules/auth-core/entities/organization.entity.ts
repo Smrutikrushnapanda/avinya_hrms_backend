@@ -46,7 +46,12 @@ export class Organization {
   @Column({ name: 'enable_wifi_validation', type: 'boolean', default: false })
   enableWifiValidation: boolean;
 
-  @Column({ name: 'wfh_approval_mode', type: 'varchar', length: 20, default: 'MANAGER' })
+  @Column({
+    name: 'wfh_approval_mode',
+    type: 'varchar',
+    length: 20,
+    default: 'MANAGER',
+  })
   wfhApprovalMode: string;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })

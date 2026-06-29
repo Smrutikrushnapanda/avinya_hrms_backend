@@ -1,6 +1,15 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from "typeorm";
-import { Organization } from "src/modules/auth-core/entities/organization.entity";
-import { LeaveType } from "./leave-type.entity";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+  UpdateDateColumn,
+} from 'typeorm';
+import { Organization } from 'src/modules/auth-core/entities/organization.entity';
+import { LeaveType } from './leave-type.entity';
 
 @Entity('leave_balance_templates')
 @Unique(['organization', 'employmentType', 'leaveType'])

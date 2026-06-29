@@ -59,17 +59,19 @@ export class MeetingService implements OnModuleInit {
         .filter((p) => p.email)
         .map((p) => ({ email: p.email, firstName: p.firstName }));
 
-      this.mailService.sendMeetingInvite(
-        recipients,
-        {
-          title: fullMeeting.title,
-          scheduledAt: fullMeeting.scheduledAt,
-          durationMinutes: fullMeeting.durationMinutes,
-          meetingLink: fullMeeting.meetingLink ?? undefined,
-          description: fullMeeting.description,
-        },
-        fullMeeting.organizationId,
-      ).catch(() => undefined);
+      this.mailService
+        .sendMeetingInvite(
+          recipients,
+          {
+            title: fullMeeting.title,
+            scheduledAt: fullMeeting.scheduledAt,
+            durationMinutes: fullMeeting.durationMinutes,
+            meetingLink: fullMeeting.meetingLink ?? undefined,
+            description: fullMeeting.description,
+          },
+          fullMeeting.organizationId,
+        )
+        .catch(() => undefined);
     }
 
     return fullMeeting;
@@ -118,11 +120,23 @@ export class MeetingService implements OnModuleInit {
     // Send cancellation notification to participants before deleting ONLY if meeting is in the future
     const now = new Date();
     const scheduledTime = new Date(meeting.scheduledAt);
-    
-    if (meeting.participants && meeting.participants.length > 0 && meeting.status === 'SCHEDULED' && scheduledTime > now) {
+
+    if (
+      meeting.participants &&
+      meeting.participants.length > 0 &&
+      meeting.status === 'SCHEDULED' &&
+      scheduledTime > now
+    ) {
       const participantIds = meeting.participants.map((p) => p.id);
-      const timeString = scheduledTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      const dateString = scheduledTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const timeString = scheduledTime.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const dateString = scheduledTime.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
 
       try {
         await this.messageService.createMessage(meeting.createdById, {
@@ -133,7 +147,10 @@ export class MeetingService implements OnModuleInit {
           type: 'meeting',
         });
       } catch (error) {
-        console.error(`[MeetingService] Failed to send cancellation notification for meeting ${id}:`, error);
+        console.error(
+          `[MeetingService] Failed to send cancellation notification for meeting ${id}:`,
+          error,
+        );
       }
 
       // Send cancellation email (fire-and-forget)
@@ -142,15 +159,17 @@ export class MeetingService implements OnModuleInit {
         .map((p) => ({ email: p.email, firstName: p.firstName }));
 
       if (emailRecipients.length) {
-        this.mailService.sendMeetingCancellation(
-          emailRecipients,
-          {
-            title: meeting.title,
-            scheduledAt: scheduledTime,
-            durationMinutes: meeting.durationMinutes,
-          },
-          meeting.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendMeetingCancellation(
+            emailRecipients,
+            {
+              title: meeting.title,
+              scheduledAt: scheduledTime,
+              durationMinutes: meeting.durationMinutes,
+            },
+            meeting.organizationId,
+          )
+          .catch(() => undefined);
       }
     }
 
@@ -220,7 +239,9 @@ export class MeetingService implements OnModuleInit {
 
   // ─── Notification Methods ───
 
-  async sendMeetingNotification(meetingId: string): Promise<{ message: string }> {
+  async sendMeetingNotification(
+    meetingId: string,
+  ): Promise<{ message: string }> {
     const meeting = await this.meetingRepo.findOne({
       where: { id: meetingId },
       relations: ['participants', 'organization', 'createdBy'],
@@ -250,7 +271,9 @@ export class MeetingService implements OnModuleInit {
       day: 'numeric',
     });
 
-    const linkLine = meeting.meetingLink ? `\nJoin: ${meeting.meetingLink}` : '';
+    const linkLine = meeting.meetingLink
+      ? `\nJoin: ${meeting.meetingLink}`
+      : '';
 
     // Send in-app notification — single DB write for all participants
     await this.messageService.createMessage(meeting.createdById, {
@@ -280,13 +303,17 @@ export class MeetingService implements OnModuleInit {
       .leftJoinAndSelect('meeting.participants', 'participant')
       .leftJoinAndSelect('meeting.organization', 'organization')
       .leftJoinAndSelect('meeting.createdBy', 'createdBy')
-      .where('meeting.scheduledAt <= :fiveMinutesFromNow', { fiveMinutesFromNow })
+      .where('meeting.scheduledAt <= :fiveMinutesFromNow', {
+        fiveMinutesFromNow,
+      })
       .andWhere('meeting.scheduledAt > :now', { now })
       .andWhere('meeting.status = :status', { status: 'SCHEDULED' })
       .andWhere('meeting.notificationSent = :sent', { sent: false })
       .getMany();
 
-    console.log(`[MeetingService] Found ${upcomingMeetings.length} meetings needing notifications`);
+    console.log(
+      `[MeetingService] Found ${upcomingMeetings.length} meetings needing notifications`,
+    );
 
     for (const meeting of upcomingMeetings) {
       try {
@@ -314,10 +341,15 @@ export class MeetingService implements OnModuleInit {
             type: 'meeting',
           });
 
-          console.log(`[MeetingService] Sent notification for meeting: ${meeting.title}`);
+          console.log(
+            `[MeetingService] Sent notification for meeting: ${meeting.title}`,
+          );
         }
       } catch (error) {
-        console.error(`[MeetingService] Error sending notification for meeting ${meeting.id}:`, error);
+        console.error(
+          `[MeetingService] Error sending notification for meeting ${meeting.id}:`,
+          error,
+        );
       }
     }
   }
@@ -336,4 +368,3 @@ export class MeetingService implements OnModuleInit {
     return this.meetingRepo.save(meeting);
   }
 }
-

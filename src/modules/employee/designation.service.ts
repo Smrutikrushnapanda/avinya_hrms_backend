@@ -17,14 +17,23 @@ export class DesignationService {
     });
   }
 
-  async create(data: { name: string; code: string; organizationId: string }): Promise<Designation> {
+  async create(data: {
+    name: string;
+    code: string;
+    organizationId: string;
+  }): Promise<Designation> {
     const designation = this.designationRepository.create(data);
     return this.designationRepository.save(designation);
   }
 
-  async update(id: string, data: { name?: string; code?: string }): Promise<Designation> {
+  async update(
+    id: string,
+    data: { name?: string; code?: string },
+  ): Promise<Designation> {
     await this.designationRepository.update(id, data);
-    const designation = await this.designationRepository.findOne({ where: { id } });
+    const designation = await this.designationRepository.findOne({
+      where: { id },
+    });
     if (!designation) {
       throw new NotFoundException(`Designation with ID ${id} not found`);
     }

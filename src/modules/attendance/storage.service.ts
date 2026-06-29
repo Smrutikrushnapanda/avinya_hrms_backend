@@ -7,10 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as Sharp from 'sharp';
 import { subMonths } from 'date-fns';
-import {
-  UploadApiResponse,
-  v2 as cloudinary,
-} from 'cloudinary';
+import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { AttendancePhotoType } from './dto/upload-attendance-photo.dto';
 
 interface StoredObject {
@@ -32,11 +29,13 @@ export class StorageService {
     const sweepEnabled = process.env.DISABLE_ATTENDANCE_PHOTO_SWEEP !== 'true';
 
     if (sweepEnabled) {
-      setInterval(() =>
-        this
-          .deletePhotosOlderThanMonths(6)
-          .catch((error) => this.logger.error(`Cleanup failed: ${error.message}`)),
-      sweepHours * 60 * 60 * 1000);
+      setInterval(
+        () =>
+          this.deletePhotosOlderThanMonths(6).catch((error) =>
+            this.logger.error(`Cleanup failed: ${error.message}`),
+          ),
+        sweepHours * 60 * 60 * 1000,
+      );
     }
   }
 
@@ -64,7 +63,9 @@ export class StorageService {
       );
     }
 
-    const { buffer, mimeType } = await this.compressToJpegUnderLimit(file.buffer);
+    const { buffer, mimeType } = await this.compressToJpegUnderLimit(
+      file.buffer,
+    );
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -73,8 +74,7 @@ export class StorageService {
 
     const safeCompanyId = companyId.trim();
     const safeUserId = userId.trim();
-    const folder =
-      `${this.cloudinaryBaseFolder}/${safeCompanyId}/${safeUserId}/${year}/${month}/${day}`;
+    const folder = `${this.cloudinaryBaseFolder}/${safeCompanyId}/${safeUserId}/${year}/${month}/${day}`;
     const publicId = `${type}-${Date.now()}`;
 
     try {
@@ -109,9 +109,12 @@ export class StorageService {
 
       return result.secure_url;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown upload error';
+      const message =
+        error instanceof Error ? error.message : 'Unknown upload error';
       this.logger.error(`Cloudinary attendance upload failed: ${message}`);
-      throw new InternalServerErrorException('Could not store attendance photo');
+      throw new InternalServerErrorException(
+        'Could not store attendance photo',
+      );
     }
   }
 
@@ -124,7 +127,9 @@ export class StorageService {
       return key;
     }
 
-    const legacyStorageBaseUrl = this.configService.get<string>('LEGACY_STORAGE_BASE_URL');
+    const legacyStorageBaseUrl = this.configService.get<string>(
+      'LEGACY_STORAGE_BASE_URL',
+    );
     if (legacyStorageBaseUrl) {
       return `${legacyStorageBaseUrl.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}`;
     }
@@ -151,10 +156,15 @@ export class StorageService {
       await cloudinary.api.delete_resources(expiredPublicIds, {
         resource_type: 'image',
       });
-      this.logger.log(`Deleted ${expiredPublicIds.length} expired attendance photos`);
+      this.logger.log(
+        `Deleted ${expiredPublicIds.length} expired attendance photos`,
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown delete error';
-      this.logger.error(`Failed to delete expired Cloudinary photos: ${message}`);
+      const message =
+        error instanceof Error ? error.message : 'Unknown delete error';
+      this.logger.error(
+        `Failed to delete expired Cloudinary photos: ${message}`,
+      );
       throw new InternalServerErrorException('Photo cleanup failed');
     }
   }
@@ -193,7 +203,9 @@ export class StorageService {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
 
     if (!cloudName || !apiKey || !apiSecret) {
-      this.logger.error('Cloudinary credentials are missing in environment variables');
+      this.logger.error(
+        'Cloudinary credentials are missing in environment variables',
+      );
       throw new Error(
         'Cloudinary credentials are missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
       );
@@ -225,15 +237,20 @@ export class StorageService {
           next_cursor: nextCursor,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown list error';
+        const message =
+          error instanceof Error ? error.message : 'Unknown list error';
         this.logger.error(`Failed to list Cloudinary resources: ${message}`);
-        throw new InternalServerErrorException('Unable to list storage objects');
+        throw new InternalServerErrorException(
+          'Unable to list storage objects',
+        );
       }
 
       for (const resource of response.resources || []) {
         files.push({
           publicId: resource.public_id,
-          createdAt: resource.created_at ? new Date(resource.created_at) : undefined,
+          createdAt: resource.created_at
+            ? new Date(resource.created_at)
+            : undefined,
         });
       }
 

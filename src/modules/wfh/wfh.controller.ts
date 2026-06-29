@@ -15,7 +15,10 @@ import { ApproveWfhDto } from './dto/approve-wfh.dto';
 import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
 import { SetWfhBalanceTemplatesDto } from './dto/set-wfh-balance-templates.dto';
-import { SetEmployeeWfhLimitDto, UpdateEmployeeWfhLimitDto } from './dto/set-employee-wfh-limit.dto';
+import {
+  SetEmployeeWfhLimitDto,
+  UpdateEmployeeWfhLimitDto,
+} from './dto/set-employee-wfh-limit.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -72,9 +75,7 @@ export class WfhController {
   @Get('requests/:userId')
   @ApiOperation({ summary: 'Get all WFH requests for a user' })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
-  async getRequestsByUser(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ) {
+  async getRequestsByUser(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.wfhService.getRequestsByUser(userId);
   }
 
@@ -93,9 +94,7 @@ export class WfhController {
   @Get('all/:orgId')
   @ApiOperation({ summary: 'Get all WFH requests for an organization' })
   @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
-  async getRequestsByOrg(
-    @Param('orgId', ParseUUIDPipe) orgId: string,
-  ) {
+  async getRequestsByOrg(@Param('orgId', ParseUUIDPipe) orgId: string) {
     return this.wfhService.getRequestsByOrg(orgId);
   }
 
@@ -119,14 +118,14 @@ export class WfhController {
   @Get('approval-assignments/:userId')
   @ApiOperation({ summary: 'Get WFH approval assignments for a user' })
   @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
-  async getAssignments(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ) {
+  async getAssignments(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.wfhService.getAssignments(userId);
   }
 
   @Get('approval-assignments/org/:organizationId')
-  @ApiOperation({ summary: 'Get all WFH approval assignments for an organization' })
+  @ApiOperation({
+    summary: 'Get all WFH approval assignments for an organization',
+  })
   @ApiParam({ name: 'organizationId', type: 'string', format: 'uuid' })
   async getAssignmentsByOrg(
     @Param('organizationId', ParseUUIDPipe) organizationId: string,

@@ -30,6 +30,7 @@ import { PerformanceModule } from './modules/performance/performance.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { MeetingModule } from './modules/meeting/meeting.module';
+import { MenuModule } from './modules/menu/menu.module';
 import { MailModule } from './modules/mail/mail.module';
 import { ResignationModule } from './modules/resignation/resignation.module';
 import { PostsModule } from './modules/posts/posts.module';
@@ -50,7 +51,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
       const publicPath = join(__dirname, '..', 'public');
       const uploadsPath = join(publicPath, 'uploads');
       const chatPath = join(uploadsPath, 'chat');
-      
+
       // Ensure directories exist
       if (!fs.existsSync(publicPath)) {
         fs.mkdirSync(publicPath, { recursive: true });
@@ -61,7 +62,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
       if (!fs.existsSync(chatPath)) {
         fs.mkdirSync(chatPath, { recursive: true });
       }
-      
+
       return ServeStaticModule.forRoot({
         rootPath: publicPath,
         serveRoot: '/static',
@@ -90,6 +91,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     ProjectModule,
     ExpensesModule,
     MeetingModule,
+    MenuModule,
     MailModule,
     ResignationModule,
     PostsModule,

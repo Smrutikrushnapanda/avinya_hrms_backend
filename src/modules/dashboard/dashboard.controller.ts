@@ -1,4 +1,11 @@
-import { Controller, Get, UseGuards, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  UseGuards,
+  Query,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
@@ -30,12 +37,18 @@ export class DashboardController {
 
     try {
       // Sequential queries to stay within Supabase free-tier session-mode connection limit
-      const dashboardStats = await this.employeeService.getDashboardStats(organizationId);
+      const dashboardStats =
+        await this.employeeService.getDashboardStats(organizationId);
       const employees = await this.employeeService.findAll(organizationId);
       const departments = await this.departmentService.findAll(organizationId);
-      const designations = await this.designationService.findAll(organizationId);
-      const departmentStats = await this.departmentService.getStatistics(organizationId);
-      const upcomingBirthdays = await this.employeeService.getUpcomingBirthdays(organizationId, 30);
+      const designations =
+        await this.designationService.findAll(organizationId);
+      const departmentStats =
+        await this.departmentService.getStatistics(organizationId);
+      const upcomingBirthdays = await this.employeeService.getUpcomingBirthdays(
+        organizationId,
+        30,
+      );
 
       return {
         success: true,
@@ -67,17 +80,70 @@ export class DashboardController {
 
   // NEW: Comprehensive Employee Management API
   @Get('employees')
-  @ApiOperation({ summary: 'Get comprehensive employee management data with pagination and filtering' })
-  @ApiQuery({ name: 'page', type: 'number', required: false, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', type: 'number', required: false, description: 'Items per page (default: 15)' })
-  @ApiQuery({ name: 'search', type: 'string', required: false, description: 'Search term for name, email, or employee code' })
-  @ApiQuery({ name: 'status', type: 'string', required: false, description: 'Filter by status (all, active, inactive, terminated)' })
-  @ApiQuery({ name: 'department', type: 'string', required: false, description: 'Filter by department ID' })
-  @ApiQuery({ name: 'designation', type: 'string', required: false, description: 'Filter by designation ID' })
-  @ApiQuery({ name: 'branch', type: 'string', required: false, description: 'Filter by branch ID' })
-  @ApiQuery({ name: 'joinDateFilter', type: 'string', required: false, description: 'Filter by join date (all, last30, last90, thisYear)' })
-  @ApiQuery({ name: 'sortBy', type: 'string', required: false, description: 'Sort field (default: firstName)' })
-  @ApiQuery({ name: 'sortOrder', type: 'string', required: false, description: 'Sort order (asc, desc)' })
+  @ApiOperation({
+    summary:
+      'Get comprehensive employee management data with pagination and filtering',
+  })
+  @ApiQuery({
+    name: 'page',
+    type: 'number',
+    required: false,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    type: 'number',
+    required: false,
+    description: 'Items per page (default: 15)',
+  })
+  @ApiQuery({
+    name: 'search',
+    type: 'string',
+    required: false,
+    description: 'Search term for name, email, or employee code',
+  })
+  @ApiQuery({
+    name: 'status',
+    type: 'string',
+    required: false,
+    description: 'Filter by status (all, active, inactive, terminated)',
+  })
+  @ApiQuery({
+    name: 'department',
+    type: 'string',
+    required: false,
+    description: 'Filter by department ID',
+  })
+  @ApiQuery({
+    name: 'designation',
+    type: 'string',
+    required: false,
+    description: 'Filter by designation ID',
+  })
+  @ApiQuery({
+    name: 'branch',
+    type: 'string',
+    required: false,
+    description: 'Filter by branch ID',
+  })
+  @ApiQuery({
+    name: 'joinDateFilter',
+    type: 'string',
+    required: false,
+    description: 'Filter by join date (all, last30, last90, thisYear)',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    type: 'string',
+    required: false,
+    description: 'Sort field (default: firstName)',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    type: 'string',
+    required: false,
+    description: 'Sort order (asc, desc)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns comprehensive employee management data',
@@ -111,13 +177,22 @@ export class DashboardController {
 
     try {
       // Sequential queries to stay within Supabase free-tier session-mode connection limit
-      const employeeData = await this.employeeService.findAllWithFilters(organizationId, filters);
+      const employeeData = await this.employeeService.findAllWithFilters(
+        organizationId,
+        filters,
+      );
       const departments = await this.departmentService.findAll(organizationId);
-      const designations = await this.designationService.findAll(organizationId);
-      const dashboardStats = await this.employeeService.getDashboardStats(organizationId);
+      const designations =
+        await this.designationService.findAll(organizationId);
+      const dashboardStats =
+        await this.employeeService.getDashboardStats(organizationId);
       const managers = await this.employeeService.findManagers(organizationId);
-      const recentJoiners = await this.employeeService.getRecentJoiners(organizationId, 30);
-      const branches = await this.employeeService.getBranchesForOrg(organizationId);
+      const recentJoiners = await this.employeeService.getRecentJoiners(
+        organizationId,
+        30,
+      );
+      const branches =
+        await this.employeeService.getBranchesForOrg(organizationId);
       const shifts = await this.employeeService.getShiftsForOrg(organizationId);
       const roles = await this.rolesService.findAllForOrg(organizationId);
 

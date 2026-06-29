@@ -10,7 +10,11 @@ import {
 export type ProjectTestSheetSource = 'standalone' | 'client';
 
 @Entity('project_test_sheet_tabs')
-@Index('idx_project_test_sheet_tabs_scope', ['organizationId', 'projectSource', 'projectId'])
+@Index('idx_project_test_sheet_tabs_scope', [
+  'organizationId',
+  'projectSource',
+  'projectId',
+])
 export class ProjectTestSheetTab {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -18,7 +22,12 @@ export class ProjectTestSheetTab {
   @Column({ name: 'project_id', type: 'uuid' })
   projectId: string;
 
-  @Column({ name: 'project_source', type: 'varchar', length: 20, default: 'standalone' })
+  @Column({
+    name: 'project_source',
+    type: 'varchar',
+    length: 20,
+    default: 'standalone',
+  })
   projectSource: ProjectTestSheetSource;
 
   @Column({ name: 'organization_id', type: 'uuid' })

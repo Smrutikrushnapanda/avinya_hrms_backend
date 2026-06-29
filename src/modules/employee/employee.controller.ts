@@ -15,11 +15,16 @@ import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { ValidateEmployeeDto } from './dto/validate-employee.dto';
-import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard'; // <-- 2. Import JwtAuthGuard
 import { GetUser } from '../auth-core/decorators/get-user.decorator'; // <-- 3. Import GetUser decorator
 import { User } from '../auth-core/entities/user.entity'; // <-- 4. Import User entity
-
 
 @ApiTags('Employees')
 @Controller('employees')
@@ -37,7 +42,10 @@ export class EmployeeController {
     try {
       return await this.employeeService.getDashboardStats(user.organizationId);
     } catch (error) {
-      console.error('getDashboardStats controller error:', error instanceof Error ? error.message : 'Unknown error');
+      console.error(
+        'getDashboardStats controller error:',
+        error instanceof Error ? error.message : 'Unknown error',
+      );
       return {
         totalEmployees: { value: 0, change: 0 },
         activeEmployees: { value: 0, change: 0 },
@@ -53,56 +61,68 @@ export class EmployeeController {
   }
   // -----------------------------
 
-@Get('birthdays/upcoming')
-@CacheTTL(3600) // 1 hour cache for birthdays (they don't change frequently)
-@ApiOperation({ summary: 'Get upcoming employee birthdays' })
-@ApiQuery({ name: 'organizationId', type: 'string', required: true })
-@ApiQuery({ name: 'days', type: 'number', required: false, description: 'Days ahead to look (default: 30)' })
-@ApiResponse({
-  status: 200,
-  description: 'Return upcoming birthdays',
-  schema: {
-    type: 'object',
-    properties: {
-      data: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' },
-            firstName: { type: 'string' },
-            lastName: { type: 'string' },
-            dateOfBirth: { type: 'string' },
-            department: { type: 'object' },
-            photoUrl: { type: 'string' },
-            workEmail: { type: 'string' },
+  @Get('birthdays/upcoming')
+  @CacheTTL(3600) // 1 hour cache for birthdays (they don't change frequently)
+  @ApiOperation({ summary: 'Get upcoming employee birthdays' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiQuery({
+    name: 'days',
+    type: 'number',
+    required: false,
+    description: 'Days ahead to look (default: 30)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Return upcoming birthdays',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              firstName: { type: 'string' },
+              lastName: { type: 'string' },
+              dateOfBirth: { type: 'string' },
+              department: { type: 'object' },
+              photoUrl: { type: 'string' },
+              workEmail: { type: 'string' },
+            },
           },
         },
       },
     },
-  },
-})
-async getUpcomingBirthdays(
-  @Query('organizationId') organizationId: string,
-  @Query('days') days: number = 30,
-) {
-  const birthdays = await this.employeeService.getUpcomingBirthdays(organizationId, days);
-  return { data: birthdays };
-}
-//------------------------------------------------- old code
+  })
+  async getUpcomingBirthdays(
+    @Query('organizationId') organizationId: string,
+    @Query('days') days: number = 30,
+  ) {
+    const birthdays = await this.employeeService.getUpcomingBirthdays(
+      organizationId,
+      days,
+    );
+    return { data: birthdays };
+  }
+  //------------------------------------------------- old code
   @Get('hierarchy')
   @ApiOperation({ summary: 'Get employee hierarchy or direct reports' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   @ApiQuery({ name: 'employeeId', type: 'string', required: false })
   @ApiResponse({
     status: 200,
-    description: 'Return employee hierarchy with direct reports when employeeId is provided.',
+    description:
+      'Return employee hierarchy with direct reports when employeeId is provided.',
   })
   async getHierarchy(
     @Query('organizationId') organizationId: string,
     @Query('employeeId') employeeId?: string,
   ) {
-    return this.employeeService.getEmployeeHierarchy(organizationId, employeeId);
+    return this.employeeService.getEmployeeHierarchy(
+      organizationId,
+      employeeId,
+    );
   }
 
   @Post()
@@ -127,7 +147,7 @@ async getUpcomingBirthdays(
     return this.employeeService.findOne(id);
   }
 
-@Get('by-user/:userId')
+  @Get('by-user/:userId')
   @CacheTTL(600) // 10 minutes cache for user lookup
   @ApiOperation({ summary: 'Get employee by user ID' })
   @ApiParam({ name: 'userId', type: 'string' })
@@ -144,15 +164,22 @@ async getUpcomingBirthdays(
   }
 
   @Post('validate')
-  @ApiOperation({ summary: 'Validate employee data before create/update (manager assignment, duplicates, etc)' })
+  @ApiOperation({
+    summary:
+      'Validate employee data before create/update (manager assignment, duplicates, etc)',
+  })
   @ApiResponse({ status: 200, description: 'Validation result' })
-  async validateEmployee(
-    @Body() dto: ValidateEmployeeDto
-  ) {
+  async validateEmployee(@Body() dto: ValidateEmployeeDto) {
     if (!dto.organizationId) {
       return { isValid: false, errors: ['organizationId is required'] };
     }
-    const result = await this.employeeService.validateManagerAssignment(dto as { organizationId: string; employeeId?: string; reportingTo: string });
+    const result = await this.employeeService.validateManagerAssignment(
+      dto as {
+        organizationId: string;
+        employeeId?: string;
+        reportingTo: string;
+      },
+    );
     return result;
   }
 

@@ -1,4 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
 
@@ -15,13 +22,25 @@ export class EmployeeWfhLimitEntity {
   @JoinColumn({ name: 'organization_id' })
   organization!: Organization;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum WFH days allowed per month. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum WFH days allowed per month. NULL = no limit',
+  })
   maxDaysPerMonth: number | null = null;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum WFH days allowed per week. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum WFH days allowed per week. NULL = no limit',
+  })
   maxDaysPerWeek: number | null = null;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum WFH days allowed per year. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum WFH days allowed per year. NULL = no limit',
+  })
   maxDaysPerYear: number | null = null;
 
   @Column({ name: 'is_enabled', default: true })

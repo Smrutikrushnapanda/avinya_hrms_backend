@@ -33,4 +33,3 @@ export class PostLike {
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
-

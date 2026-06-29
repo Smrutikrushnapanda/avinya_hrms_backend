@@ -1,6 +1,13 @@
-import { User } from "src/modules/auth-core/entities/user.entity";
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
-import { LeaveType } from "./leave-type.entity";
+import { User } from 'src/modules/auth-core/entities/user.entity';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
+import { LeaveType } from './leave-type.entity';
 
 @Entity('leave_balances')
 @Unique(['user', 'leaveType'])

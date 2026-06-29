@@ -12,9 +12,7 @@ import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { CreateRegisterDto } from '../dto/register.dto';
-import {
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiTags } from '@nestjs/swagger';
 import {
   SwaggerFindUserIdByDOB,
   SwaggerRegisterUser,

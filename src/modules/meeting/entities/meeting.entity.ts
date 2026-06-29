@@ -66,4 +66,3 @@ export class Meeting {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 }
-

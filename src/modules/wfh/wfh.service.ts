@@ -20,7 +20,10 @@ import { ApplyWfhDto } from './dto/apply-wfh.dto';
 import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
 import { SetWfhBalanceTemplatesDto } from './dto/set-wfh-balance-templates.dto';
-import { SetEmployeeWfhLimitDto, UpdateEmployeeWfhLimitDto } from './dto/set-employee-wfh-limit.dto';
+import {
+  SetEmployeeWfhLimitDto,
+  UpdateEmployeeWfhLimitDto,
+} from './dto/set-employee-wfh-limit.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MailService } from '../mail/mail.service';
 
@@ -124,7 +127,9 @@ export class WfhService {
 
       const hrUserId = await this.findHrUserIdInOrg(orgId, employee?.branchId);
       if (hrUserId) {
-        const already = fallbackApprovers.find((a) => a.approverId === hrUserId);
+        const already = fallbackApprovers.find(
+          (a) => a.approverId === hrUserId,
+        );
         if (!already) {
           fallbackApprovers.push({
             approverId: hrUserId,
@@ -187,7 +192,7 @@ export class WfhService {
 
     if (isAdmin) {
       const now = new Date();
-      
+
       // If there are approval entities, process them
       if (request.approvals && request.approvals.length > 0) {
         for (const ap of request.approvals) {
@@ -216,12 +221,19 @@ export class WfhService {
           type: 'wfh',
         });
         if (request.user.email) {
-          this.mailService.sendWfhStatus(
-            { email: request.user.email, firstName: request.user.firstName },
-            'REJECTED',
-            { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-            request.user.organizationId,
-          ).catch(() => undefined);
+          this.mailService
+            .sendWfhStatus(
+              { email: request.user.email, firstName: request.user.firstName },
+              'REJECTED',
+              {
+                date: request.date,
+                endDate: request.endDate,
+                numberOfDays: request.numberOfDays,
+                remarks,
+              },
+              request.user.organizationId,
+            )
+            .catch(() => undefined);
         }
         return { message: 'WFH request rejected' };
       }
@@ -255,12 +267,19 @@ export class WfhService {
         type: 'wfh',
       });
       if (request.user.email) {
-        this.mailService.sendWfhStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'APPROVED',
-          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendWfhStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'APPROVED',
+            {
+              date: request.date,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
       return { message: 'WFH request approved' };
     }
@@ -298,12 +317,19 @@ export class WfhService {
         type: 'wfh',
       });
       if (request.user.email) {
-        this.mailService.sendWfhStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'REJECTED',
-          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendWfhStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'REJECTED',
+            {
+              date: request.date,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
 
       return { message: 'WFH request rejected' };
@@ -353,12 +379,19 @@ export class WfhService {
         type: 'wfh',
       });
       if (request.user.email) {
-        this.mailService.sendWfhStatus(
-          { email: request.user.email, firstName: request.user.firstName },
-          'APPROVED',
-          { date: request.date, endDate: request.endDate, numberOfDays: request.numberOfDays, remarks },
-          request.user.organizationId,
-        ).catch(() => undefined);
+        this.mailService
+          .sendWfhStatus(
+            { email: request.user.email, firstName: request.user.firstName },
+            'APPROVED',
+            {
+              date: request.date,
+              endDate: request.endDate,
+              numberOfDays: request.numberOfDays,
+              remarks,
+            },
+            request.user.organizationId,
+          )
+          .catch(() => undefined);
       }
     }
 
@@ -399,7 +432,9 @@ export class WfhService {
       );
     }
 
-    await this.approvalRepo.delete({ wfhRequest: { id: requestId } as WfhRequest });
+    await this.approvalRepo.delete({
+      wfhRequest: { id: requestId } as WfhRequest,
+    });
     await this.requestRepo.delete(requestId);
   }
 
@@ -415,9 +450,7 @@ export class WfhService {
       .getMany();
   }
 
-  async getPendingApprovalsForUser(
-    approverId: string,
-  ): Promise<WfhApproval[]> {
+  async getPendingApprovalsForUser(approverId: string): Promise<WfhApproval[]> {
     return this.approvalRepo.find({
       where: { approver: { id: approverId }, status: 'PENDING' },
       relations: ['wfhRequest', 'wfhRequest.user'],
@@ -451,7 +484,9 @@ export class WfhService {
     });
   }
 
-  async getAssignmentsByOrg(organizationId: string): Promise<WfhApprovalAssignment[]> {
+  async getAssignmentsByOrg(
+    organizationId: string,
+  ): Promise<WfhApprovalAssignment[]> {
     return this.assignmentRepo.find({
       where: { organization: { id: organizationId }, isActive: true },
       relations: ['user', 'approver'],
@@ -474,7 +509,9 @@ export class WfhService {
     });
   }
 
-  async initializeWfhBalance(dto: InitializeWfhBalanceDto): Promise<WfhBalance> {
+  async initializeWfhBalance(
+    dto: InitializeWfhBalanceDto,
+  ): Promise<WfhBalance> {
     const existing = await this.wfhBalanceRepo.findOne({
       where: { user: { id: dto.userId } },
     });
@@ -515,7 +552,10 @@ export class WfhService {
     return results;
   }
 
-  async getWfhBalanceTemplates(organizationId: string, employmentType?: string) {
+  async getWfhBalanceTemplates(
+    organizationId: string,
+    employmentType?: string,
+  ) {
     const where: any = { organization: { id: organizationId } };
     if (employmentType) {
       where.employmentType = employmentType;
@@ -526,7 +566,11 @@ export class WfhService {
     });
   }
 
-  async applyTemplatesToUser(userId: string, organizationId: string, employmentType: string) {
+  async applyTemplatesToUser(
+    userId: string,
+    organizationId: string,
+    employmentType: string,
+  ) {
     if (!employmentType) return;
     const templates = await this.wfhBalanceTemplateRepo.find({
       where: {
@@ -557,10 +601,13 @@ export class WfhService {
     });
     if (!templates.length) return { updated: 0 };
 
-    const templateByEmploymentType = templates.reduce((acc, t) => {
-      if (!acc[t.employmentType]) acc[t.employmentType] = t;
-      return acc;
-    }, {} as Record<string, WfhBalanceTemplate>);
+    const templateByEmploymentType = templates.reduce(
+      (acc, t) => {
+        if (!acc[t.employmentType]) acc[t.employmentType] = t;
+        return acc;
+      },
+      {} as Record<string, WfhBalanceTemplate>,
+    );
 
     let updated = 0;
 
@@ -645,20 +692,32 @@ export class WfhService {
   // ─── Employee WFH Limits (Optional Admin-Set Limits) ───
 
   async setEmployeeWfhLimit(dto: SetEmployeeWfhLimitDto) {
-    const { userId, maxDaysPerMonth, maxDaysPerWeek, maxDaysPerYear, isEnabled } = dto;
+    const {
+      userId,
+      maxDaysPerMonth,
+      maxDaysPerWeek,
+      maxDaysPerYear,
+      isEnabled,
+    } = dto;
 
-    const user = await this.employeeRepo.manager.findOne('User', { where: { id: userId } });
+    const user = await this.employeeRepo.manager.findOne('User', {
+      where: { id: userId },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     const employee = await this.employeeRepo.findOne({
       where: { userId },
       relations: ['organization'],
     });
-    if (!employee || !employee.organization) throw new NotFoundException('Employee organization not found');
+    if (!employee || !employee.organization)
+      throw new NotFoundException('Employee organization not found');
 
     // Check if limit already exists
     let limit = await this.employeeWfhLimitRepo.findOne({
-      where: { user: { id: userId }, organization: { id: employee.organization.id } },
+      where: {
+        user: { id: userId },
+        organization: { id: employee.organization.id },
+      },
     });
 
     if (limit) {
@@ -694,11 +753,15 @@ export class WfhService {
       where: { user: { id: userId } },
     });
 
-    if (!limit) throw new NotFoundException('WFH limit not found for this employee');
+    if (!limit)
+      throw new NotFoundException('WFH limit not found for this employee');
 
-    if (dto.maxDaysPerMonth !== undefined) limit.maxDaysPerMonth = dto.maxDaysPerMonth;
-    if (dto.maxDaysPerWeek !== undefined) limit.maxDaysPerWeek = dto.maxDaysPerWeek;
-    if (dto.maxDaysPerYear !== undefined) limit.maxDaysPerYear = dto.maxDaysPerYear;
+    if (dto.maxDaysPerMonth !== undefined)
+      limit.maxDaysPerMonth = dto.maxDaysPerMonth;
+    if (dto.maxDaysPerWeek !== undefined)
+      limit.maxDaysPerWeek = dto.maxDaysPerWeek;
+    if (dto.maxDaysPerYear !== undefined)
+      limit.maxDaysPerYear = dto.maxDaysPerYear;
     if (dto.isEnabled !== undefined) limit.isEnabled = dto.isEnabled;
 
     return this.employeeWfhLimitRepo.save(limit);
@@ -709,7 +772,8 @@ export class WfhService {
       where: { user: { id: userId } },
     });
 
-    if (!limit) throw new NotFoundException('WFH limit not found for this employee');
+    if (!limit)
+      throw new NotFoundException('WFH limit not found for this employee');
 
     await this.employeeWfhLimitRepo.remove(limit);
   }
@@ -735,7 +799,10 @@ export class WfhService {
     const refYear = referenceDate.getFullYear();
     const refMonth = referenceDate.getMonth();
 
-    const sumRequestedDays = async (fromDate: string, toDate: string): Promise<number> => {
+    const sumRequestedDays = async (
+      fromDate: string,
+      toDate: string,
+    ): Promise<number> => {
       const row = await this.requestRepo
         .createQueryBuilder('wfh')
         .select('COALESCE(SUM(COALESCE(wfh.number_of_days, 1)), 0)', 'total')
@@ -754,8 +821,12 @@ export class WfhService {
 
     // Check monthly limit
     if (limit.maxDaysPerMonth !== null && limit.maxDaysPerMonth !== undefined) {
-      const monthStart = new Date(refYear, refMonth, 1).toISOString().slice(0, 10);
-      const monthEnd = new Date(refYear, refMonth + 1, 0).toISOString().slice(0, 10);
+      const monthStart = new Date(refYear, refMonth, 1)
+        .toISOString()
+        .slice(0, 10);
+      const monthEnd = new Date(refYear, refMonth + 1, 0)
+        .toISOString()
+        .slice(0, 10);
       const usedThisMonth = await sumRequestedDays(monthStart, monthEnd);
       if (usedThisMonth + requestedDays > limit.maxDaysPerMonth) {
         const remaining = Math.max(0, limit.maxDaysPerMonth - usedThisMonth);

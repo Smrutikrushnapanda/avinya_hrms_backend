@@ -49,7 +49,12 @@ export class ResignationRequest {
   @Column({ name: 'proposed_last_working_day', type: 'date', nullable: true })
   proposedLastWorkingDay: string | null;
 
-  @Column({ name: 'status', type: 'varchar', length: 20, default: ResignationStatus.PENDING })
+  @Column({
+    name: 'status',
+    type: 'varchar',
+    length: 20,
+    default: ResignationStatus.PENDING,
+  })
   status: ResignationStatus;
 
   @Column({ name: 'hr_remarks', type: 'text', nullable: true })
@@ -77,4 +82,3 @@ export class ResignationRequest {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 }
-

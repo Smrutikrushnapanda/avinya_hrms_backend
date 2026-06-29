@@ -9,7 +9,11 @@ import { WfhRequest } from '../wfh/entities/wfh-request.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WfhActivityLog, WfhHeartbeatSnapshot, WfhRequest]),
+    TypeOrmModule.forFeature([
+      WfhActivityLog,
+      WfhHeartbeatSnapshot,
+      WfhRequest,
+    ]),
     AuthCoreModule,
   ],
   controllers: [WfhMonitoringController],

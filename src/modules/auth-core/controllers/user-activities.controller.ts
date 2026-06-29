@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { UserActivitiesService } from '../services/user-activities.service';
 import { CreateUserActivityDto } from '../dto/user-actvities.dto';
 

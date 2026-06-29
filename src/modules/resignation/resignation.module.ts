@@ -8,10 +8,16 @@ import { Organization } from '../auth-core/entities/organization.entity';
 import { User } from '../auth-core/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ResignationRequest, Employee, Organization, User])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ResignationRequest,
+      Employee,
+      Organization,
+      User,
+    ]),
+  ],
   controllers: [ResignationController],
   providers: [ResignationService],
   exports: [ResignationService],
 })
 export class ResignationModule {}
-

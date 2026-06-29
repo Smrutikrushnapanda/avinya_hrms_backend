@@ -1,6 +1,13 @@
-import { Organization } from "src/modules/auth-core/entities/organization.entity";
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
-import { LeaveType } from "./leave-type.entity";
+import { Organization } from 'src/modules/auth-core/entities/organization.entity';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
+import { LeaveType } from './leave-type.entity';
 
 @Entity('leave_policies')
 export class LeavePolicy {

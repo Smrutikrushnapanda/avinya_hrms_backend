@@ -28,7 +28,9 @@ export class WorkflowService {
   }
 
   async findAllWorkflows(): Promise<Workflow[]> {
-    return this.workflowRepo.find({ relations: ['steps', 'steps.assignments'] });
+    return this.workflowRepo.find({
+      relations: ['steps', 'steps.assignments'],
+    });
   }
 
   async findWorkflowById(id: string): Promise<Workflow> {
@@ -50,14 +52,23 @@ export class WorkflowService {
   }
 
   /** ---- Steps ---- */
-  async addStep(workflowId: string, dto: Partial<WorkflowStep>): Promise<WorkflowStep> {
+  async addStep(
+    workflowId: string,
+    dto: Partial<WorkflowStep>,
+  ): Promise<WorkflowStep> {
     const step = this.stepRepo.create({ ...dto, workflowId });
     return this.stepRepo.save(step);
   }
 
-  async updateStep(stepId: string, dto: Partial<WorkflowStep>): Promise<WorkflowStep> {
+  async updateStep(
+    stepId: string,
+    dto: Partial<WorkflowStep>,
+  ): Promise<WorkflowStep> {
     await this.stepRepo.update(stepId, dto);
-    return this.stepRepo.findOneOrFail({ where: { id: stepId }, relations: ['assignments'] });
+    return this.stepRepo.findOneOrFail({
+      where: { id: stepId },
+      relations: ['assignments'],
+    });
   }
 
   async deleteStep(stepId: string): Promise<void> {
@@ -65,12 +76,18 @@ export class WorkflowService {
   }
 
   /** ---- Assignments ---- */
-  async addAssignment(stepId: string, dto: Partial<WorkflowAssignment>): Promise<WorkflowAssignment> {
+  async addAssignment(
+    stepId: string,
+    dto: Partial<WorkflowAssignment>,
+  ): Promise<WorkflowAssignment> {
     const assignment = this.assignmentRepo.create({ ...dto, stepId });
     return this.assignmentRepo.save(assignment);
   }
 
-  async updateAssignment(id: string, dto: Partial<WorkflowAssignment>): Promise<WorkflowAssignment> {
+  async updateAssignment(
+    id: string,
+    dto: Partial<WorkflowAssignment>,
+  ): Promise<WorkflowAssignment> {
     await this.assignmentRepo.update(id, dto);
     return this.assignmentRepo.findOneOrFail({ where: { id } });
   }
@@ -80,48 +97,49 @@ export class WorkflowService {
   }
 
   // In your workflow.service.ts
-async updateStepApprover(stepId: string, newApproverId: string): Promise<{ success: boolean; message: string }> {
-  try {
-    // Find existing assignment
-    const existingAssignment = await this.assignmentRepo.findOne({ 
-      where: { stepId },
-      relations: ['approver'] 
-    });
-
-    if (existingAssignment) {
-      // Only update the approverId - keep employeeId unchanged
-      existingAssignment.approverId = newApproverId;
-      
-      // Update the approver relation object
-      existingAssignment.approver = { id: newApproverId } as Employee;
-
-      await this.assignmentRepo.save(existingAssignment);
-      
-      return {
-        success: true,
-        message: 'Approver updated successfully'
-      };
-    } else {
-      // No existing assignment - create new one
-      // For new assignments, you might need to set employeeId based on your business logic
-      const newAssignment = this.assignmentRepo.create({
-        stepId,
-        approverId: newApproverId,
-        // employeeId: ... (set this based on your workflow logic - who is the requester?)
+  async updateStepApprover(
+    stepId: string,
+    newApproverId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      // Find existing assignment
+      const existingAssignment = await this.assignmentRepo.findOne({
+        where: { stepId },
+        relations: ['approver'],
       });
 
-      await this.assignmentRepo.save(newAssignment);
-      
-      return {
-        success: true,
-        message: 'Approver assigned successfully'
-      };
+      if (existingAssignment) {
+        // Only update the approverId - keep employeeId unchanged
+        existingAssignment.approverId = newApproverId;
+
+        // Update the approver relation object
+        existingAssignment.approver = { id: newApproverId } as Employee;
+
+        await this.assignmentRepo.save(existingAssignment);
+
+        return {
+          success: true,
+          message: 'Approver updated successfully',
+        };
+      } else {
+        // No existing assignment - create new one
+        // For new assignments, you might need to set employeeId based on your business logic
+        const newAssignment = this.assignmentRepo.create({
+          stepId,
+          approverId: newApproverId,
+          // employeeId: ... (set this based on your workflow logic - who is the requester?)
+        });
+
+        await this.assignmentRepo.save(newAssignment);
+
+        return {
+          success: true,
+          message: 'Approver assigned successfully',
+        };
+      }
+    } catch (error) {
+      console.error('Error updating step approver:', error);
+      throw error;
     }
-  } catch (error) {
-    console.error('Error updating step approver:', error);
-    throw error;
   }
-}
-
-
 }

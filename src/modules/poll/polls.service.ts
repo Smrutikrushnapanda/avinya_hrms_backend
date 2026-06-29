@@ -1,7 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Poll } from './entities/poll.entity';
-import { IsNull, LessThanOrEqual, MoreThanOrEqual, Repository, In } from 'typeorm'; // ADDED In
+import {
+  IsNull,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+  In,
+} from 'typeorm'; // ADDED In
 import { CreatePollDto } from './dto/create-poll.dto';
 import { PollQuestion } from './entities/poll-question.entity';
 import { CreateQuestionDto, QuestionType } from './dto/create-question.dto';
@@ -17,7 +23,7 @@ import {
   OptionBreakdownDto,
   UserResponseDto,
   SimpleEmployeeResponseDto,
-  SimpleQuestionResponseDto
+  SimpleQuestionResponseDto,
 } from './dto/poll-analytics.dto';
 
 interface CreatePollResponseDto {
@@ -42,7 +48,7 @@ export class PollsService {
     private readonly pollResponseRepo: Repository<PollResponse>,
     @InjectRepository(Employee) // ADDED
     private readonly employeeRepo: Repository<Employee>, // ADDED
-  ) { }
+  ) {}
 
   async createPoll(dto: CreatePollDto) {
     // Step 1: Save Poll
@@ -75,7 +81,10 @@ export class PollsService {
       await this.questionRepo.save(question);
 
       // Step 3: Save Options (only for choice-based questions)
-      if (questionDto.questionType === 'single_choice' || questionDto.questionType === 'multiple_choice') {
+      if (
+        questionDto.questionType === 'single_choice' ||
+        questionDto.questionType === 'multiple_choice'
+      ) {
         const optionEntities = questionDto.options.map((opt, i) =>
           this.optionRepo.create({
             question_id: question.id,
@@ -103,13 +112,23 @@ export class PollsService {
     if (!poll) throw new NotFoundException('Poll not found');
 
     if (updateData.title !== undefined) poll.title = updateData.title;
-    if (updateData.description !== undefined) poll.description = updateData.description;
-    if (updateData.isAnonymous !== undefined) poll.is_anonymous = updateData.isAnonymous;
+    if (updateData.description !== undefined)
+      poll.description = updateData.description;
+    if (updateData.isAnonymous !== undefined)
+      poll.is_anonymous = updateData.isAnonymous;
     if (updateData.startTime !== undefined) {
-      poll.start_time = DateTime.fromISO(updateData.startTime, { zone: 'Asia/Kolkata' }).toUTC().toJSDate();
+      poll.start_time = DateTime.fromISO(updateData.startTime, {
+        zone: 'Asia/Kolkata',
+      })
+        .toUTC()
+        .toJSDate();
     }
     if (updateData.endTime !== undefined) {
-      poll.end_time = DateTime.fromISO(updateData.endTime, { zone: 'Asia/Kolkata' }).toUTC().toJSDate();
+      poll.end_time = DateTime.fromISO(updateData.endTime, {
+        zone: 'Asia/Kolkata',
+      })
+        .toUTC()
+        .toJSDate();
     }
 
     await this.pollRepo.save(poll);
@@ -173,58 +192,75 @@ export class PollsService {
     });
 
     // Get unique user IDs who responded
-    const userIds = Array.from(new Set(responses.map(r => r.user_id).filter(Boolean)));
+    const userIds = Array.from(
+      new Set(responses.map((r) => r.user_id).filter(Boolean)),
+    );
 
     // Fetch employee names for these user IDs using In operator
-    const employees = userIds.length > 0 
-      ? await this.employeeRepo.find({
-          where: { userId: In(userIds) },
-          select: ['userId', 'firstName', 'lastName'],
-        })
-      : [];
+    const employees =
+      userIds.length > 0
+        ? await this.employeeRepo.find({
+            where: { userId: In(userIds) },
+            select: ['userId', 'firstName', 'lastName'],
+          })
+        : [];
 
     // Create a map of userId to employee name
     const userIdToNameMap = new Map<string, string>();
-    employees.forEach(emp => {
+    employees.forEach((emp) => {
       const fullName = `${emp.firstName} ${emp.lastName || ''}`.trim();
       userIdToNameMap.set(emp.userId, fullName);
     });
 
-    const totalUniqueResponders = new Set(responses.map(r => r.user_id)).size;
+    const totalUniqueResponders = new Set(responses.map((r) => r.user_id)).size;
 
     // Build analytics for each question
     const questionsAnalytics: QuestionAnalyticsDto[] = await Promise.all(
       poll.questions.map(async (question) => {
-        const questionResponses = responses.filter(r => r.question_id === question.id);
+        const questionResponses = responses.filter(
+          (r) => r.question_id === question.id,
+        );
 
         // Get options breakdown for choice-based questions
         let optionsBreakdown: OptionBreakdownDto[] = [];
-        if (question.question_type === 'single_choice' || question.question_type === 'multiple_choice') {
-          optionsBreakdown = question.options?.map(option => {
-            const optionResponses = questionResponses.filter(r =>
-              r.option_ids && r.option_ids.includes(option.id)
-            );
+        if (
+          question.question_type === 'single_choice' ||
+          question.question_type === 'multiple_choice'
+        ) {
+          optionsBreakdown =
+            question.options?.map((option) => {
+              const optionResponses = questionResponses.filter(
+                (r) => r.option_ids && r.option_ids.includes(option.id),
+              );
 
-            return {
-              option_id: option.id,
-              option_text: option.option_text,
-              count: optionResponses.length,
-              percentage: questionResponses.length > 0
-                ? Math.round((optionResponses.length / questionResponses.length) * 100)
-                : 0
-            };
-          }) || [];
+              return {
+                option_id: option.id,
+                option_text: option.option_text,
+                count: optionResponses.length,
+                percentage:
+                  questionResponses.length > 0
+                    ? Math.round(
+                        (optionResponses.length / questionResponses.length) *
+                          100,
+                      )
+                    : 0,
+              };
+            }) || [];
         }
 
         // Get user responses (for non-anonymous polls) with employee names
-        const userResponses: UserResponseDto[] = poll.is_anonymous ? [] : questionResponses.map(response => ({
-          user_id: response.user_id || 'anonymous',
-          employee_name: response.user_id ? (userIdToNameMap.get(response.user_id) || 'Unknown Employee') : 'Anonymous',
-          selected_options: response.option_ids || [],
-          response_text: response.response_text,
-          response_rating: response.response_rating,
-          submitted_at: response.submitted_at
-        }));
+        const userResponses: UserResponseDto[] = poll.is_anonymous
+          ? []
+          : questionResponses.map((response) => ({
+              user_id: response.user_id || 'anonymous',
+              employee_name: response.user_id
+                ? userIdToNameMap.get(response.user_id) || 'Unknown Employee'
+                : 'Anonymous',
+              selected_options: response.option_ids || [],
+              response_text: response.response_text,
+              response_rating: response.response_rating,
+              submitted_at: response.submitted_at,
+            }));
 
         return {
           question_id: question.id,
@@ -232,16 +268,16 @@ export class PollsService {
           question_type: question.question_type,
           total_responses: questionResponses.length,
           options_breakdown: optionsBreakdown,
-          user_responses: userResponses
+          user_responses: userResponses,
         };
-      })
+      }),
     );
 
     return {
       poll,
       total_responses: totalUniqueResponders,
       response_rate: 0, // You can calculate this if you have total employee count
-      questions_analytics: questionsAnalytics
+      questions_analytics: questionsAnalytics,
     };
   }
 
@@ -249,23 +285,24 @@ export class PollsService {
   async getPollsSummary(): Promise<PollSummaryDto[]> {
     const polls = await this.pollRepo.find({
       relations: ['questions'],
-      order: { created_at: 'DESC' }
+      order: { created_at: 'DESC' },
     });
 
     // Get unique creator IDs
-    const creatorIds = Array.from(new Set(polls.map(p => p.created_by)));
+    const creatorIds = Array.from(new Set(polls.map((p) => p.created_by)));
 
     // Fetch employee names for creators using In operator
-    const employees = creatorIds.length > 0 
-      ? await this.employeeRepo.find({
-          where: { userId: In(creatorIds) },
-          select: ['userId', 'firstName', 'lastName'],
-        })
-      : [];
+    const employees =
+      creatorIds.length > 0
+        ? await this.employeeRepo.find({
+            where: { userId: In(creatorIds) },
+            select: ['userId', 'firstName', 'lastName'],
+          })
+        : [];
 
     // Create a map of userId to employee name
     const creatorIdToNameMap = new Map<string, string>();
-    employees.forEach(emp => {
+    employees.forEach((emp) => {
       const fullName = `${emp.firstName} ${emp.lastName || ''}`.trim();
       creatorIdToNameMap.set(emp.userId, fullName);
     });
@@ -280,8 +317,9 @@ export class PollsService {
 
         const now = new Date();
         const isActive: boolean = Boolean(
-          (poll.start_time && poll.start_time <= now) &&
-          (poll.end_time ? poll.end_time >= now : true)
+          poll.start_time &&
+            poll.start_time <= now &&
+            (poll.end_time ? poll.end_time >= now : true),
         );
 
         return {
@@ -297,9 +335,9 @@ export class PollsService {
           updated_at: poll.updated_at,
           total_responses: parseInt(responseCount.count) || 0,
           is_active: isActive,
-          questions: poll.questions?.length || 0
+          questions: poll.questions?.length || 0,
         };
-      })
+      }),
     );
 
     return pollsSummary;
@@ -328,9 +366,9 @@ export class PollsService {
         const analytics = await this.getPollAnalytics(poll.id);
         return {
           poll,
-          analytics
+          analytics,
         };
-      })
+      }),
     );
 
     return pollsWithAnalytics;
@@ -339,7 +377,7 @@ export class PollsService {
   async findAll(): Promise<Poll[]> {
     return await this.pollRepo.find({
       relations: ['questions', 'questions.options'],
-      order: { created_at: 'DESC' }
+      order: { created_at: 'DESC' },
     });
   }
 
@@ -385,7 +423,9 @@ export class PollsService {
       throw new NotFoundException('Poll not found');
     }
 
-    const question = await this.questionRepo.findOne({ where: { id: data.question_id } });
+    const question = await this.questionRepo.findOne({
+      where: { id: data.question_id },
+    });
     if (!question) {
       throw new NotFoundException('Question not found');
     }
@@ -395,73 +435,79 @@ export class PollsService {
   }
 
   //New api
- // Simplified version - Get employees with basic response status
-async getEmployeeResponsesByQuestion(
-  questionId: string, 
-  organizationId?: string
-): Promise<SimpleQuestionResponseDto> {
-  // Validate question exists
-  const question = await this.questionRepo.findOne({
-    where: { id: questionId },
-    relations: ['poll']
-  });
-
-  if (!question) {
-    throw new NotFoundException('Question not found');
-  }
-
-  // Get organization ID - either provided or derive from poll creator
-  let orgId = organizationId;
-  if (!orgId) {
-    const pollCreator = await this.employeeRepo.findOne({
-      where: { userId: question.poll.created_by },
-      select: ['organizationId']
+  // Simplified version - Get employees with basic response status
+  async getEmployeeResponsesByQuestion(
+    questionId: string,
+    organizationId?: string,
+  ): Promise<SimpleQuestionResponseDto> {
+    // Validate question exists
+    const question = await this.questionRepo.findOne({
+      where: { id: questionId },
+      relations: ['poll'],
     });
-    
-    if (!pollCreator) {
-      throw new NotFoundException('Cannot determine organization for this poll');
+
+    if (!question) {
+      throw new NotFoundException('Question not found');
     }
-    orgId = pollCreator.organizationId;
+
+    // Get organization ID - either provided or derive from poll creator
+    let orgId = organizationId;
+    if (!orgId) {
+      const pollCreator = await this.employeeRepo.findOne({
+        where: { userId: question.poll.created_by },
+        select: ['organizationId'],
+      });
+
+      if (!pollCreator) {
+        throw new NotFoundException(
+          'Cannot determine organization for this poll',
+        );
+      }
+      orgId = pollCreator.organizationId;
+    }
+
+    // Get all active employees for the organization
+    const employees = await this.employeeRepo.find({
+      where: {
+        organizationId: orgId,
+        status: 'active',
+      },
+      select: ['id', 'userId', 'firstName', 'lastName'], // Only select needed fields
+      order: { firstName: 'ASC' },
+    });
+
+    // Get user IDs who responded to this question
+    const respondedUserIds = await this.pollResponseRepo
+      .createQueryBuilder('response')
+      .select('DISTINCT response.user_id', 'user_id')
+      .where('response.question_id = :questionId', { questionId })
+      .andWhere('response.user_id IS NOT NULL')
+      .getRawMany();
+
+    // Create a Set for faster lookup
+    const respondedUserSet = new Set(respondedUserIds.map((r) => r.user_id));
+
+    // Build simplified employee list
+    const employeeStatuses: SimpleEmployeeResponseDto[] = employees.map(
+      (employee) => ({
+        employee_id: employee.id,
+        employee_name:
+          `${employee.firstName} ${employee.lastName || ''}`.trim(),
+        has_responded: respondedUserSet.has(employee.userId),
+      }),
+    );
+
+    const respondedCount = employeeStatuses.filter(
+      (emp) => emp.has_responded,
+    ).length;
+    const totalEmployees = employeeStatuses.length;
+
+    return {
+      question_id: questionId,
+      question_text: question.question_text,
+      total_employees: totalEmployees,
+      responded_count: respondedCount,
+      employees: employeeStatuses,
+    };
   }
-  
-  // Get all active employees for the organization
-  const employees = await this.employeeRepo.find({
-    where: { 
-      organizationId: orgId,
-      status: 'active'
-    },
-    select: ['id', 'userId', 'firstName', 'lastName'], // Only select needed fields
-    order: { firstName: 'ASC' }
-  });
-
-  // Get user IDs who responded to this question
-  const respondedUserIds = await this.pollResponseRepo
-    .createQueryBuilder('response')
-    .select('DISTINCT response.user_id', 'user_id')
-    .where('response.question_id = :questionId', { questionId })
-    .andWhere('response.user_id IS NOT NULL')
-    .getRawMany();
-
-  // Create a Set for faster lookup
-  const respondedUserSet = new Set(respondedUserIds.map(r => r.user_id));
-
-  // Build simplified employee list
-  const employeeStatuses: SimpleEmployeeResponseDto[] = employees.map(employee => ({
-    employee_id: employee.id,
-    employee_name: `${employee.firstName} ${employee.lastName || ''}`.trim(),
-    has_responded: respondedUserSet.has(employee.userId)
-  }));
-
-  const respondedCount = employeeStatuses.filter(emp => emp.has_responded).length;
-  const totalEmployees = employeeStatuses.length;
-
-  return {
-    question_id: questionId,
-    question_text: question.question_text,
-    total_employees: totalEmployees,
-    responded_count: respondedCount,
-    employees: employeeStatuses
-  };
-}
-
 }

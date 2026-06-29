@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Organization } from '../../auth-core/entities/organization.entity';
 
 @Entity('attendance_settings')
@@ -27,10 +35,22 @@ export class AttendanceSettings {
   lateThresholdMinutes!: number;
 
   // Location Configuration
-  @Column({ name: 'office_latitude', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({
+    name: 'office_latitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   officeLatitude!: number | null;
 
-  @Column({ name: 'office_longitude', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({
+    name: 'office_longitude',
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
   officeLongitude!: number | null;
 
   @Column({ name: 'office_location_name', type: 'varchar', nullable: true })
@@ -55,7 +75,11 @@ export class AttendanceSettings {
   @Column({ name: 'enable_checkin_validation', type: 'boolean', default: true })
   enableCheckinValidation!: boolean;
 
-  @Column({ name: 'enable_checkout_validation', type: 'boolean', default: true })
+  @Column({
+    name: 'enable_checkout_validation',
+    type: 'boolean',
+    default: true,
+  })
   enableCheckoutValidation!: boolean;
 
   // Half Day Configuration

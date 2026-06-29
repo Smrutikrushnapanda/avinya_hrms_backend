@@ -1,7 +1,22 @@
-import { Controller, Post, Body, Put, Param, Get, Delete, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Put,
+  Param,
+  Get,
+  Delete,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { OrganizationService } from '../services/organization.service';
-import { CreateOrganizationDto, UpdateOrganizationDto, ChangeCredentialsDto, StartTrialDto } from '../dto/organization.dto';
+import {
+  CreateOrganizationDto,
+  UpdateOrganizationDto,
+  ChangeCredentialsDto,
+  StartTrialDto,
+} from '../dto/organization.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import {
   SwaggerCreateOrganization,
@@ -31,8 +46,16 @@ export class OrganizationController {
   @UseGuards(JwtAuthGuard)
   @Put(':id')
   @SwaggerUpdateOrganization()
-  update(@Param('id') id: string, @Body() body: UpdateOrganizationDto, @Request() req: any) {
-    return this.orgService.update(id, body, req.user?.userId || body.updatedBy || 'system');
+  update(
+    @Param('id') id: string,
+    @Body() body: UpdateOrganizationDto,
+    @Request() req: any,
+  ) {
+    return this.orgService.update(
+      id,
+      body,
+      req.user?.userId || body.updatedBy || 'system',
+    );
   }
 
   @UseGuards(JwtAuthGuard)

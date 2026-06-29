@@ -76,7 +76,10 @@ export class MailService {
     private orgRepo: Repository<Organization>,
   ) {
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('BREVO_SMTP_HOST', 'smtp-relay.brevo.com'),
+      host: this.configService.get<string>(
+        'BREVO_SMTP_HOST',
+        'smtp-relay.brevo.com',
+      ),
       port: this.configService.get<number>('BREVO_SMTP_PORT', 587),
       secure: false,
       auth: {
@@ -97,8 +100,14 @@ export class MailService {
   }
 
   private get fromAddress(): string {
-    const name = this.configService.get<string>('MAIL_FROM_NAME', 'HRMS Notifications');
-    const email = this.configService.get<string>('MAIL_FROM_EMAIL', 'a3a15c001@smtp-brevo.com');
+    const name = this.configService.get<string>(
+      'MAIL_FROM_NAME',
+      'HRMS Notifications',
+    );
+    const email = this.configService.get<string>(
+      'MAIL_FROM_EMAIL',
+      'a3a15c001@smtp-brevo.com',
+    );
     return `"${name}" <${email}>`;
   }
 
@@ -119,7 +128,11 @@ export class MailService {
     });
   }
 
-  private buildEmailWrapper(orgName: string, orgLogoUrl: string | null, content: string): string {
+  private buildEmailWrapper(
+    orgName: string,
+    orgLogoUrl: string | null,
+    content: string,
+  ): string {
     const logoHtml = orgLogoUrl
       ? `<img src="${orgLogoUrl}" alt="${orgName}" style="max-height:40px;max-width:160px;object-fit:contain;" />`
       : `<span style="font-size:18px;font-weight:700;color:#ffffff;">${orgName}</span>`;
@@ -192,9 +205,13 @@ export class MailService {
   private async send(options: nodemailer.SendMailOptions): Promise<void> {
     try {
       await this.transporter.sendMail(options);
-      this.logger.log(`Email sent to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}`);
+      this.logger.log(
+        `Email sent to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to send email to ${options.to}: ${error.message}`);
+      this.logger.error(
+        `Failed to send email to ${options.to}: ${error.message}`,
+      );
     }
   }
 
@@ -227,13 +244,17 @@ export class MailService {
           </table>
         </div>
 
-        ${meeting.meetingLink ? `
+        ${
+          meeting.meetingLink
+            ? `
         <div style="text-align:center;margin:24px 0;">
           <a href="${meeting.meetingLink}" style="display:inline-block;background:#3b82f6;color:#ffffff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">
             Join Meeting
           </a>
           <p style="margin:8px 0 0;font-size:12px;color:#9aa0ac;">or copy: ${meeting.meetingLink}</p>
-        </div>` : ''}
+        </div>`
+            : ''
+        }
 
         <p style="margin:24px 0 0;font-size:14px;color:#6b7280;">Please add this to your calendar and be ready on time.</p>
       `;
@@ -302,15 +323,18 @@ export class MailService {
     const orgEmail = org?.email;
 
     const isApproved = status === 'APPROVED';
-    const heading = isApproved ? 'WFH Request Approved' : 'WFH Request Rejected';
+    const heading = isApproved
+      ? 'WFH Request Approved'
+      : 'WFH Request Rejected';
     const headingColor = isApproved ? '#16a34a' : '#dc2626';
     const intro = isApproved
       ? `Hi ${recipient.firstName}, your Work from Home request has been approved.`
       : `Hi ${recipient.firstName}, unfortunately your Work from Home request has been rejected.`;
 
-    const dateRange = details.endDate && details.endDate !== details.date
-      ? `${details.date} – ${details.endDate}`
-      : details.date;
+    const dateRange =
+      details.endDate && details.endDate !== details.date
+        ? `${details.date} – ${details.endDate}`
+        : details.date;
 
     const content = `
       <h2 style="margin:0 0 8px;font-size:24px;color:${headingColor};">${heading}</h2>
@@ -326,9 +350,11 @@ export class MailService {
         </table>
       </div>
 
-      ${isApproved
-        ? `<p style="margin:0;font-size:14px;color:#6b7280;">Please ensure you are available online during working hours and log your attendance via the HRMS portal.</p>`
-        : `<p style="margin:0;font-size:14px;color:#6b7280;">For more information, please contact your manager or the HR department.</p>`}
+      ${
+        isApproved
+          ? `<p style="margin:0;font-size:14px;color:#6b7280;">Please ensure you are available online during working hours and log your attendance via the HRMS portal.</p>`
+          : `<p style="margin:0;font-size:14px;color:#6b7280;">For more information, please contact your manager or the HR department.</p>`
+      }
     `;
 
     await this.send({
@@ -353,7 +379,9 @@ export class MailService {
     const orgEmail = org?.email;
 
     const isApproved = status === 'APPROVED';
-    const heading = isApproved ? 'Leave Request Approved' : 'Leave Request Rejected';
+    const heading = isApproved
+      ? 'Leave Request Approved'
+      : 'Leave Request Rejected';
     const headingColor = isApproved ? '#16a34a' : '#dc2626';
     const intro = isApproved
       ? `Hi ${recipient.firstName}, your leave request has been approved.`
@@ -375,9 +403,11 @@ export class MailService {
         </table>
       </div>
 
-      ${isApproved
-        ? `<p style="margin:0;font-size:14px;color:#6b7280;">Your leave balance has been updated accordingly. Have a good time off!</p>`
-        : `<p style="margin:0;font-size:14px;color:#6b7280;">For more information, please contact your manager or the HR department.</p>`}
+      ${
+        isApproved
+          ? `<p style="margin:0;font-size:14px;color:#6b7280;">Your leave balance has been updated accordingly. Have a good time off!</p>`
+          : `<p style="margin:0;font-size:14px;color:#6b7280;">For more information, please contact your manager or the HR department.</p>`
+      }
     `;
 
     await this.send({
@@ -389,7 +419,9 @@ export class MailService {
     });
   }
 
-  async sendResignationRequestToHr(details: ResignationRequestToHrDetails): Promise<void> {
+  async sendResignationRequestToHr(
+    details: ResignationRequestToHrDetails,
+  ): Promise<void> {
     const org = await this.getOrg(details.organizationId);
     const orgName = org?.organizationName ?? 'Your Organization';
     const orgEmail = org?.email;
@@ -482,7 +514,9 @@ export class MailService {
     });
   }
 
-  async sendEmployeeCredentials(details: EmployeeCredentialsDetails): Promise<void> {
+  async sendEmployeeCredentials(
+    details: EmployeeCredentialsDetails,
+  ): Promise<void> {
     const org = await this.getOrg(details.organizationId);
     const orgName = org?.organizationName ?? 'Your Organization';
     const orgEmail = org?.email;

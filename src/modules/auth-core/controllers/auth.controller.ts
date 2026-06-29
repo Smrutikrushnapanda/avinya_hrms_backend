@@ -58,35 +58,37 @@ export class AuthController {
     description: 'User logged in successfully',
     schema: {
       example: {
-        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwODkzNjI5MS1kOGY0LTQ0MjktYWM1MS0yODc5ZWEzNGRmNDMiLCJ1c2VyTmFtZSI6ImFsb2suc2Fob29AcGFuY2hzb2Z0dGVjaG5vbG9naWVzLmNvbSIsImZpcnN0TmFtZSI6IkFsb2siLCJtaWRkbGVOYW1lIjoiIiwibGFzdE5hbWUiOiJTYWhvbyIsImdlbmRlciI6Ik1BTEUiLCJkb2IiOiIxOTk1LTA1LTI0IiwiZW1haWwiOiJhbG9rLnNhaG9vQHBhbmNoc29mdHRlY2hub2xvZ2llcy5jb20iLCJtb2JpbGVOdW1iZXIiOiI5NjU4MDQ4MjM1Iiwib3JnYW5pemF0aW9uSWQiOiIyNGZhY2QyMS0yNjVhLTRlZGQtOGZkMS1iYzY5YTAzNmY3NTUiLCJyb2xlcyI6W3siaWQiOiJlNWI3NjFmNi1kNTU3LTRkNDUtYjcyNC1hYTFiM2IyY2I5NWEiLCJyb2xlTmFtZSI6IkVNUExPWUVFIn1dLCJtdXN0Q2hhbmdlUGFzc3dvcmQiOnRydWUsImlhdCI6MTc1MjI5OTIyMSwiZXhwIjoxNzUyMzAyODIxfQ.3xusjy6rEaguYYD5s8eIlQf-CD2SfA8ibxg_R_K-gJc",
-        "user": {
-          "id": "08936291-d8f4-4429-ac51-2879ea34df43",
-          "userName": "smruti@gmail.com",
-          "email": "smruti@gmail.com",
-          "password": "$2b$12$Uzo/gUA/0kBehY0YNWYfreGrPvkj7dCnp9SDQum8h3rOHcrXyqPme",
-          "firstName": "Alok",
-          "middleName": "",
-          "lastName": "Sahoo",
-          "dob": "1995-05-24",
-          "gender": "MALE",
-          "mobileNumber": "9658048235",
-          "organization": {
-            "id": "24facd21-265a-4edd-8fd1-bc69a036f755"
+        access_token:
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwODkzNjI5MS1kOGY0LTQ0MjktYWM1MS0yODc5ZWEzNGRmNDMiLCJ1c2VyTmFtZSI6ImFsb2suc2Fob29AcGFuY2hzb2Z0dGVjaG5vbG9naWVzLmNvbSIsImZpcnN0TmFtZSI6IkFsb2siLCJtaWRkbGVOYW1lIjoiIiwibGFzdE5hbWUiOiJTYWhvbyIsImdlbmRlciI6Ik1BTEUiLCJkb2IiOiIxOTk1LTA1LTI0IiwiZW1haWwiOiJhbG9rLnNhaG9vQHBhbmNoc29mdHRlY2hub2xvZ2llcy5jb20iLCJtb2JpbGVOdW1iZXIiOiI5NjU4MDQ4MjM1Iiwib3JnYW5pemF0aW9uSWQiOiIyNGZhY2QyMS0yNjVhLTRlZGQtOGZkMS1iYzY5YTAzNmY3NTUiLCJyb2xlcyI6W3siaWQiOiJlNWI3NjFmNi1kNTU3LTRkNDUtYjcyNC1hYTFiM2IyY2I5NWEiLCJyb2xlTmFtZSI6IkVNUExPWUVFIn1dLCJtdXN0Q2hhbmdlUGFzc3dvcmQiOnRydWUsImlhdCI6MTc1MjI5OTIyMSwiZXhwIjoxNzUyMzAyODIxfQ.3xusjy6rEaguYYD5s8eIlQf-CD2SfA8ibxg_R_K-gJc',
+        user: {
+          id: '08936291-d8f4-4429-ac51-2879ea34df43',
+          userName: 'smruti@gmail.com',
+          email: 'smruti@gmail.com',
+          password:
+            '$2b$12$Uzo/gUA/0kBehY0YNWYfreGrPvkj7dCnp9SDQum8h3rOHcrXyqPme',
+          firstName: 'Alok',
+          middleName: '',
+          lastName: 'Sahoo',
+          dob: '1995-05-24',
+          gender: 'MALE',
+          mobileNumber: '9658048235',
+          organization: {
+            id: '24facd21-265a-4edd-8fd1-bc69a036f755',
           },
-          "isActive": true,
-          "isEmailVerified": false,
-          "isMobileVerified": false,
-          "lastLoginAt": "2025-07-12T05:42:19.072Z",
-          "createdAt": "2025-07-12T05:32:15.484Z",
-          "updatedAt": "2025-07-12T05:42:19.072Z",
-          "mustChangePassword": true,
-          "roles": [
+          isActive: true,
+          isEmailVerified: false,
+          isMobileVerified: false,
+          lastLoginAt: '2025-07-12T05:42:19.072Z',
+          createdAt: '2025-07-12T05:32:15.484Z',
+          updatedAt: '2025-07-12T05:42:19.072Z',
+          mustChangePassword: true,
+          roles: [
             {
-              "id": "e5b761f6-d557-4d45-b724-aa1b3b2cb95a",
-              "roleName": "EMPLOYEE"
-            }
-          ]
-        }
+              id: 'e5b761f6-d557-4d45-b724-aa1b3b2cb95a',
+              roleName: 'EMPLOYEE',
+            },
+          ],
+        },
       },
     },
   })
@@ -185,8 +187,8 @@ export class AuthController {
         roles: [
           {
             id: 'e5b761f6-d557-4d45-b724-aa1b3b2cb95a',
-            roleName: 'EMPLOYEE'
-          }
+            roleName: 'EMPLOYEE',
+          },
         ],
         mustChangePassword: false,
         isApprover: true,

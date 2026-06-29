@@ -97,10 +97,7 @@ export class PostsController {
    * Like a post
    */
   @Post(':id/like')
-  async likePost(
-    @Param('id') id: string,
-    @Body() body: { userId: string },
-  ) {
+  async likePost(@Param('id') id: string, @Body() body: { userId: string }) {
     return this.postsService.likePost(id, body.userId);
   }
 
@@ -108,10 +105,7 @@ export class PostsController {
    * Unlike a post
    */
   @Delete(':id/like')
-  async unlikePost(
-    @Param('id') id: string,
-    @Query('userId') userId: string,
-  ) {
+  async unlikePost(@Param('id') id: string, @Query('userId') userId: string) {
     return this.postsService.unlikePost(id, userId);
   }
 
@@ -127,10 +121,7 @@ export class PostsController {
    * Check if user liked a post
    */
   @Get(':id/liked')
-  async hasUserLiked(
-    @Param('id') id: string,
-    @Query('userId') userId: string,
-  ) {
+  async hasUserLiked(@Param('id') id: string, @Query('userId') userId: string) {
     return { liked: await this.postsService.hasUserLiked(id, userId) };
   }
 

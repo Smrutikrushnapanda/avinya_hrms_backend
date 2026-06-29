@@ -30,7 +30,9 @@ export class MeetingController {
   }
 
   @Get('org/:organizationId/upcoming')
-  async getUpcomingMeetingsByOrg(@Param('organizationId') organizationId: string) {
+  async getUpcomingMeetingsByOrg(
+    @Param('organizationId') organizationId: string,
+  ) {
     return this.meetingService.getUpcomingMeetingsByOrg(organizationId);
   }
 
@@ -65,10 +67,7 @@ export class MeetingController {
   }
 
   @Put(':id/status')
-  async updateStatus(
-    @Param('id') id: string,
-    @Body('status') status: string,
-  ) {
+  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.meetingService.updateMeetingStatus(id, status);
   }
 }

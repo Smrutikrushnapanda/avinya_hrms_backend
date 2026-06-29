@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class MoveOrganizationConfigToSettingsTable1765000000000 implements MigrationInterface {
+export class MoveOrganizationConfigToSettingsTable1765000000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS organization_settings (
@@ -71,8 +73,12 @@ export class MoveOrganizationConfigToSettingsTable1765000000000 implements Migra
       DROP COLUMN IF EXISTS wfh_carry_forward_enabled
     `);
 
-    await queryRunner.query(`DROP TABLE IF EXISTS organization_mobile_header_settings`);
-    await queryRunner.query(`DROP TABLE IF EXISTS organization_resignation_settings`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS organization_mobile_header_settings`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS organization_resignation_settings`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

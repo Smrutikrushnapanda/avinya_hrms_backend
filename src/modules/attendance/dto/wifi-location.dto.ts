@@ -1,4 +1,10 @@
-import { IsUUID, IsString, IsOptional, IsNumber, IsBoolean } from 'class-validator';
+import {
+  IsUUID,
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateWifiLocationDto {

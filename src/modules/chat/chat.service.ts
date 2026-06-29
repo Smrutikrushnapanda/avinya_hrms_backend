@@ -149,13 +149,21 @@ export class ChatService {
         user: { id: currentUserId } as any,
         userId: currentUserId,
       },
-      { conversation: conv, conversationId: conv.id, user: otherUser, userId: otherUser.id },
+      {
+        conversation: conv,
+        conversationId: conv.id,
+        user: otherUser,
+        userId: otherUser.id,
+      },
     ]);
 
     return conv;
   }
 
-  async createGroupConversation(currentUser: User, dto: CreateGroupConversationDto) {
+  async createGroupConversation(
+    currentUser: User,
+    dto: CreateGroupConversationDto,
+  ) {
     const currentUserId = (currentUser as any)?.userId || currentUser.id;
     const currentOrgId =
       (currentUser as any)?.organizationId || currentUser.organizationId;
@@ -192,7 +200,12 @@ export class ChatService {
     return conv;
   }
 
-  async getMessages(conversationId: string, userId: string, limit = 30, before?: string) {
+  async getMessages(
+    conversationId: string,
+    userId: string,
+    limit = 30,
+    before?: string,
+  ) {
     const participant = await this.participantRepo.findOne({
       where: { conversation: { id: conversationId }, user: { id: userId } },
     });
@@ -218,12 +231,10 @@ export class ChatService {
     participant.lastReadAt = new Date();
     await this.participantRepo.save(participant);
 
-    return messages
-      .reverse()
-      .map((m) => ({
-        ...m,
-        readByAll: this.isReadByAll(m, participants),
-      }));
+    return messages.reverse().map((m) => ({
+      ...m,
+      readByAll: this.isReadByAll(m, participants),
+    }));
   }
 
   async sendMessage(
@@ -254,7 +265,9 @@ export class ChatService {
       text: dto.text?.trim() || undefined,
     });
     const message = await this.messageRepo.save(messageEntity);
-    await this.conversationRepo.update(conversationId, { updatedAt: new Date() });
+    await this.conversationRepo.update(conversationId, {
+      updatedAt: new Date(),
+    });
 
     const attachments: ChatAttachment[] = [];
     if (files?.length) {
@@ -303,7 +316,10 @@ export class ChatService {
     return payloadMessage;
   }
 
-  private isReadByAll(message: ChatMessage | null, participants: ChatParticipant[]) {
+  private isReadByAll(
+    message: ChatMessage | null,
+    participants: ChatParticipant[],
+  ) {
     if (!message) return false;
     const others = participants.filter((p) => p.userId !== message.senderId);
     if (!others.length) return false;

@@ -34,14 +34,18 @@ export class PerformanceController {
   @Post('settings/toggle')
   toggleEnabled(@GetUser() user: JwtPayload) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can toggle performance monitor');
+    if (!isAdmin)
+      throw new ForbiddenException(
+        'Only admins can toggle performance monitor',
+      );
     return this.service.toggleEnabled(user.organizationId);
   }
 
   @Patch('settings')
   updateSettings(@GetUser() user: JwtPayload, @Body() dto: UpdateSettingsDto) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can update settings');
+    if (!isAdmin)
+      throw new ForbiddenException('Only admins can update settings');
     return this.service.updateSettings(user.organizationId, dto);
   }
 
@@ -62,7 +66,8 @@ export class PerformanceController {
   @Delete('questions/:id')
   deleteQuestion(@Param('id') id: string, @GetUser() user: JwtPayload) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can delete questions');
+    if (!isAdmin)
+      throw new ForbiddenException('Only admins can delete questions');
     return this.service.deleteQuestion(id, user.organizationId);
   }
 
@@ -84,14 +89,20 @@ export class PerformanceController {
 
   @Get('team')
   getTeamWithReviews(@GetUser() user: JwtPayload) {
-    return this.service.getTeamMembersWithReviews(user.userId, user.organizationId);
+    return this.service.getTeamMembersWithReviews(
+      user.userId,
+      user.organizationId,
+    );
   }
 
   // ─── All employees for HR view ────────────────────────────────────────────
 
   @Get('employees')
   getAllEmployeesForHr(@GetUser() user: JwtPayload) {
-    return this.service.getAllEmployeesForHrView(user.userId, user.organizationId);
+    return this.service.getAllEmployeesForHrView(
+      user.userId,
+      user.organizationId,
+    );
   }
 
   // ─── Reviews ──────────────────────────────────────────────────────────────
@@ -102,10 +113,19 @@ export class PerformanceController {
   }
 
   @Post('reviews/manager')
-  async submitManagerReview(@GetUser() user: JwtPayload, @Body() dto: SubmitReviewDto) {
-    const { isManager } = await this.service.checkIsManager(user.userId, user.organizationId);
+  async submitManagerReview(
+    @GetUser() user: JwtPayload,
+    @Body() dto: SubmitReviewDto,
+  ) {
+    const { isManager } = await this.service.checkIsManager(
+      user.userId,
+      user.organizationId,
+    );
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isManager && !isAdmin) throw new ForbiddenException('Only managers/admins can submit team reviews');
+    if (!isManager && !isAdmin)
+      throw new ForbiddenException(
+        'Only managers/admins can submit team reviews',
+      );
     return this.service.submitManagerReview(user.userId, dto);
   }
 

@@ -1,4 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { LeaveType } from './leave-type.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
@@ -21,13 +28,25 @@ export class EmployeeLeaveLimitEntity {
   @JoinColumn({ name: 'organization_id' })
   organization!: Organization;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum days allowed per year. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum days allowed per year. NULL = no limit',
+  })
   maxDaysPerYear: number | null = null;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum paid leave days allowed per month. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum paid leave days allowed per month. NULL = no limit',
+  })
   maxDaysPerMonth: number | null = null;
 
-  @Column({ type: 'int', nullable: true, comment: 'Maximum days allowed per request. NULL = no limit' })
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum days allowed per request. NULL = no limit',
+  })
   maxDaysPerRequest: number | null = null;
 
   @Column({ name: 'is_enabled', default: true })

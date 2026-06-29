@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { DepartmentService, DepartmentStatistics } from './department.service';
@@ -19,14 +29,19 @@ export class DepartmentController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new department' })
-  async create(@Body() data: { name: string; code: string; organizationId: string }) {
+  async create(
+    @Body() data: { name: string; code: string; organizationId: string },
+  ) {
     const department = await this.departmentService.create(data);
     return { data: department };
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update a department' })
-  async update(@Param('id') id: string, @Body() data: { name?: string; code?: string }) {
+  async update(
+    @Param('id') id: string,
+    @Body() data: { name?: string; code?: string },
+  ) {
     const department = await this.departmentService.update(id, data);
     return { data: department };
   }
@@ -41,8 +56,11 @@ export class DepartmentController {
   @Get('statistics')
   @ApiOperation({ summary: 'Get department statistics with employee counts' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
-  async getStatistics(@Query('organizationId') organizationId: string): Promise<{ data: DepartmentStatistics[] }> {
-    const statistics = await this.departmentService.getStatistics(organizationId);
+  async getStatistics(
+    @Query('organizationId') organizationId: string,
+  ): Promise<{ data: DepartmentStatistics[] }> {
+    const statistics =
+      await this.departmentService.getStatistics(organizationId);
     return { data: statistics };
   }
 }

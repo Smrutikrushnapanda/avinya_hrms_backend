@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, IsUrl, Length, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Length,
+  Min,
+} from 'class-validator';
 
 export class UpdateProjectDocumentDto {
   @IsOptional()

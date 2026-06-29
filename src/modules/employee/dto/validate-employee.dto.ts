@@ -1,7 +1,4 @@
-import {
-  IsUUID,
-  IsOptional,
-} from 'class-validator';
+import { IsUUID, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ValidateEmployeeDto {
@@ -20,4 +17,3 @@ export class ValidateEmployeeDto {
   @IsOptional()
   organizationId?: string;
 }
-

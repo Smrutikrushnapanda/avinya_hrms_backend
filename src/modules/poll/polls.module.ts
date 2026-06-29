@@ -9,7 +9,15 @@ import { PollResponse } from './entities/poll-response.entity';
 import { Employee } from '../employee/entities/employee.entity'; // ADDED
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Poll, PollQuestion, PollOption, PollResponse, Employee])], // ADDED Employee
+  imports: [
+    TypeOrmModule.forFeature([
+      Poll,
+      PollQuestion,
+      PollOption,
+      PollResponse,
+      Employee,
+    ]),
+  ], // ADDED Employee
   controllers: [PollsController],
   providers: [PollsService],
 })

@@ -1,4 +1,10 @@
-import { IsUUID, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import {
+  IsUUID,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export enum MissingType {
   IN = 'IN',

@@ -18,4 +18,3 @@ import { User } from '../auth-core/entities/user.entity';
   exports: [MeetingService],
 })
 export class MeetingModule {}
-

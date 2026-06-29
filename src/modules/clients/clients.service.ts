@@ -18,7 +18,9 @@ export class ClientsService {
         .toString(36)
         .slice(2, 6)
         .toUpperCase()}`;
-      const exists = await this.clientRepo.findOne({ where: { clientCode: code } });
+      const exists = await this.clientRepo.findOne({
+        where: { clientCode: code },
+      });
       if (!exists) return code;
     }
     return `CL-${Date.now().toString(36).toUpperCase()}`;
@@ -26,7 +28,8 @@ export class ClientsService {
 
   create(dto: CreateClientDto) {
     const saveClient = async () => {
-      const clientCode = dto.clientCode?.trim() || (await this.generateClientCode());
+      const clientCode =
+        dto.clientCode?.trim() || (await this.generateClientCode());
       const client = this.clientRepo.create({
         ...dto,
         clientCode,

@@ -41,7 +41,12 @@ export class Timesheet {
   @Column({ name: 'working_minutes', type: 'int' })
   workingMinutes: number;
 
-  @Column({ name: 'project_name', type: 'varchar', length: 150, nullable: true })
+  @Column({
+    name: 'project_name',
+    type: 'varchar',
+    length: 150,
+    nullable: true,
+  })
   projectName: string | null;
 
   @Column({ name: 'client_name', type: 'varchar', length: 150, nullable: true })

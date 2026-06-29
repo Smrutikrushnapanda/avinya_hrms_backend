@@ -9,7 +9,12 @@ export class PayrollSettings {
   @Column({ name: 'organization_id', type: 'uuid' })
   organizationId: string;
 
-  @Column({ name: 'company_name', type: 'varchar', length: 200, nullable: true })
+  @Column({
+    name: 'company_name',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
   companyName?: string;
 
   @Column({ name: 'address', type: 'text', nullable: true })
@@ -18,7 +23,12 @@ export class PayrollSettings {
   @Column({ name: 'logo_url', type: 'text', nullable: true })
   logoUrl?: string;
 
-  @Column({ name: 'primary_color', type: 'varchar', length: 20, nullable: true })
+  @Column({
+    name: 'primary_color',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
   primaryColor?: string;
 
   @Column({ name: 'footer_note', type: 'text', nullable: true })
@@ -36,13 +46,28 @@ export class PayrollSettings {
   @Column({ name: 'gstin_number', type: 'varchar', length: 32, nullable: true })
   gstinNumber?: string;
 
-  @Column({ name: 'pf_registration_number', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'pf_registration_number',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   pfRegistrationNumber?: string;
 
-  @Column({ name: 'esi_registration_number', type: 'varchar', length: 64, nullable: true })
+  @Column({
+    name: 'esi_registration_number',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   esiRegistrationNumber?: string;
 
-  @Column({ name: 'custom_fields', type: 'jsonb', nullable: true, default: () => "'[]'" })
+  @Column({
+    name: 'custom_fields',
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'[]'",
+  })
   customFields?: Array<{
     label: string;
     value: string;

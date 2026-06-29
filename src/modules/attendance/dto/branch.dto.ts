@@ -32,26 +32,38 @@ export class CreateBranchDto {
   @IsString()
   name!: string;
 
-  @ApiPropertyOptional({ example: '09:00:00', description: 'Work start time (HH:mm:ss)' })
+  @ApiPropertyOptional({
+    example: '09:00:00',
+    description: 'Work start time (HH:mm:ss)',
+  })
   @IsOptional()
   @IsString()
   @Matches(/^\d{2}:\d{2}:\d{2}$/)
   workStartTime?: string;
 
-  @ApiPropertyOptional({ example: '18:00:00', description: 'Work end time (HH:mm:ss)' })
+  @ApiPropertyOptional({
+    example: '18:00:00',
+    description: 'Work end time (HH:mm:ss)',
+  })
   @IsOptional()
   @IsString()
   @Matches(/^\d{2}:\d{2}:\d{2}$/)
   workEndTime?: string;
 
-  @ApiPropertyOptional({ example: 15, description: 'Grace minutes for late tolerance' })
+  @ApiPropertyOptional({
+    example: 15,
+    description: 'Grace minutes for late tolerance',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(240)
   graceMinutes?: number;
 
-  @ApiPropertyOptional({ example: 30, description: 'Late threshold in minutes' })
+  @ApiPropertyOptional({
+    example: 30,
+    description: 'Late threshold in minutes',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -81,7 +93,8 @@ export class CreateBranchDto {
 
   @ApiPropertyOptional({
     example: { '1': [2, 4], '6': [2, 4] },
-    description: 'Weekday off rules: key=weekday (1=Mon..6=Sat), value=weeks (1-5)',
+    description:
+      'Weekday off rules: key=weekday (1=Mon..6=Sat), value=weeks (1-5)',
   })
   @IsOptional()
   @IsObject()
@@ -99,7 +112,10 @@ export class CreateBranchDto {
   @IsNumber()
   officeLongitude?: number;
 
-  @ApiPropertyOptional({ example: 150, description: 'Allowed GPS radius (meters) for this branch' })
+  @ApiPropertyOptional({
+    example: 150,
+    description: 'Allowed GPS radius (meters) for this branch',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -110,7 +126,12 @@ export class CreateBranchDto {
     description: 'Alternate geofences for this branch',
     example: [
       { latitude: 20.35, longitude: 85.81, radiusMeters: 120, label: 'Gate A' },
-      { latitude: 20.36, longitude: 85.82, radiusMeters: 80, label: 'Warehouse' },
+      {
+        latitude: 20.36,
+        longitude: 85.82,
+        radiusMeters: 80,
+        label: 'Warehouse',
+      },
     ],
   })
   @IsOptional()
@@ -122,7 +143,10 @@ export class CreateBranchDto {
     label?: string;
   }[];
 
-  @ApiPropertyOptional({ example: true, description: 'Whether branch is active' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Whether branch is active',
+  })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

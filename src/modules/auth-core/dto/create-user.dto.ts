@@ -34,15 +34,24 @@ export class CreateUserDto {
   email: string;
 
   @IsOptional()
-  @IsMobilePhone('en-IN', {}, { message: 'Mobile number must be a valid Indian mobile number' })
+  @IsMobilePhone(
+    'en-IN',
+    {},
+    { message: 'Mobile number must be a valid Indian mobile number' },
+  )
   mobileNumber?: string;
 
   @IsOptional()
-  @IsDateString({}, { message: 'DOB must be a valid ISO 8601 date string (YYYY-MM-DD)' })
+  @IsDateString(
+    {},
+    { message: 'DOB must be a valid ISO 8601 date string (YYYY-MM-DD)' },
+  )
   dob?: string;
 
   @IsOptional()
-  @IsIn(['MALE', 'FEMALE', 'OTHER'], { message: 'Gender must be MALE, FEMALE or OTHER' })
+  @IsIn(['MALE', 'FEMALE', 'OTHER'], {
+    message: 'Gender must be MALE, FEMALE or OTHER',
+  })
   gender?: 'MALE' | 'FEMALE' | 'OTHER';
 
   @IsUUID('4', { message: 'organizationId must be a valid UUID' })

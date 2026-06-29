@@ -10,7 +10,14 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ApiTags, ApiOperation, ApiConsumes, ApiQuery, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiQuery,
+  ApiResponse,
+  ApiBody,
+} from '@nestjs/swagger';
 import { Common } from './common.service';
 import { Express } from 'express';
 import { DateTime } from 'luxon';
@@ -42,10 +49,27 @@ export class CommonController {
       },
     },
   })
-  @ApiQuery({ name: 'path', required: false, description: 'Folder path to store file' })
-  @ApiQuery({ name: 'public', required: false, description: 'Whether the file is public (true/false)' })
-  @ApiResponse({ status: 201, description: 'File uploaded successfully', schema: { example: { url: 'https://your-bucket/avatars/123-file.png' } } })
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiQuery({
+    name: 'path',
+    required: false,
+    description: 'Folder path to store file',
+  })
+  @ApiQuery({
+    name: 'public',
+    required: false,
+    description: 'Whether the file is public (true/false)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'File uploaded successfully',
+    schema: { example: { url: 'https://your-bucket/avatars/123-file.png' } },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Query('path') path: string,

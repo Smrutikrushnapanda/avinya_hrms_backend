@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ResignationRequest, ResignationStatus } from './entities/resignation-request.entity';
+import {
+  ResignationRequest,
+  ResignationStatus,
+} from './entities/resignation-request.entity';
 import {
   CreateResignationRequestDto,
   ReviewResignationRequestDto,
@@ -36,17 +39,23 @@ export class ResignationService {
 
   private hasReviewerRole(user: any): boolean {
     const roles = Array.isArray(user?.roles)
-      ? user.roles.map((r: { roleName?: string }) => String(r?.roleName || '').toUpperCase())
+      ? user.roles.map((r: { roleName?: string }) =>
+          String(r?.roleName || '').toUpperCase(),
+        )
       : [];
     return roles.includes('ADMIN') || roles.includes('HR');
   }
 
   private buildEmployeeName(employee?: Employee | null): string {
     if (!employee) return 'Employee';
-    return [employee.firstName, employee.middleName, employee.lastName]
-      .filter(Boolean)
-      .join(' ')
-      .trim() || employee.employeeCode || 'Employee';
+    return (
+      [employee.firstName, employee.middleName, employee.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      employee.employeeCode ||
+      'Employee'
+    );
   }
 
   private async getRequestById(id: string): Promise<ResignationRequest> {
@@ -88,7 +97,9 @@ export class ResignationService {
       where: { employeeUserId: userId, status: ResignationStatus.PENDING },
     });
     if (existingPending) {
-      throw new BadRequestException('You already have a pending resignation request.');
+      throw new BadRequestException(
+        'You already have a pending resignation request.',
+      );
     }
 
     const request = await this.resignationRepo.save(
@@ -113,7 +124,8 @@ export class ResignationService {
       message: request.message,
       proposedLastWorkingDay: request.proposedLastWorkingDay,
       resignationPolicy: organization.settings?.resignationPolicy || undefined,
-      noticePeriodDays: organization.settings?.resignationNoticePeriodDays || 30,
+      noticePeriodDays:
+        organization.settings?.resignationNoticePeriodDays || 30,
     });
 
     return this.getRequestById(request.id);
@@ -130,14 +142,18 @@ export class ResignationService {
 
   async getOrgRequests(user: any, status?: string) {
     if (!this.hasReviewerRole(user)) {
-      throw new ForbiddenException('Only HR/Admin can view organization resignation requests');
+      throw new ForbiddenException(
+        'Only HR/Admin can view organization resignation requests',
+      );
     }
     const organizationId = user?.organizationId;
     if (!organizationId) {
       throw new BadRequestException('Invalid organization context');
     }
 
-    const where: { organizationId: string; status?: ResignationStatus } = { organizationId };
+    const where: { organizationId: string; status?: ResignationStatus } = {
+      organizationId,
+    };
     if (status) {
       where.status = status.toUpperCase() as ResignationStatus;
     }
@@ -151,7 +167,9 @@ export class ResignationService {
 
   async reviewRequest(id: string, user: any, dto: ReviewResignationRequestDto) {
     if (!this.hasReviewerRole(user)) {
-      throw new ForbiddenException('Only HR/Admin can review resignation requests');
+      throw new ForbiddenException(
+        'Only HR/Admin can review resignation requests',
+      );
     }
 
     const reviewerUserId = this.getUserId(user);
@@ -162,10 +180,14 @@ export class ResignationService {
     const request = await this.getRequestById(id);
 
     if (request.organizationId !== user?.organizationId) {
-      throw new ForbiddenException('You cannot review a request outside your organization');
+      throw new ForbiddenException(
+        'You cannot review a request outside your organization',
+      );
     }
     if (request.status !== ResignationStatus.PENDING) {
-      throw new BadRequestException('This resignation request is already reviewed');
+      throw new BadRequestException(
+        'This resignation request is already reviewed',
+      );
     }
 
     const nextStatus = dto.status;
@@ -177,7 +199,8 @@ export class ResignationService {
     if (nextStatus === ResignationStatus.APPROVED) {
       const fallbackDate = new Date();
       fallbackDate.setDate(
-        fallbackDate.getDate() + (request.organization?.settings?.resignationNoticePeriodDays || 30),
+        fallbackDate.getDate() +
+          (request.organization?.settings?.resignationNoticePeriodDays || 30),
       );
       const canAllowEarly = Boolean(
         request.organization?.settings?.allowEarlyRelievingByAdmin,
@@ -191,7 +214,8 @@ export class ResignationService {
         dto.approvedLastWorkingDay ||
         request.proposedLastWorkingDay ||
         fallbackDate.toISOString().slice(0, 10);
-      request.allowEarlyRelieving = canAllowEarly && Boolean(dto.allowEarlyRelieving);
+      request.allowEarlyRelieving =
+        canAllowEarly && Boolean(dto.allowEarlyRelieving);
     } else {
       request.approvedLastWorkingDay = null;
       request.allowEarlyRelieving = false;
@@ -199,21 +223,30 @@ export class ResignationService {
 
     const saved = await this.resignationRepo.save(request);
 
-    const employeeEmail = request.employee?.workEmail || request.employeeUser?.email;
+    const employeeEmail =
+      request.employee?.workEmail || request.employeeUser?.email;
     if (employeeEmail) {
       await this.mailService.sendResignationStatusToEmployee({
         employeeEmail,
         employeeFirstName:
-          request.employee?.firstName || request.employeeUser?.firstName || 'Employee',
+          request.employee?.firstName ||
+          request.employeeUser?.firstName ||
+          'Employee',
         organizationId: request.organizationId,
-        status: saved.status as ResignationStatus.APPROVED | ResignationStatus.REJECTED,
+        status: saved.status as
+          | ResignationStatus.APPROVED
+          | ResignationStatus.REJECTED,
         hrRemarks: saved.hrRemarks,
         approvedLastWorkingDay: saved.approvedLastWorkingDay,
         allowEarlyRelieving: saved.allowEarlyRelieving,
         reviewerName: reviewer
-          ? [reviewer.firstName, reviewer.lastName].filter(Boolean).join(' ').trim() || reviewer.userName
+          ? [reviewer.firstName, reviewer.lastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || reviewer.userName
           : undefined,
-        resignationPolicy: request.organization?.settings?.resignationPolicy || undefined,
+        resignationPolicy:
+          request.organization?.settings?.resignationPolicy || undefined,
       });
     }
 

@@ -11,7 +11,11 @@ import { ProjectTestSheetSource } from './project-test-sheet-tab.entity';
 export type ProjectTestCaseStatus = 'pending' | 'resolved';
 
 @Entity('project_test_sheet_cases')
-@Index('idx_project_test_sheet_cases_scope', ['organizationId', 'projectSource', 'projectId'])
+@Index('idx_project_test_sheet_cases_scope', [
+  'organizationId',
+  'projectSource',
+  'projectId',
+])
 @Index('idx_project_test_sheet_cases_tab', ['tabId', 'rowIndex'])
 export class ProjectTestSheetCase {
   @PrimaryGeneratedColumn('uuid')
@@ -20,7 +24,12 @@ export class ProjectTestSheetCase {
   @Column({ name: 'project_id', type: 'uuid' })
   projectId: string;
 
-  @Column({ name: 'project_source', type: 'varchar', length: 20, default: 'standalone' })
+  @Column({
+    name: 'project_source',
+    type: 'varchar',
+    length: 20,
+    default: 'standalone',
+  })
   projectSource: ProjectTestSheetSource;
 
   @Column({ name: 'organization_id', type: 'uuid' })

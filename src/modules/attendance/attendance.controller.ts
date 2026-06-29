@@ -62,7 +62,9 @@ export class AttendanceController {
   ) {}
 
   @Get('photo-url')
-  @ApiOperation({ summary: 'Generate signed URL for stored attendance photo key' })
+  @ApiOperation({
+    summary: 'Generate signed URL for stored attendance photo key',
+  })
   @ApiQuery({ name: 'key', type: 'string', required: true })
   async getPhotoSignedUrl(@Query('key') key: string) {
     const signedUrl = await this.storageService.getSignedUrl(key);
@@ -237,7 +239,11 @@ export class AttendanceController {
   @Get('wifi-locations')
   @ApiOperation({ summary: 'List Wi-Fi locations for organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
-  @ApiResponse({ status: 200, description: 'List of Wi-Fi locations', type: [WifiLocation] })
+  @ApiResponse({
+    status: 200,
+    description: 'List of Wi-Fi locations',
+    type: [WifiLocation],
+  })
   async getWifiLocations(
     @Query('organizationId') organizationId: string,
   ): Promise<WifiLocation[]> {
@@ -248,7 +254,11 @@ export class AttendanceController {
   @Put('wifi-locations/:id')
   @ApiOperation({ summary: 'Update Wi-Fi location' })
   @ApiParam({ name: 'id', type: 'string' })
-  @ApiResponse({ status: 200, description: 'Updated Wi-Fi location', type: WifiLocation })
+  @ApiResponse({
+    status: 200,
+    description: 'Updated Wi-Fi location',
+    type: WifiLocation,
+  })
   async updateWifiLocation(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateWifiLocationDto,
@@ -409,7 +419,11 @@ export class AttendanceController {
         punchInTime: { type: 'string', format: 'date-time' },
         lastPunch: { type: 'string', format: 'date-time' },
         isOnBreak: { type: 'boolean' },
-        activeBreakSince: { type: 'string', format: 'date-time', nullable: true },
+        activeBreakSince: {
+          type: 'string',
+          format: 'date-time',
+          nullable: true,
+        },
       },
       example: {
         logs: [
@@ -687,8 +701,11 @@ export class AttendanceController {
     // If no date passed, use today's date in Asia/Kolkata
     const finalDate = date
       ? new Date(date)
-      : new Date(DateTime.now().setZone('Asia/Kolkata').toISODate() ?? new Date().toISOString().slice(0, 10));
-  
+      : new Date(
+          DateTime.now().setZone('Asia/Kolkata').toISODate() ??
+            new Date().toISOString().slice(0, 10),
+        );
+
     await this.attendanceService.generateDailyAttendanceSummary(finalDate);
     console.log(`Attendance summary generated for date ${finalDate}`);
     return { message: 'Summary generated' };
@@ -707,96 +724,95 @@ export class AttendanceController {
   }
 
   @Get('report')
-@ApiOperation({ summary: 'Get attendance report with user filters' })
-@ApiQuery({
-  name: 'organizationId',
-  type: 'string',
-  required: true,
-  example: '24facd21-265a-4edd-8fd1-bc69a036f755',
-})
-@ApiQuery({
-  name: 'year',
-  type: 'number',
-  required: true,
-  example: 2025,
-})
-@ApiQuery({
-  name: 'month',
-  type: 'number',
-  required: true,
-  example: 8,
-})
-@ApiQuery({
-  name: 'userIds',
-  type: 'string',
-  required: false,
-  description: 'Comma-separated user IDs or "ALL" for all users',
-  example: 'ALL or user1,user2,user3',
-})
-@ApiOkResponse({
-  description: 'Attendance report data with user filtering',
-  schema: {
-    type: 'object',
-    properties: {
-      reportData: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            userId: { type: 'string' },
-            userName: { type: 'string' },
-            email: { type: 'string' },
-            employeeCode: { type: 'string' },
-            totalWorkingDays: { type: 'number' },
-            presentDays: { type: 'number' },
-            absentDays: { type: 'number' },
-            halfDays: { type: 'number' },
-            onLeaveDays: { type: 'number' },
-            attendancePercentage: { type: 'number' },
-            totalWorkingHours: { type: 'number' },
-            averageWorkingHours: { type: 'number' },
-            dailyRecords: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  date: { type: 'string' },
-                  status: { type: 'string' },
-                  inTime: { type: 'string' },
-                  outTime: { type: 'string' },
-                  workingHours: { type: 'number' },
-                  isHoliday: { type: 'boolean' },
-                  isSunday: { type: 'boolean' },
+  @ApiOperation({ summary: 'Get attendance report with user filters' })
+  @ApiQuery({
+    name: 'organizationId',
+    type: 'string',
+    required: true,
+    example: '24facd21-265a-4edd-8fd1-bc69a036f755',
+  })
+  @ApiQuery({
+    name: 'year',
+    type: 'number',
+    required: true,
+    example: 2025,
+  })
+  @ApiQuery({
+    name: 'month',
+    type: 'number',
+    required: true,
+    example: 8,
+  })
+  @ApiQuery({
+    name: 'userIds',
+    type: 'string',
+    required: false,
+    description: 'Comma-separated user IDs or "ALL" for all users',
+    example: 'ALL or user1,user2,user3',
+  })
+  @ApiOkResponse({
+    description: 'Attendance report data with user filtering',
+    schema: {
+      type: 'object',
+      properties: {
+        reportData: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              userId: { type: 'string' },
+              userName: { type: 'string' },
+              email: { type: 'string' },
+              employeeCode: { type: 'string' },
+              totalWorkingDays: { type: 'number' },
+              presentDays: { type: 'number' },
+              absentDays: { type: 'number' },
+              halfDays: { type: 'number' },
+              onLeaveDays: { type: 'number' },
+              attendancePercentage: { type: 'number' },
+              totalWorkingHours: { type: 'number' },
+              averageWorkingHours: { type: 'number' },
+              dailyRecords: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    date: { type: 'string' },
+                    status: { type: 'string' },
+                    inTime: { type: 'string' },
+                    outTime: { type: 'string' },
+                    workingHours: { type: 'number' },
+                    isHoliday: { type: 'boolean' },
+                    isSunday: { type: 'boolean' },
+                  },
                 },
               },
             },
           },
         },
-      },
-      summary: {
-        type: 'object',
-        properties: {
-          totalEmployees: { type: 'number' },
-          period: { type: 'string' },
-          workingDays: { type: 'number' },
-          holidays: { type: 'number' },
+        summary: {
+          type: 'object',
+          properties: {
+            totalEmployees: { type: 'number' },
+            period: { type: 'string' },
+            workingDays: { type: 'number' },
+            holidays: { type: 'number' },
+          },
         },
       },
     },
-  },
-})
-async getAttendanceReport(
-  @Query('organizationId') organizationId: string,
-  @Query('year') year: number,
-  @Query('month') month: number,
-  @Query('userIds') userIds: string = 'ALL',
-) {
-  return this.attendanceService.getAttendanceReport(
-    organizationId,
-    year,
-    month,
-    userIds,
-  );
-}
-
+  })
+  async getAttendanceReport(
+    @Query('organizationId') organizationId: string,
+    @Query('year') year: number,
+    @Query('month') month: number,
+    @Query('userIds') userIds: string = 'ALL',
+  ) {
+    return this.attendanceService.getAttendanceReport(
+      organizationId,
+      year,
+      month,
+      userIds,
+    );
+  }
 }

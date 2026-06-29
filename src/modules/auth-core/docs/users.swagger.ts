@@ -27,7 +27,9 @@ export function SwaggerFindUserIdByDOB() {
 
 export function SwaggerRegisterUser() {
   return applyDecorators(
-    ApiOperation({ summary: 'Register a new user (applicant self registration)' }),
+    ApiOperation({
+      summary: 'Register a new user (applicant self registration)',
+    }),
     ApiBody({
       type: CreateRegisterDto,
       examples: {
@@ -94,9 +96,24 @@ export function SwaggerGetAllUsers() {
     ApiOperation({ summary: 'Get all users (with pagination, search, sort)' }),
     ApiQuery({ name: 'limit', required: false, type: Number, example: 10 }),
     ApiQuery({ name: 'offset', required: false, type: Number, example: 0 }),
-    ApiQuery({ name: 'search', required: false, type: String, example: 'Alok' }),
-    ApiQuery({ name: 'sortField', required: false, type: String, example: 'user_name' }),
-    ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'], example: 'ASC' }),
+    ApiQuery({
+      name: 'search',
+      required: false,
+      type: String,
+      example: 'Alok',
+    }),
+    ApiQuery({
+      name: 'sortField',
+      required: false,
+      type: String,
+      example: 'user_name',
+    }),
+    ApiQuery({
+      name: 'sortOrder',
+      required: false,
+      enum: ['ASC', 'DESC'],
+      example: 'ASC',
+    }),
     ApiResponse({ status: 200, description: 'List of users' }),
   );
 }
@@ -104,7 +121,12 @@ export function SwaggerGetAllUsers() {
 export function SwaggerGetUserById() {
   return applyDecorators(
     ApiOperation({ summary: 'Get user by ID' }),
-    ApiParam({ name: 'user_id', required: true, type: String, example: 'user-uuid' }),
+    ApiParam({
+      name: 'user_id',
+      required: true,
+      type: String,
+      example: 'user-uuid',
+    }),
     ApiResponse({ status: 200, description: 'User details' }),
   );
 }
@@ -112,7 +134,12 @@ export function SwaggerGetUserById() {
 export function SwaggerUpdateUser() {
   return applyDecorators(
     ApiOperation({ summary: 'Update user by ID' }),
-    ApiParam({ name: 'user_id', required: true, type: String, example: 'user-uuid' }),
+    ApiParam({
+      name: 'user_id',
+      required: true,
+      type: String,
+      example: 'user-uuid',
+    }),
     ApiBody({ type: UpdateUserDto }),
     ApiResponse({ status: 200, description: 'User updated' }),
   );
@@ -121,7 +148,12 @@ export function SwaggerUpdateUser() {
 export function SwaggerDeleteUser() {
   return applyDecorators(
     ApiOperation({ summary: 'Delete user by ID' }),
-    ApiParam({ name: 'user_id', required: true, type: String, example: 'user-uuid' }),
+    ApiParam({
+      name: 'user_id',
+      required: true,
+      type: String,
+      example: 'user-uuid',
+    }),
     ApiResponse({ status: 200, description: 'User deleted' }),
   );
 }

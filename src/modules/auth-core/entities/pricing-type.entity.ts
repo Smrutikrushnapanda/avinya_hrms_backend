@@ -14,13 +14,24 @@ export class PricingType {
   @Column({ name: 'type_name', type: 'varchar', length: 60, unique: true })
   typeName: string;
 
-  @Column({ name: 'price', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  @Column({
+    name: 'price',
+    type: 'numeric',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
   price?: string | null;
 
   @Column({ name: 'currency', type: 'varchar', length: 10, default: 'INR' })
   currency: string;
 
-  @Column({ name: 'billing_model', type: 'varchar', length: 30, default: 'MONTHLY' })
+  @Column({
+    name: 'billing_model',
+    type: 'varchar',
+    length: 30,
+    default: 'MONTHLY',
+  })
   billingModel: string;
 
   @Column({ name: 'is_custom_pricing', type: 'boolean', default: false })

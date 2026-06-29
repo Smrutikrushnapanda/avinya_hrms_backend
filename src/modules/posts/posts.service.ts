@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post, PostType } from './entities/post.entity';
@@ -69,11 +73,13 @@ export class PostsService {
           where: { postId: post.id },
           relations: ['user'],
         });
-        
+
         // Add passport photo to each like
         const likesWithPhotos = await Promise.all(
           likes.map(async (like) => {
-            const passportPhotoUrl = await this.getEmployeePassportPhoto(like.userId);
+            const passportPhotoUrl = await this.getEmployeePassportPhoto(
+              like.userId,
+            );
             return {
               ...like,
               user: {
@@ -81,7 +87,7 @@ export class PostsService {
                 passportPhotoUrl,
               },
             };
-          })
+          }),
         );
 
         const comments = await this.commentRepo.find({
@@ -93,7 +99,9 @@ export class PostsService {
         // Add passport photo to each comment
         const commentsWithPhotos = await Promise.all(
           comments.map(async (comment) => {
-            const passportPhotoUrl = await this.getEmployeePassportPhoto(comment.userId);
+            const passportPhotoUrl = await this.getEmployeePassportPhoto(
+              comment.userId,
+            );
             return {
               ...comment,
               user: {
@@ -101,7 +109,7 @@ export class PostsService {
                 passportPhotoUrl,
               },
             };
-          })
+          }),
         );
 
         return {
@@ -120,7 +128,10 @@ export class PostsService {
   /**
    * Get latest posts (for dashboard widget)
    */
-  async getLatestPosts(organizationId: string, limit: number = 5): Promise<any[]> {
+  async getLatestPosts(
+    organizationId: string,
+    limit: number = 5,
+  ): Promise<any[]> {
     const posts = await this.postRepo.find({
       where: { organizationId },
       relations: ['author'],
@@ -134,11 +145,13 @@ export class PostsService {
           where: { postId: post.id },
           relations: ['user'],
         });
-        
+
         // Add passport photo to each like
         const likesWithPhotos = await Promise.all(
           likes.map(async (like) => {
-            const passportPhotoUrl = await this.getEmployeePassportPhoto(like.userId);
+            const passportPhotoUrl = await this.getEmployeePassportPhoto(
+              like.userId,
+            );
             return {
               ...like,
               user: {
@@ -146,7 +159,7 @@ export class PostsService {
                 passportPhotoUrl,
               },
             };
-          })
+          }),
         );
 
         const comments = await this.commentRepo.find({
@@ -158,7 +171,9 @@ export class PostsService {
         // Add passport photo to each comment
         const commentsWithPhotos = await Promise.all(
           comments.map(async (comment) => {
-            const passportPhotoUrl = await this.getEmployeePassportPhoto(comment.userId);
+            const passportPhotoUrl = await this.getEmployeePassportPhoto(
+              comment.userId,
+            );
             return {
               ...comment,
               user: {
@@ -166,7 +181,7 @@ export class PostsService {
                 passportPhotoUrl,
               },
             };
-          })
+          }),
         );
 
         return {
@@ -216,7 +231,9 @@ export class PostsService {
     // Add passport photo to each like
     const likesWithPhotos = await Promise.all(
       likes.map(async (like) => {
-        const passportPhotoUrl = await this.getEmployeePassportPhoto(like.userId);
+        const passportPhotoUrl = await this.getEmployeePassportPhoto(
+          like.userId,
+        );
         return {
           ...like,
           user: {
@@ -224,7 +241,7 @@ export class PostsService {
             passportPhotoUrl,
           },
         };
-      })
+      }),
     );
 
     const comments = await this.commentRepo.find({
@@ -236,7 +253,9 @@ export class PostsService {
     // Add passport photo to each comment
     const commentsWithPhotos = await Promise.all(
       comments.map(async (comment) => {
-        const passportPhotoUrl = await this.getEmployeePassportPhoto(comment.userId);
+        const passportPhotoUrl = await this.getEmployeePassportPhoto(
+          comment.userId,
+        );
         return {
           ...comment,
           user: {
@@ -244,7 +263,7 @@ export class PostsService {
             passportPhotoUrl,
           },
         };
-      })
+      }),
     );
 
     return {
@@ -310,7 +329,10 @@ export class PostsService {
   /**
    * Unlike a post
    */
-  async unlikePost(postId: string, userId: string): Promise<{ message: string }> {
+  async unlikePost(
+    postId: string,
+    userId: string,
+  ): Promise<{ message: string }> {
     const result = await this.likeRepo.delete({ postId, userId });
     if (result.affected === 0) {
       throw new NotFoundException('Like not found');
@@ -382,7 +404,9 @@ export class PostsService {
   /**
    * Get employee passport photo by userId
    */
-  private async getEmployeePassportPhoto(userId: string): Promise<string | null> {
+  private async getEmployeePassportPhoto(
+    userId: string,
+  ): Promise<string | null> {
     const employee = await this.employeeRepo.findOne({
       where: { userId },
     });

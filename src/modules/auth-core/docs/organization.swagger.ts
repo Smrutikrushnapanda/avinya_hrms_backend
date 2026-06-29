@@ -1,5 +1,11 @@
 import { applyDecorators } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiParam, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 
 const ORG_EXAMPLE = {
   id: 'a1b2c3d4-0000-0000-0000-000000000001',
@@ -23,7 +29,9 @@ const ORG_EXAMPLE = {
 
 export function SwaggerCreateOrganization() {
   return applyDecorators(
-    ApiOperation({ summary: 'Create a new organization (auto-creates admin user)' }),
+    ApiOperation({
+      summary: 'Create a new organization (auto-creates admin user)',
+    }),
     ApiBody({
       schema: {
         example: {
@@ -45,7 +53,8 @@ export function SwaggerCreateOrganization() {
     }),
     ApiResponse({
       status: 201,
-      description: 'Organization created. Returns org data + default admin credentials.',
+      description:
+        'Organization created. Returns org data + default admin credentials.',
       schema: {
         example: {
           ...ORG_EXAMPLE,
@@ -61,7 +70,11 @@ export function SwaggerUpdateOrganization() {
   return applyDecorators(
     ApiBearerAuth(),
     ApiOperation({ summary: 'Update organization details' }),
-    ApiParam({ name: 'id', type: String, example: 'a1b2c3d4-0000-0000-0000-000000000001' }),
+    ApiParam({
+      name: 'id',
+      type: String,
+      example: 'a1b2c3d4-0000-0000-0000-000000000001',
+    }),
     ApiBody({
       schema: {
         example: {
@@ -84,7 +97,12 @@ export function SwaggerUpdateOrganization() {
     ApiResponse({
       status: 200,
       description: 'Updated organization',
-      schema: { example: { ...ORG_EXAMPLE, organizationName: 'Avinya Technologies Pvt Ltd' } },
+      schema: {
+        example: {
+          ...ORG_EXAMPLE,
+          organizationName: 'Avinya Technologies Pvt Ltd',
+        },
+      },
     }),
     ApiResponse({ status: 404, description: 'Organization not found' }),
   );
@@ -94,7 +112,11 @@ export function SwaggerChangeCredentials() {
   return applyDecorators(
     ApiBearerAuth(),
     ApiOperation({ summary: 'Change admin credentials for an organization' }),
-    ApiParam({ name: 'id', type: String, example: 'a1b2c3d4-0000-0000-0000-000000000001' }),
+    ApiParam({
+      name: 'id',
+      type: String,
+      example: 'a1b2c3d4-0000-0000-0000-000000000001',
+    }),
     ApiBody({
       schema: {
         example: {
@@ -120,7 +142,10 @@ export function SwaggerChangeCredentials() {
       },
     }),
     ApiResponse({ status: 400, description: 'Username already taken' }),
-    ApiResponse({ status: 404, description: 'Admin user not found in this organization' }),
+    ApiResponse({
+      status: 404,
+      description: 'Admin user not found in this organization',
+    }),
   );
 }
 
@@ -128,7 +153,11 @@ export function SwaggerDeleteOrganization() {
   return applyDecorators(
     ApiBearerAuth(),
     ApiOperation({ summary: 'Delete an organization and all its data' }),
-    ApiParam({ name: 'id', type: String, example: 'a1b2c3d4-0000-0000-0000-000000000001' }),
+    ApiParam({
+      name: 'id',
+      type: String,
+      example: 'a1b2c3d4-0000-0000-0000-000000000001',
+    }),
     ApiResponse({
       status: 200,
       description: 'Organization deleted',
@@ -151,8 +180,14 @@ export function SwaggerFindAllOrganizations() {
 
 export function SwaggerFindOneOrganization() {
   return applyDecorators(
-    ApiOperation({ summary: 'Get organization by ID (includes users and features)' }),
-    ApiParam({ name: 'id', type: String, example: 'a1b2c3d4-0000-0000-0000-000000000001' }),
+    ApiOperation({
+      summary: 'Get organization by ID (includes users and features)',
+    }),
+    ApiParam({
+      name: 'id',
+      type: String,
+      example: 'a1b2c3d4-0000-0000-0000-000000000001',
+    }),
     ApiResponse({
       status: 200,
       description: 'Organization details',

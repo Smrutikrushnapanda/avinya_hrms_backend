@@ -1,8 +1,24 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PayrollService } from './payroll.service';
-import { CreatePayrollRecordDto, SendPayslipDto, UpdatePayrollRecordDto, UpdatePayrollSettingsDto } from './dto/payroll.dto';
+import {
+  CreatePayrollRecordDto,
+  SendPayslipDto,
+  UpdatePayrollRecordDto,
+  UpdatePayrollSettingsDto,
+} from './dto/payroll.dto';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
@@ -51,7 +67,9 @@ export class PayrollController {
   }
 
   @Post(':id/send')
-  @ApiOperation({ summary: 'Send payslip to employee via email and/or in-app notification' })
+  @ApiOperation({
+    summary: 'Send payslip to employee via email and/or in-app notification',
+  })
   sendPayslip(@Param('id') id: string, @Body() dto: SendPayslipDto) {
     return this.payrollService.sendPayslip(id, dto.method || 'both');
   }
@@ -61,7 +79,10 @@ export class PayrollController {
   async downloadSlip(@Param('id') id: string, @Res() res: Response) {
     const pdf = await this.payrollService.generateSlipPdf(id);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=salary-slip-${id}.pdf`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=salary-slip-${id}.pdf`,
+    );
     return res.send(pdf);
   }
 
@@ -85,7 +106,10 @@ export class PayrollController {
 
   @Put('settings/:orgId')
   @ApiOperation({ summary: 'Update payroll settings' })
-  updateSettings(@Param('orgId') orgId: string, @Body() dto: UpdatePayrollSettingsDto) {
+  updateSettings(
+    @Param('orgId') orgId: string,
+    @Body() dto: UpdatePayrollSettingsDto,
+  ) {
     return this.payrollService.updateSettings(orgId, dto);
   }
 }

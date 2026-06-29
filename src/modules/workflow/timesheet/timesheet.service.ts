@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Timesheet } from './entities/timesheet.entity';
@@ -135,7 +139,10 @@ export class TimesheetService {
     }
 
     if (fromDate && toDate) {
-      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', { fromDate, toDate });
+      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', {
+        fromDate,
+        toDate,
+      });
     }
 
     qb.orderBy('ts.date', 'DESC');

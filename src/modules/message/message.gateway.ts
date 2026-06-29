@@ -1,4 +1,9 @@
-import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+} from '@nestjs/websockets';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 
@@ -8,19 +13,26 @@ import { Server, Socket } from 'socket.io';
     credentials: true,
   },
 })
-export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class MessageGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
   constructor(private readonly jwtService: JwtService) {}
 
   private socketIndex = new Map<string, { userId: string; orgId?: string }>();
-  private userConnections = new Map<string, { count: number; orgId?: string }>();
+  private userConnections = new Map<
+    string,
+    { count: number; orgId?: string }
+  >();
 
   handleConnection(client: Socket) {
     try {
       const authHeader = client.handshake.headers?.authorization || '';
-      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      const bearerToken = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : '';
       const token = (client.handshake.auth?.token as string) || bearerToken;
       if (!token) {
         client.disconnect(true);
@@ -29,7 +41,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
       const payload = this.jwtService.verify(token, {
         secret: process.env.JWT_SECRET_KEY,
-      }) as any;
+      });
 
       const userId = payload?.userId;
       const orgId = payload?.organizationId;

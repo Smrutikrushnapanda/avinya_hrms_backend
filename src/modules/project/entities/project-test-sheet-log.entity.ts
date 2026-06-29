@@ -1,8 +1,18 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ProjectTestSheetSource } from './project-test-sheet-tab.entity';
 
 @Entity('project_test_sheet_change_logs')
-@Index('idx_project_test_sheet_logs_scope', ['organizationId', 'projectSource', 'projectId'])
+@Index('idx_project_test_sheet_logs_scope', [
+  'organizationId',
+  'projectSource',
+  'projectId',
+])
 export class ProjectTestSheetChangeLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -10,7 +20,12 @@ export class ProjectTestSheetChangeLog {
   @Column({ name: 'project_id', type: 'uuid' })
   projectId: string;
 
-  @Column({ name: 'project_source', type: 'varchar', length: 20, default: 'standalone' })
+  @Column({
+    name: 'project_source',
+    type: 'varchar',
+    length: 20,
+    default: 'standalone',
+  })
   projectSource: ProjectTestSheetSource;
 
   @Column({ name: 'organization_id', type: 'uuid' })
@@ -40,7 +55,12 @@ export class ProjectTestSheetChangeLog {
   @Column({ name: 'changed_by_user_id', type: 'uuid', nullable: true })
   changedByUserId: string | null;
 
-  @Column({ name: 'changed_by_user_name', type: 'varchar', length: 150, nullable: true })
+  @Column({
+    name: 'changed_by_user_name',
+    type: 'varchar',
+    length: 150,
+    nullable: true,
+  })
   changedByUserName: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

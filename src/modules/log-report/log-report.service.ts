@@ -8,7 +8,10 @@ import { CreateLogReportDto } from './dto/log-report.dto';
 @Injectable()
 export class LogReportService {
   // In-memory cache: orgId → { value, expiresAt }
-  private readonly enabledCache = new Map<string, { value: boolean; expiresAt: number }>();
+  private readonly enabledCache = new Map<
+    string,
+    { value: boolean; expiresAt: number }
+  >();
   private readonly CACHE_TTL_MS = 60_000; // 1 minute
 
   constructor(
@@ -54,9 +57,14 @@ export class LogReportService {
     if (!organizationId) return false;
     const cached = this.enabledCache.get(organizationId);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    const settings = await this.settingsRepo.findOne({ where: { organizationId } });
+    const settings = await this.settingsRepo.findOne({
+      where: { organizationId },
+    });
     const value = settings ? settings.isEnabled : true;
-    this.enabledCache.set(organizationId, { value, expiresAt: Date.now() + this.CACHE_TTL_MS });
+    this.enabledCache.set(organizationId, {
+      value,
+      expiresAt: Date.now() + this.CACHE_TTL_MS,
+    });
     return value;
   }
 

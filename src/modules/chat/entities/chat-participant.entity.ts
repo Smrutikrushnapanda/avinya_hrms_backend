@@ -15,7 +15,9 @@ export class ChatParticipant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => ChatConversation, (c) => c.participants, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ChatConversation, (c) => c.participants, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'conversation_id' })
   conversation: ChatConversation;
 

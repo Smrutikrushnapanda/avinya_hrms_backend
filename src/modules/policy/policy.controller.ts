@@ -35,7 +35,8 @@ export class PolicyController {
   @Post()
   create(@GetUser() user: JwtPayload, @Body() dto: CreatePolicyDto) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can create policies');
+    if (!isAdmin)
+      throw new ForbiddenException('Only admins can create policies');
     return this.service.create(user.organizationId, user.userId, dto);
   }
 
@@ -46,14 +47,16 @@ export class PolicyController {
     @Body() dto: Partial<CreatePolicyDto>,
   ) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can update policies');
+    if (!isAdmin)
+      throw new ForbiddenException('Only admins can update policies');
     return this.service.update(id, user.organizationId, dto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @GetUser() user: JwtPayload) {
     const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can delete policies');
+    if (!isAdmin)
+      throw new ForbiddenException('Only admins can delete policies');
     return this.service.remove(id, user.organizationId);
   }
 }

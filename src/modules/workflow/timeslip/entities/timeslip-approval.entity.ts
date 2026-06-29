@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Timeslip } from './timeslip.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 
@@ -10,7 +16,9 @@ export class TimeslipApproval {
   @Column({ name: 'timeslip_id', type: 'uuid', nullable: true })
   timeslip_id: string | null;
 
-  @ManyToOne(() => Timeslip, (timeslip) => timeslip.approvals, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Timeslip, (timeslip) => timeslip.approvals, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'timeslip_id' })
   timeslip: Timeslip;
 

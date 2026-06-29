@@ -38,4 +38,3 @@ export class PostComment {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 }
-

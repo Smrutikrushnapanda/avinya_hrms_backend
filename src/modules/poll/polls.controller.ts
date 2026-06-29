@@ -15,7 +15,12 @@ import { PollsService } from './polls.service';
 import { CreatePollDto } from './dto/create-poll.dto';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { PollResponse } from './entities/poll-response.entity';
-import { PollAnalyticsDto, PollWithAnalyticsDto, PollSummaryDto, SimpleQuestionResponseDto } from './dto/poll-analytics.dto';
+import {
+  PollAnalyticsDto,
+  PollWithAnalyticsDto,
+  PollSummaryDto,
+  SimpleQuestionResponseDto,
+} from './dto/poll-analytics.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -101,7 +106,10 @@ export class PollsController {
   @Get(':id/analytics')
   @ApiOperation({ summary: 'Get detailed poll analytics with all responses' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
-  @ApiResponse({ status: 200, description: 'Poll analytics with response breakdown' })
+  @ApiResponse({
+    status: 200,
+    description: 'Poll analytics with response breakdown',
+  })
   async getPollAnalytics(@Param('id') id: string): Promise<PollAnalyticsDto> {
     return this.pollsService.getPollAnalytics(id);
   }
@@ -109,7 +117,10 @@ export class PollsController {
   // NEW: Get summary of all polls with response counts
   @Get('summary')
   @ApiOperation({ summary: 'Get summary of all polls with response counts' })
-  @ApiResponse({ status: 200, description: 'Polls summary with response statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Polls summary with response statistics',
+  })
   async getPollsSummary(): Promise<PollSummaryDto[]> {
     return this.pollsService.getPollsSummary();
   }
@@ -151,26 +162,31 @@ export class PollsController {
   }
 
   //New API
-// Simplified endpoint - only essential employee response data
-@Get('questions/:questionId/employee-responses')
-@ApiOperation({ 
-  summary: 'Get all employees with their response status for a specific poll question' 
-})
-@ApiParam({ name: 'questionId', description: 'Poll Question ID' })
-@ApiQuery({ 
-  name: 'organizationId', 
-  required: false, 
-  description: 'Organization ID (optional, will be derived from poll if not provided)' 
-})
-@ApiResponse({ 
-  status: 200, 
-  description: 'List of employees with their response status for the question'
-})
-async getEmployeeResponsesByQuestion(
-  @Param('questionId') questionId: string,
-  @Query('organizationId') organizationId?: string
-): Promise<SimpleQuestionResponseDto> {
-  return this.pollsService.getEmployeeResponsesByQuestion(questionId, organizationId);
-}
-
+  // Simplified endpoint - only essential employee response data
+  @Get('questions/:questionId/employee-responses')
+  @ApiOperation({
+    summary:
+      'Get all employees with their response status for a specific poll question',
+  })
+  @ApiParam({ name: 'questionId', description: 'Poll Question ID' })
+  @ApiQuery({
+    name: 'organizationId',
+    required: false,
+    description:
+      'Organization ID (optional, will be derived from poll if not provided)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'List of employees with their response status for the question',
+  })
+  async getEmployeeResponsesByQuestion(
+    @Param('questionId') questionId: string,
+    @Query('organizationId') organizationId?: string,
+  ): Promise<SimpleQuestionResponseDto> {
+    return this.pollsService.getEmployeeResponsesByQuestion(
+      questionId,
+      organizationId,
+    );
+  }
 }

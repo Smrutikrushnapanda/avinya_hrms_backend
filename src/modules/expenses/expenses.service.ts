@@ -2,7 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Expense } from './entities/expense.entity';
-import { CreateExpenseDto, UpdateExpenseStatusDto } from './dto/create-expense.dto';
+import {
+  CreateExpenseDto,
+  UpdateExpenseStatusDto,
+} from './dto/create-expense.dto';
 
 @Injectable()
 export class ExpensesService {
@@ -43,7 +46,10 @@ export class ExpensesService {
       .getMany();
   }
 
-  async updateStatus(id: string, dto: UpdateExpenseStatusDto): Promise<Expense> {
+  async updateStatus(
+    id: string,
+    dto: UpdateExpenseStatusDto,
+  ): Promise<Expense> {
     const expense = await this.expenseRepo.findOne({ where: { id } });
     if (!expense) throw new NotFoundException('Expense not found');
     expense.status = dto.status;

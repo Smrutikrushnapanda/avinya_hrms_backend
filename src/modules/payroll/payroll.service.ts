@@ -4,7 +4,11 @@ import { Repository } from 'typeorm';
 import { PayrollRecord, PayrollStatus } from './entities/payroll-record.entity';
 import { PayrollSettings } from './entities/payroll-settings.entity';
 import { PayrollNotification } from './entities/payroll-notification.entity';
-import { CreatePayrollRecordDto, UpdatePayrollRecordDto, UpdatePayrollSettingsDto } from './dto/payroll.dto';
+import {
+  CreatePayrollRecordDto,
+  UpdatePayrollRecordDto,
+  UpdatePayrollSettingsDto,
+} from './dto/payroll.dto';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { MailService } from './mail.service';
@@ -41,9 +45,23 @@ export class PayrollService {
       'Eighteen',
       'Nineteen',
     ];
-    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const tens = [
+      '',
+      '',
+      'Twenty',
+      'Thirty',
+      'Forty',
+      'Fifty',
+      'Sixty',
+      'Seventy',
+      'Eighty',
+      'Ninety',
+    ];
 
-    const twoDigit = (x: number) => (x < 20 ? ones[x] : `${tens[Math.floor(x / 10)]}${x % 10 ? ` ${ones[x % 10]}` : ''}`);
+    const twoDigit = (x: number) =>
+      x < 20
+        ? ones[x]
+        : `${tens[Math.floor(x / 10)]}${x % 10 ? ` ${ones[x % 10]}` : ''}`;
     const threeDigit = (x: number) => {
       const h = Math.floor(x / 100);
       const r = x % 100;
@@ -121,12 +139,15 @@ export class PayrollService {
       totalEarnings: totals.totalEarnings,
       totalDeductions: totals.totalDeductions,
       netPay: totals.netPay,
-      status: (dto.status || 'draft') as PayrollStatus,
+      status: dto.status || 'draft',
     });
     return this.payrollRepo.save(record);
   }
 
-  async update(id: string, dto: UpdatePayrollRecordDto): Promise<PayrollRecord> {
+  async update(
+    id: string,
+    dto: UpdatePayrollRecordDto,
+  ): Promise<PayrollRecord> {
     const record = await this.payrollRepo.findOne({ where: { id } });
     if (!record) throw new NotFoundException('Payroll record not found');
 
@@ -176,8 +197,10 @@ export class PayrollService {
       .leftJoinAndSelect('payroll.employee', 'employee')
       .where('payroll.organizationId = :organizationId', { organizationId });
 
-    if (employeeId) qb.andWhere('payroll.employeeId = :employeeId', { employeeId });
-    if (status && status !== 'all') qb.andWhere('payroll.status = :status', { status });
+    if (employeeId)
+      qb.andWhere('payroll.employeeId = :employeeId', { employeeId });
+    if (status && status !== 'all')
+      qb.andWhere('payroll.status = :status', { status });
 
     if (month && year) {
       const payPeriod = `${year}-${String(month).padStart(2, '0')}`;
@@ -185,10 +208,13 @@ export class PayrollService {
     }
 
     if (from && to) {
-      qb.andWhere('payroll.periodStart >= :fromDate AND payroll.periodEnd <= :toDate', {
-        fromDate: new Date(from),
-        toDate: new Date(to),
-      });
+      qb.andWhere(
+        'payroll.periodStart >= :fromDate AND payroll.periodEnd <= :toDate',
+        {
+          fromDate: new Date(from),
+          toDate: new Date(to),
+        },
+      );
     }
 
     if (search) {
@@ -210,17 +236,22 @@ export class PayrollService {
   }
 
   async getSettings(organizationId: string): Promise<PayrollSettings> {
-    let settings = await this.settingsRepo.findOne({ where: { organizationId } });
+    let settings = await this.settingsRepo.findOne({
+      where: { organizationId },
+    });
     if (!settings) {
       settings = this.settingsRepo.create({ organizationId });
       settings = await this.settingsRepo.save(settings);
     }
 
     // Fetch organization data and merge with settings
-    const organization = await this.organizationRepo.findOne({ where: { id: organizationId } });
+    const organization = await this.organizationRepo.findOne({
+      where: { id: organizationId },
+    });
     if (organization) {
       // Use organization data if settings don't have custom values
-      settings.companyName = settings.companyName || organization.organizationName;
+      settings.companyName =
+        settings.companyName || organization.organizationName;
       settings.logoUrl = settings.logoUrl || organization.logoUrl;
       settings.address = settings.address || organization.address;
     }
@@ -232,8 +263,13 @@ export class PayrollService {
     return settings;
   }
 
-  async updateSettings(organizationId: string, dto: UpdatePayrollSettingsDto): Promise<PayrollSettings> {
-    let settings = await this.settingsRepo.findOne({ where: { organizationId } });
+  async updateSettings(
+    organizationId: string,
+    dto: UpdatePayrollSettingsDto,
+  ): Promise<PayrollSettings> {
+    let settings = await this.settingsRepo.findOne({
+      where: { organizationId },
+    });
     if (!settings) {
       settings = this.settingsRepo.create({ organizationId, ...dto });
     } else {
@@ -266,14 +302,28 @@ export class PayrollService {
     const color = settings.primaryColor || '#2f3640';
     const periodStart = new Date(record.periodStart as any);
     const periodEnd = new Date(record.periodEnd as any);
-    const fmt = (n: number) => Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmtDate = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    const totalWorkingDays = Math.max(1, Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1);
+    const fmt = (n: number) =>
+      Number(n).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    const fmtDate = (d: Date) =>
+      d.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    const totalWorkingDays = Math.max(
+      1,
+      Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000) + 1,
+    );
     const actualPayableDays = totalWorkingDays;
     const lossOfPayDays = 0;
     const payableDays = actualPayableDays - lossOfPayDays;
     const netWords = `${this.toWords(Number(record.netPay))} only`;
-    const headerPeriod = periodStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
+    const headerPeriod = periodStart
+      .toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      .toUpperCase();
 
     const html = `
       <html>
@@ -430,9 +480,14 @@ export class PayrollService {
             <div class="header">
               <div class="brand">
                 <div class="logo-box">
-                  ${settings.logoUrl
-                    ? `<img src="${settings.logoUrl}" alt="logo" />`
-                    : (settings.companyName || 'C').trim().charAt(0).toUpperCase()}
+                  ${
+                    settings.logoUrl
+                      ? `<img src="${settings.logoUrl}" alt="logo" />`
+                      : (settings.companyName || 'C')
+                          .trim()
+                          .charAt(0)
+                          .toUpperCase()
+                  }
                 </div>
                 <div>
                   <div class="company-name">${settings.companyName || 'Company'}</div>
@@ -526,11 +581,17 @@ export class PayrollService {
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.setContent(html, {
+        waitUntil: 'domcontentloaded',
+        timeout: 20000,
+      });
       const pdf = await page.pdf({ format: 'A4', printBackground: true });
       return Buffer.from(pdf);
     } catch (error) {
-      this.logger.error(`Failed to generate salary slip PDF for payroll ${id}`, error);
+      this.logger.error(
+        `Failed to generate salary slip PDF for payroll ${id}`,
+        error,
+      );
       throw error;
     } finally {
       if (browser) await browser.close();
@@ -548,7 +609,11 @@ export class PayrollService {
 
     const settings = await this.getSettings(record.organizationId);
     const fmt = (n: number) =>
-      Number(n).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
+      Number(n).toLocaleString('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        maximumFractionDigits: 0,
+      });
 
     let emailSent = false;
     let inAppNotification = false;
@@ -561,14 +626,18 @@ export class PayrollService {
           const pdfBuffer = await this.generateSlipPdf(id);
           emailSent = await this.mailService.sendPayslipEmail({
             to: email,
-            employeeName: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+            employeeName:
+              `${employee.firstName} ${employee.lastName || ''}`.trim(),
             payPeriod: record.payPeriod,
             netPay: fmt(record.netPay),
             pdfBuffer,
             companyName: settings.companyName,
           });
         } catch (error) {
-          this.logger.error(`Failed to generate or send payslip email for payroll ${id}`, error);
+          this.logger.error(
+            `Failed to generate or send payslip email for payroll ${id}`,
+            error,
+          );
           emailSent = false;
         }
       } else {
@@ -590,7 +659,10 @@ export class PayrollService {
         await this.notificationRepo.save(notification);
         inAppNotification = true;
       } catch (error) {
-        this.logger.error(`Failed to create in-app payslip notification for payroll ${id}`, error);
+        this.logger.error(
+          `Failed to create in-app payslip notification for payroll ${id}`,
+          error,
+        );
       }
     }
 
@@ -599,7 +671,10 @@ export class PayrollService {
       record.status = 'paid';
       await this.payrollRepo.save(record);
     } catch (error) {
-      this.logger.error(`Failed to update payroll status to paid for payroll ${id}`, error);
+      this.logger.error(
+        `Failed to update payroll status to paid for payroll ${id}`,
+        error,
+      );
     }
 
     return {
@@ -610,17 +685,29 @@ export class PayrollService {
     };
   }
 
-  private buildResultMessage(method: string, emailSent: boolean, inAppNotification: boolean): string {
+  private buildResultMessage(
+    method: string,
+    emailSent: boolean,
+    inAppNotification: boolean,
+  ): string {
     if (method === 'email') {
-      return emailSent ? 'Payslip sent via email' : 'Email sending failed - check Brevo SMTP configuration';
+      return emailSent
+        ? 'Payslip sent via email'
+        : 'Email sending failed - check Brevo SMTP configuration';
     }
     if (method === 'in_app') {
-      return inAppNotification ? 'Payslip notification sent to employee app' : 'Failed to send payslip notification in app';
+      return inAppNotification
+        ? 'Payslip notification sent to employee app'
+        : 'Failed to send payslip notification in app';
     }
     // both
     const parts: string[] = [];
     parts.push(emailSent ? 'Email sent' : 'Email failed');
-    parts.push(inAppNotification ? 'In-app notification created' : 'In-app notification failed');
+    parts.push(
+      inAppNotification
+        ? 'In-app notification created'
+        : 'In-app notification failed',
+    );
     return parts.join('. ');
   }
 
@@ -633,7 +720,9 @@ export class PayrollService {
   }
 
   async markNotificationRead(notificationId: string) {
-    const notification = await this.notificationRepo.findOne({ where: { id: notificationId } });
+    const notification = await this.notificationRepo.findOne({
+      where: { id: notificationId },
+    });
     if (!notification) throw new NotFoundException('Notification not found');
     notification.isRead = true;
     return this.notificationRepo.save(notification);
