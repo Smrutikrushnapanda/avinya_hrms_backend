@@ -8,6 +8,7 @@ import {
   Body,
   ParseUUIDPipe,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { WfhService } from './wfh.service';
 import { ApplyWfhDto } from './dto/apply-wfh.dto';
@@ -26,9 +27,11 @@ import {
   ApiParam,
   ApiBody,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('WFH')
 @Controller('wfh')
+@UseGuards(JwtAuthGuard)
 export class WfhController {
   constructor(private readonly wfhService: WfhService) {}
 

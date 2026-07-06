@@ -5,6 +5,7 @@ import {
   UseInterceptors,
   BadRequestException,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -16,6 +17,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { UploadService, UploadResponseDto } from './upload.service';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 /**
  * Allowed MIME types for image uploads
@@ -34,6 +36,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('Upload')
 @Controller('upload')
+@UseGuards(JwtAuthGuard)
 export class UploadController {
   private readonly logger = new Logger(UploadController.name);
 

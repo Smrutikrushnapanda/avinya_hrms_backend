@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { UserActivitiesService } from '../services/user-activities.service';
 import { CreateUserActivityDto } from '../dto/user-actvities.dto';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 
 @Controller('user-activities')
+@UseGuards(JwtAuthGuard)
 export class UserActivitiesController {
   constructor(private readonly userActivitiesService: UserActivitiesService) {}
 

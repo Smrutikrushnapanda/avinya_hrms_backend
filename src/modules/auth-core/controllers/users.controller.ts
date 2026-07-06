@@ -7,12 +7,14 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { CreateRegisterDto } from '../dto/register.dto';
 import { ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import {
   SwaggerFindUserIdByDOB,
   SwaggerRegisterUser,
@@ -28,6 +30,7 @@ import {
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  // Public: used for pre-auth username recovery / self-registration flows.
   @Post('useridbydob')
   @SwaggerFindUserIdByDOB()
   userIdByDOB(@Body() body: { name: string; dob: string }) {
@@ -41,12 +44,14 @@ export class UsersController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   @SwaggerCreateUser()
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   @SwaggerGetAllUsers()
   async getAllUsers(
     @Query('limit') limit = 10,
@@ -73,12 +78,14 @@ export class UsersController {
   }*/
 
   @Get(':user_id')
+  @UseGuards(JwtAuthGuard)
   @SwaggerGetUserById()
   findOne(@Param('user_id') user_id: string) {
     return this.usersService.findOne(user_id);
   }
 
   @Patch(':user_id')
+  @UseGuards(JwtAuthGuard)
   @SwaggerUpdateUser()
   update(
     @Param('user_id') user_id: string,
@@ -88,6 +95,7 @@ export class UsersController {
   }
 
   @Delete(':user_id')
+  @UseGuards(JwtAuthGuard)
   @SwaggerDeleteUser()
   remove(@Param('user_id') user_id: string) {
     return this.usersService.remove(user_id);

@@ -70,3 +70,30 @@ export class AssignDefaultRoleToOrgDto {
   @IsNotEmpty({ message: 'Assigned by is required' })
   assignedBy: string;
 }
+
+export class CreatePermissionDto {
+  @IsString({ message: 'Permission name must be a string' })
+  @IsNotEmpty({ message: 'Permission name is required' })
+  permissionName: string;
+
+  @IsOptional()
+  @IsString({ message: 'Description must be a string' })
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  createdBy?: string;
+}
+
+export class AssignPermissionsToRoleDto {
+  @IsArray({ message: 'permissionIds must be an array of UUIDs' })
+  @IsUUID('all', {
+    each: true,
+    message: 'Each permissionId must be a valid UUID',
+  })
+  permissionIds: string[];
+
+  @IsOptional()
+  @IsString()
+  assignedBy?: string;
+}

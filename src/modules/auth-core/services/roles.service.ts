@@ -9,10 +9,13 @@ import { In, Repository } from 'typeorm';
 import { Role } from '../entities/role.entity';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
+import { Permission } from '../entities/permission.entity';
+import { RolePermission } from '../entities/role-permission.entity';
 import {
   CreateRoleDto,
   AssignRoleDto,
   AssignDefaultRoleToOrgDto,
+  AssignPermissionsToRoleDto,
 } from '../dto/roles.dto';
 import { RoleType } from '../enums/role-type.enum';
 import { OrganizationRole } from '../entities/organization-role.entity';
@@ -40,6 +43,12 @@ export class RolesService {
 
     @InjectRepository(OrganizationRole)
     private readonly organizationRoleRepo: Repository<OrganizationRole>,
+
+    @InjectRepository(Permission)
+    private readonly permissionRepo: Repository<Permission>,
+
+    @InjectRepository(RolePermission)
+    private readonly rolePermissionRepo: Repository<RolePermission>,
   ) {}
 
   async createRole(dto: CreateRoleDto): Promise<Role> {
@@ -223,5 +232,62 @@ export class RolesService {
       throw new ForbiddenException('Default roles cannot be deleted');
     }
     await this.roleRepo.delete(id);
+  }
+
+  async assignPermissionsToRole(
+    roleId: string,
+    dto: AssignPermissionsToRoleDto,
+  ): Promise<Role> {
+    const role = await this.roleRepo.findOne({ where: { id: roleId } });
+    if (!role) throw new NotFoundException('Role not found');
+
+    const permissions = await this.permissionRepo.findBy({
+      id: In(dto.permissionIds),
+    });
+    if (!permissions.length) {
+      throw new NotFoundException(
+        'No valid permissions found for the provided permissionIds',
+      );
+    }
+
+    const existing = await this.rolePermissionRepo.find({
+      where: { role: { id: roleId } },
+      relations: ['permission'],
+    });
+    const existingPermissionIds = new Set(
+      existing.map((rp) => rp.permission.id),
+    );
+
+    const newAssignments = permissions
+      .filter((permission) => !existingPermissionIds.has(permission.id))
+      .map((permission) =>
+        this.rolePermissionRepo.create({
+          role,
+          permission,
+          assignedBy: dto.assignedBy,
+          isActive: true,
+        }),
+      );
+
+    if (newAssignments.length) {
+      await this.rolePermissionRepo.save(newAssignments);
+    }
+
+    return this.findById(roleId);
+  }
+
+  async revokePermissionFromRole(
+    roleId: string,
+    permissionId: string,
+  ): Promise<void> {
+    const rolePermission = await this.rolePermissionRepo.findOne({
+      where: { role: { id: roleId }, permission: { id: permissionId } },
+    });
+    if (!rolePermission) {
+      throw new NotFoundException(
+        'This permission is not assigned to the role',
+      );
+    }
+    await this.rolePermissionRepo.delete(rolePermission.id);
   }
 }

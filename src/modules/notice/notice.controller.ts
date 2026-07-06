@@ -6,11 +6,14 @@ import {
   Delete,
   Body,
   Param,
+  UseGuards,
 } from '@nestjs/common';
 import { NoticeService } from './notice.service';
 import { Notice } from './entities/notice.entity';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @Controller('notices')
+@UseGuards(JwtAuthGuard)
 export class NoticeController {
   constructor(private readonly noticeService: NoticeService) {}
 

@@ -158,8 +158,16 @@ export class AuthService {
         isActive: true,
       })
       .leftJoin('userRole.role', 'role')
+      .leftJoin(
+        'role.rolePermissions',
+        'rolePermission',
+        'rolePermission.isActive = :isActive',
+        { isActive: true },
+      )
+      .leftJoin('rolePermission.permission', 'permission')
       .addSelect(['organization.id'])
       .addSelect(['role.id', 'role.roleName'])
+      .addSelect(['permission.id', 'permission.permissionName'])
       .where('user.userName = :userName', { userName })
       .getRawAndEntities();
 
@@ -176,6 +184,17 @@ export class AuthService {
       .filter((r, i, self) => self.findIndex((x) => x.id === r.id) === i);
 
     user['roles'] = roles;
+
+    // Extract unique permissions granted via any of the user's active roles
+    const permissions = raw
+      .filter((r) => r.permission_permission_id)
+      .map((r) => ({
+        id: r.permission_permission_id,
+        permissionName: r.permission_permission_name,
+      }))
+      .filter((p, i, self) => self.findIndex((x) => x.id === p.id) === i);
+
+    user['permissions'] = permissions;
 
     const latestEmployee = await this.employeeRepository.findOne({
       where: { userId: user.id },

@@ -14,13 +14,15 @@ import { CreateQuestionDto } from './dto/create-question.dto';
 import { SubmitReviewDto } from './dto/submit-review.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth-core/guards/roles.guard';
+import { Roles } from '../auth-core/decorators/roles.decorator';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @RequireProPlan()
 @Controller('performance')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PerformanceController {
   constructor(private readonly service: PerformanceService) {}
 
@@ -32,20 +34,14 @@ export class PerformanceController {
   }
 
   @Post('settings/toggle')
+  @Roles('ADMIN')
   toggleEnabled(@GetUser() user: JwtPayload) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin)
-      throw new ForbiddenException(
-        'Only admins can toggle performance monitor',
-      );
     return this.service.toggleEnabled(user.organizationId);
   }
 
   @Patch('settings')
+  @Roles('ADMIN')
   updateSettings(@GetUser() user: JwtPayload, @Body() dto: UpdateSettingsDto) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin)
-      throw new ForbiddenException('Only admins can update settings');
     return this.service.updateSettings(user.organizationId, dto);
   }
 
@@ -57,17 +53,14 @@ export class PerformanceController {
   }
 
   @Post('questions')
+  @Roles('ADMIN')
   createQuestion(@GetUser() user: JwtPayload, @Body() dto: CreateQuestionDto) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Only admins can add questions');
     return this.service.createQuestion(user.organizationId, dto);
   }
 
   @Delete('questions/:id')
+  @Roles('ADMIN')
   deleteQuestion(@Param('id') id: string, @GetUser() user: JwtPayload) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin)
-      throw new ForbiddenException('Only admins can delete questions');
     return this.service.deleteQuestion(id, user.organizationId);
   }
 
@@ -140,25 +133,20 @@ export class PerformanceController {
   }
 
   @Get('reviews/team')
+  @Roles('ADMIN', 'MANAGER')
   getTeamReviews(@GetUser() user: JwtPayload) {
-    const allowed = user.roles?.some(
-      (r) => r.roleName === 'ADMIN' || r.roleName === 'MANAGER',
-    );
-    if (!allowed) throw new ForbiddenException('Access denied');
     return this.service.getTeamReviews(user.userId);
   }
 
   @Get('reviews/all')
+  @Roles('ADMIN')
   getAllReviews(@GetUser() user: JwtPayload) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Access denied');
     return this.service.getAllReviews(user.organizationId);
   }
 
   @Get('reviews/all-aggregated')
+  @Roles('ADMIN')
   getAllReviewsAggregated(@GetUser() user: JwtPayload) {
-    const isAdmin = user.roles?.some((r) => r.roleName === 'ADMIN');
-    if (!isAdmin) throw new ForbiddenException('Access denied');
     return this.service.getAllReviewsAggregated(user.organizationId);
   }
 }

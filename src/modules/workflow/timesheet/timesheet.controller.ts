@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -20,10 +21,12 @@ import {
 import { TimesheetService } from './timesheet.service';
 import { CreateTimesheetDto } from './dto/create-timesheet.dto';
 import { ManagerRemarkDto } from './dto/manager-remark.dto';
+import { JwtAuthGuard } from '../../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Timesheets')
 @ApiBearerAuth()
 @Controller('timesheets')
+@UseGuards(JwtAuthGuard)
 export class TimesheetController {
   constructor(private readonly timesheetService: TimesheetService) {}
 

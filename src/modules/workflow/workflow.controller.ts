@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { WorkflowService } from './workflow.service';
 import { Workflow } from './entities/workflow.entity';
@@ -19,8 +20,10 @@ import {
   ApiOperation,
   ApiParam,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @Controller('workflows')
+@UseGuards(JwtAuthGuard)
 export class WorkflowController {
   constructor(private readonly workflowService: WorkflowService) {}
 

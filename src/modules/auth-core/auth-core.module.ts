@@ -8,12 +8,14 @@ import { OrganizationController } from './controllers/organization.controller';
 import { AuthController } from './controllers/auth.controller';
 import { UsersController } from './controllers/users.controller';
 import { RolesController } from './controllers/roles.controller';
+import { PermissionsController } from './controllers/permissions.controller';
 import { UserActivitiesController } from './controllers/user-activities.controller';
 
 import { OrganizationService } from './services/organization.service';
 import { AuthService } from './services/auth.service';
 import { UsersService } from './services/users.service';
 import { RolesService } from './services/roles.service';
+import { PermissionsService } from './services/permissions.service';
 import { UserActivitiesService } from './services/user-activities.service';
 import { AdminSeederService } from './services/admin-seeder.service';
 import { PricingTypeSeederService } from './services/pricing-type-seeder.service';
@@ -73,6 +75,7 @@ import { PricingModule } from '../pricing/pricing.module';
     AuthController,
     UsersController,
     RolesController,
+    PermissionsController,
     UserActivitiesController,
   ],
   providers: [
@@ -81,6 +84,7 @@ import { PricingModule } from '../pricing/pricing.module';
     AuthService,
     UsersService,
     RolesService,
+    PermissionsService,
     UserActivitiesService,
     AdminSeederService,
     PricingTypeSeederService,

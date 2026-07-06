@@ -7,6 +7,7 @@ import {
   Get,
   BadRequestException,
   InternalServerErrorException,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -21,9 +22,11 @@ import {
 import { Common } from './common.service';
 import { Express } from 'express';
 import { DateTime } from 'luxon';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Common')
 @Controller('common')
+@UseGuards(JwtAuthGuard)
 export class CommonController {
   constructor(private readonly commonService: Common) {}
 

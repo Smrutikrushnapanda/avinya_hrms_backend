@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Query,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { LeaveService } from './leave.service';
@@ -29,7 +30,9 @@ import {
   ApiParam,
   ApiBody,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 @Controller('leave')
+@UseGuards(JwtAuthGuard)
 export class LeaveController {
   constructor(private readonly leaveService: LeaveService) {}
 

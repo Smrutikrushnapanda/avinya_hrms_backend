@@ -8,7 +8,6 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
-import { OrganizationFeature } from './organization-feature.entity';
 import { OrganizationSettings } from './organization-settings.entity';
 
 @Entity({ name: 'organizations' })
@@ -71,9 +70,6 @@ export class Organization {
 
   @OneToMany(() => User, (user) => user.organization)
   users: User[];
-
-  @OneToMany(() => OrganizationFeature, (of) => of.organization)
-  organizationFeatures: OrganizationFeature[];
 
   @OneToOne(() => OrganizationSettings, (settings) => settings.organization, {
     eager: true,

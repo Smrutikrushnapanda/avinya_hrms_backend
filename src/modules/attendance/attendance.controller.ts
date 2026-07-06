@@ -12,7 +12,9 @@ import {
   UseInterceptors,
   BadRequestException,
   UploadedFile,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { AttendanceService } from './attendance.service';
 import {
@@ -55,6 +57,7 @@ import { StorageService } from './storage.service';
 
 @ApiTags('Attendance')
 @Controller('attendance')
+@UseGuards(JwtAuthGuard)
 export class AttendanceController {
   constructor(
     private readonly attendanceService: AttendanceService,

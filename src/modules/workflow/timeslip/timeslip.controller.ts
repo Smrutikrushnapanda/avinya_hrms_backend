@@ -10,6 +10,7 @@ import {
   DefaultValuePipe,
   ParseIntPipe,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
@@ -30,10 +31,12 @@ import { UpdateTimeslipDto } from './dto/update-timeslip.dto';
 import { ApproveTimeslipDto } from './dto/approve-timeslip.dto';
 import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
 import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto';
+import { JwtAuthGuard } from '../../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Timeslips')
-@ApiBearerAuth() // remove if you don't use bearer auth
+@ApiBearerAuth()
 @Controller('timeslips')
+@UseGuards(JwtAuthGuard)
 export class TimeslipController {
   constructor(private readonly timeslipService: TimeslipService) {}
 

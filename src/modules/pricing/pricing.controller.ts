@@ -9,6 +9,7 @@ import {
   Query,
   HttpStatus,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { PricingService } from './pricing.service';
@@ -22,9 +23,11 @@ import {
 } from './dto/pricing.dto';
 import { PlanType } from './entities/pricing-plan.entity';
 import { SubscriptionStatus } from './entities/subscription.entity';
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
 @ApiTags('Pricing')
 @Controller('api/pricing')
+@UseGuards(JwtAuthGuard)
 export class PricingController {
   constructor(private readonly pricingService: PricingService) {}
 

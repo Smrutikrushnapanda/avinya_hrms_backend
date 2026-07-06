@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   Param,
   Post,
@@ -11,11 +10,13 @@ import {
 import { WfhMonitoringService } from './wfh-monitoring.service';
 import { HeartbeatDto } from './dto/heartbeat.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth-core/guards/roles.guard';
+import { Roles } from '../auth-core/decorators/roles.decorator';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
 
 @Controller('wfh-monitoring')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class WfhMonitoringController {
   constructor(private readonly service: WfhMonitoringService) {}
 
@@ -40,33 +41,23 @@ export class WfhMonitoringController {
   }
 
   @Get('employee/:userId')
+  @Roles('ADMIN', 'MANAGER')
   getEmployeeActivity(
-    @GetUser() user: JwtPayload,
     @Param('userId') userId: string,
     @Query('date') date?: string,
   ) {
-    const allowed = user.roles?.some(
-      (r) => r.roleName === 'ADMIN' || r.roleName === 'MANAGER',
-    );
-    if (!allowed) throw new ForbiddenException('Access denied');
     return this.service.getEmployeeActivity(userId, date);
   }
 
   @Get('chart')
+  @Roles('ADMIN', 'MANAGER')
   getChartData(@GetUser() user: JwtPayload, @Query('date') date?: string) {
-    const allowed = user.roles?.some(
-      (r) => r.roleName === 'ADMIN' || r.roleName === 'MANAGER',
-    );
-    if (!allowed) throw new ForbiddenException('Access denied');
     return this.service.getChartData(user.organizationId, date);
   }
 
   @Get('team')
+  @Roles('ADMIN', 'MANAGER')
   getTeamActivity(@GetUser() user: JwtPayload, @Query('date') date?: string) {
-    const allowed = user.roles?.some(
-      (r) => r.roleName === 'ADMIN' || r.roleName === 'MANAGER',
-    );
-    if (!allowed) throw new ForbiddenException('Access denied');
     return this.service.getTeamActivity(user.organizationId, date);
   }
 }
