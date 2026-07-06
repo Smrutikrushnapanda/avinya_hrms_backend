@@ -18,6 +18,7 @@ import {
   SendPayslipDto,
   UpdatePayrollRecordDto,
   UpdatePayrollSettingsDto,
+  UpsertEmployeeBankDetailDto,
 } from './dto/payroll.dto';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
@@ -111,5 +112,20 @@ export class PayrollController {
     @Body() dto: UpdatePayrollSettingsDto,
   ) {
     return this.payrollService.updateSettings(orgId, dto);
+  }
+
+  @Get('bank-details/:employeeId')
+  @ApiOperation({ summary: 'Get employee bank/salary account details' })
+  getBankDetail(@Param('employeeId') employeeId: string) {
+    return this.payrollService.getBankDetail(employeeId);
+  }
+
+  @Put('bank-details/:employeeId')
+  @ApiOperation({ summary: 'Create or update employee bank/salary account details' })
+  upsertBankDetail(
+    @Param('employeeId') employeeId: string,
+    @Body() dto: UpsertEmployeeBankDetailDto,
+  ) {
+    return this.payrollService.upsertBankDetail(employeeId, dto);
   }
 }

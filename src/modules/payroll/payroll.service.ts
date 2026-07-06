@@ -4,10 +4,12 @@ import { Repository } from 'typeorm';
 import { PayrollRecord, PayrollStatus } from './entities/payroll-record.entity';
 import { PayrollSettings } from './entities/payroll-settings.entity';
 import { PayrollNotification } from './entities/payroll-notification.entity';
+import { EmployeeBankDetail } from './entities/employee-bank-detail.entity';
 import {
   CreatePayrollRecordDto,
   UpdatePayrollRecordDto,
   UpdatePayrollSettingsDto,
+  UpsertEmployeeBankDetailDto,
 } from './dto/payroll.dto';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
@@ -99,8 +101,36 @@ export class PayrollService {
     private readonly notificationRepo: Repository<PayrollNotification>,
     @InjectRepository(Organization)
     private readonly organizationRepo: Repository<Organization>,
+    @InjectRepository(EmployeeBankDetail)
+    private readonly bankDetailRepo: Repository<EmployeeBankDetail>,
     private readonly mailService: MailService,
   ) {}
+
+  async getBankDetail(employeeId: string): Promise<EmployeeBankDetail | null> {
+    return this.bankDetailRepo.findOne({ where: { employeeId } });
+  }
+
+  async upsertBankDetail(
+    employeeId: string,
+    dto: UpsertEmployeeBankDetailDto,
+  ): Promise<EmployeeBankDetail> {
+    const employee = await this.employeeRepo.findOne({
+      where: { id: employeeId },
+    });
+    if (!employee) {
+      throw new NotFoundException('Employee not found');
+    }
+
+    let bankDetail = await this.bankDetailRepo.findOne({
+      where: { employeeId },
+    });
+    if (!bankDetail) {
+      bankDetail = this.bankDetailRepo.create({ employeeId, ...dto });
+    } else {
+      Object.assign(bankDetail, dto);
+    }
+    return this.bankDetailRepo.save(bankDetail);
+  }
 
   private computeTotals(values: {
     basic?: number;

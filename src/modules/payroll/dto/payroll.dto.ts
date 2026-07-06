@@ -154,3 +154,37 @@ export class PayrollCustomFieldDto {
   @IsString()
   value?: string;
 }
+
+export class UpsertEmployeeBankDetailDto {
+  @IsString()
+  accountHolderName: string;
+
+  @IsString()
+  bankName: string;
+
+  @IsString()
+  accountNumber: string;
+
+  @IsString()
+  ifscCode: string;
+
+  @IsOptional()
+  @IsString()
+  branchName?: string;
+
+  @IsOptional()
+  @IsString()
+  panNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  uanNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  pfNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  esiNumber?: string;
+}

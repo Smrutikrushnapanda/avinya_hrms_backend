@@ -6,6 +6,7 @@ import { MailService } from './mail.service';
 import { PayrollRecord } from './entities/payroll-record.entity';
 import { PayrollSettings } from './entities/payroll-settings.entity';
 import { PayrollNotification } from './entities/payroll-notification.entity';
+import { EmployeeBankDetail } from './entities/employee-bank-detail.entity';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 
@@ -15,6 +16,7 @@ import { Organization } from '../auth-core/entities/organization.entity';
       PayrollRecord,
       PayrollSettings,
       PayrollNotification,
+      EmployeeBankDetail,
       Employee,
       Organization,
     ]),

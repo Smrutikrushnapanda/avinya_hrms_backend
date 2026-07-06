@@ -10,7 +10,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
-import { EmployeeProfile } from './entities/employee-profile.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UserRole } from '../auth-core/entities/user-role.entity';
@@ -46,8 +45,6 @@ export class EmployeeService {
   constructor(
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
-    @InjectRepository(EmployeeProfile)
-    private readonly employeeProfileRepository: Repository<EmployeeProfile>,
     @InjectRepository(Branch)
     private readonly branchRepository: Repository<Branch>,
 
