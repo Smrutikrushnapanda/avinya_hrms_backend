@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsArray,
   IsUUID,
+  IsIn,
 } from 'class-validator';
 
 export class CreateMeetingDto {
@@ -69,4 +70,11 @@ export class SendMeetingNotificationDto {
   @IsUUID()
   @IsNotEmpty()
   meetingId: string;
+}
+
+export class UpdateMeetingStatusDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'])
+  status: string;
 }

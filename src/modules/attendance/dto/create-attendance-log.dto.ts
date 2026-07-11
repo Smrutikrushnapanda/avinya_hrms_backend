@@ -101,30 +101,37 @@ export class CreateAttendanceLogDto {
   @IsString()
   deviceInfo?: string;
 
-  @ApiProperty({
-    description: 'Enable face validation',
+  @ApiPropertyOptional({
+    description:
+      'Deprecated: ignored by the server. Validation is always enforced using the ' +
+      "organization's stored AttendanceSettings, never the client's claim, so a caller " +
+      "can't bypass an admin-configured check by sending false here. Kept optional so " +
+      'existing clients that still send it are not rejected.',
     type: Boolean,
     example: true,
   })
+  @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => toBoolean(value))
-  enableFaceValidation: boolean;
+  enableFaceValidation?: boolean;
 
-  @ApiProperty({
-    description: 'Enable WiFi validation',
+  @ApiPropertyOptional({
+    description: 'Deprecated: ignored by the server. See enableFaceValidation.',
     type: Boolean,
     example: true,
   })
+  @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => toBoolean(value))
-  enableWifiValidation: boolean;
+  enableWifiValidation?: boolean;
 
-  @ApiProperty({
-    description: 'Enable GPS validation',
+  @ApiPropertyOptional({
+    description: 'Deprecated: ignored by the server. See enableFaceValidation.',
     type: Boolean,
     example: true,
   })
+  @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => toBoolean(value))
-  enableGPSValidation: boolean;
+  enableGPSValidation?: boolean;
 }

@@ -9,7 +9,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { AuthService, UserWithRoles } from '../services/auth.service';
-import { LoginDto } from '../dto/auth.dto';
+import { ForgotPasswordDto, LoginDto, ResetPasswordDto } from '../dto/auth.dto';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { GetUser } from '../decorators/get-user.decorator';
@@ -133,6 +133,22 @@ export class AuthController {
     });
 
     return { access_token, user };
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({
+    summary: 'Send admin password reset OTP to registered email',
+  })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.sendAdminPasswordResetOtp(
+      forgotPasswordDto.identifier,
+    );
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset admin user ID and password with email OTP' })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetAdminCredentials(resetPasswordDto);
   }
 
   @Post('logout')

@@ -7,10 +7,18 @@ import {
   Body,
   Param,
   UseGuards,
+  ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { MeetingService } from './meeting.service';
-import { CreateMeetingDto, UpdateMeetingDto } from './dto/meeting.dto';
+import {
+  CreateMeetingDto,
+  UpdateMeetingDto,
+  UpdateMeetingStatusDto,
+} from './dto/meeting.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @RequireProPlan()
@@ -19,55 +27,90 @@ import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorat
 export class MeetingController {
   constructor(private readonly meetingService: MeetingService) {}
 
+  private getUserId(user: Partial<User> & { userId?: string }) {
+    return (user as any)?.userId || user?.id;
+  }
+
   @Post()
-  async createMeeting(@Body() dto: CreateMeetingDto) {
+  async createMeeting(@GetUser() user: User, @Body() dto: CreateMeetingDto) {
+    const userId = this.getUserId(user);
+    dto.createdById = userId;
     return this.meetingService.createMeeting(dto);
   }
 
   @Get('org/:organizationId')
-  async getMeetingsByOrg(@Param('organizationId') organizationId: string) {
+  async getMeetingsByOrg(
+    @GetUser() user: User,
+    @Param('organizationId', ParseUUIDPipe) organizationId: string,
+  ) {
     return this.meetingService.getMeetingsByOrg(organizationId);
   }
 
   @Get('org/:organizationId/upcoming')
   async getUpcomingMeetingsByOrg(
-    @Param('organizationId') organizationId: string,
+    @GetUser() user: User,
+    @Param('organizationId', ParseUUIDPipe) organizationId: string,
   ) {
     return this.meetingService.getUpcomingMeetingsByOrg(organizationId);
   }
 
   @Get('user/:userId')
-  async getMeetingsForUser(@Param('userId') userId: string) {
+  async getMeetingsForUser(
+    @GetUser() user: User,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    const currentUserId = this.getUserId(user);
+    if (userId !== currentUserId) {
+      throw new ForbiddenException('You can only view your own meetings');
+    }
     return this.meetingService.getMeetingsForUser(userId);
   }
 
   @Get('user/:userId/upcoming')
-  async getUpcomingMeetingsForUser(@Param('userId') userId: string) {
+  async getUpcomingMeetingsForUser(
+    @GetUser() user: User,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    const currentUserId = this.getUserId(user);
+    if (userId !== currentUserId) {
+      throw new ForbiddenException('You can only view your own meetings');
+    }
     return this.meetingService.getUpcomingMeetingsForUser(userId);
   }
 
   @Get(':id')
-  async getMeetingById(@Param('id') id: string) {
+  async getMeetingById(@GetUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
     return this.meetingService.findMeetingById(id);
   }
 
   @Put(':id')
-  async updateMeeting(@Param('id') id: string, @Body() dto: UpdateMeetingDto) {
+  async updateMeeting(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMeetingDto,
+  ) {
     return this.meetingService.updateMeeting(id, dto);
   }
 
   @Delete(':id')
-  async deleteMeeting(@Param('id') id: string) {
+  async deleteMeeting(@GetUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
     return this.meetingService.deleteMeeting(id);
   }
 
   @Post(':id/notify')
-  async sendNotification(@Param('id') id: string) {
+  async sendNotification(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.meetingService.sendMeetingNotification(id);
   }
 
   @Put(':id/status')
-  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.meetingService.updateMeetingStatus(id, status);
+  async updateStatus(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMeetingStatusDto,
+  ) {
+    return this.meetingService.updateMeetingStatus(id, dto.status);
   }
 }

@@ -89,7 +89,9 @@ const MENU_DATA: Array<{
         iconName: 'Monitor',
         route: '/admin/wfh-monitor',
         roles: ['ADMIN', 'HR'],
-        planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+        // Sourced from the desktop app's activity data, which is a Pro+ feature
+        // (see wfh-monitoring.controller.ts's @RequireProPlan() on team/app-summary).
+        planTiers: ['PRO', 'ENTERPRISE'],
         sortOrder: 3,
       },
     ],
@@ -345,6 +347,46 @@ const MENU_DATA: Array<{
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
     sortOrder: 19,
   },
+  {
+    label: 'Dashboard',
+    iconName: 'LayoutDashboard',
+    route: '/superadmin/dashboard',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 1,
+  },
+  {
+    label: 'Organizations',
+    iconName: 'Users',
+    route: '/superadmin/organizations',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 2,
+  },
+  {
+    label: 'Pricing Plans',
+    iconName: 'BadgeDollarSign',
+    route: '/superadmin/plans',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 3,
+  },
+  {
+    label: 'Subscriptions',
+    iconName: 'BookMarked',
+    route: '/superadmin/subscriptions',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 4,
+  },
+  {
+    label: 'System Logs',
+    iconName: 'FileText',
+    route: '/superadmin/logs',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 5,
+  },
 ];
 
 @Injectable()
@@ -360,14 +402,20 @@ export class MenuSeederService implements OnModuleInit {
     await this.seed();
   }
 
+  // Seeds default menu items only on a fresh database (empty table). Once
+  // any row exists — including admin edits made through the menu-items
+  // CRUD endpoints — this is a no-op, so admin configuration survives
+  // server restarts/deploys instead of being wiped and reseeded every time.
   private async seed() {
-    const existing = await this.repo.count();
-    if (existing > 0) {
+    const existingCount = await this.repo.count();
+    if (existingCount > 0) {
       this.logger.log(
-        `Menu items already seeded (${existing} rows), skipping.`,
+        `Menu items already seeded (${existingCount} rows) — skipping.`,
       );
       return;
     }
+
+    this.logger.log('Seeding default menu items...');
 
     for (const item of MENU_DATA) {
       const children = item.children || [];

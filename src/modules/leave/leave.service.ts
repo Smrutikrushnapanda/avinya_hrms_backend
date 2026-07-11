@@ -751,8 +751,83 @@ export class LeaveService {
 
   // ─── Queries ───
 
+  /**
+   * `users.firstName/lastName` is the raw login identity and is often left
+   * at its account-creation default (e.g. "Admin" for accounts created via
+   * an admin invite). The `employees` table (HR profile, kept up to date
+   * via the Employees admin form) is the accurate name source. Overlay it
+   * onto each already-loaded `user` relation in place so every consumer —
+   * admin requests table, manager approval screen, mobile app — shows the
+   * real employee name without each having to separately cross-reference
+   * the employees table itself.
+   */
+  private async overlayEmployeeNames(
+    users: Array<
+      | {
+          id: string;
+          firstName?: string;
+          middleName?: string;
+          lastName?: string;
+        }
+      | null
+      | undefined
+    >,
+  ): Promise<void> {
+    const userIds = [
+      ...new Set(
+        users
+          .filter(
+            (
+              u,
+            ): u is {
+              id: string;
+              firstName?: string;
+              middleName?: string;
+              lastName?: string;
+            } => !!u,
+          )
+          .map((u) => u.id),
+      ),
+    ];
+    if (userIds.length === 0) return;
+
+    const employees = await this.employeeRepo
+      .createQueryBuilder('employee')
+      .where('employee.userId IN (:...userIds)', { userIds })
+      .select([
+        'employee.userId',
+        'employee.firstName',
+        'employee.middleName',
+        'employee.lastName',
+      ])
+      .getMany();
+
+    const nameByUserId = new Map(
+      employees
+        .filter((e) => e.firstName)
+        .map((e) => [
+          e.userId,
+          {
+            firstName: e.firstName,
+            middleName: e.middleName,
+            lastName: e.lastName,
+          },
+        ]),
+    );
+
+    for (const user of users) {
+      if (!user) continue;
+      const resolved = nameByUserId.get(user.id);
+      if (resolved) {
+        user.firstName = resolved.firstName;
+        user.middleName = resolved.middleName;
+        user.lastName = resolved.lastName;
+      }
+    }
+  }
+
   async getPendingApprovalsForUser(userId: string): Promise<LeaveApproval[]> {
-    return this.approvalRepo.find({
+    const approvals = await this.approvalRepo.find({
       where: { approver: { id: userId }, status: 'PENDING' },
       relations: [
         'leaveRequest',
@@ -760,10 +835,12 @@ export class LeaveService {
         'leaveRequest.leaveType',
       ],
     });
+    await this.overlayEmployeeNames(approvals.map((a) => a.leaveRequest?.user));
+    return approvals;
   }
 
   async getAllApprovalsForUser(approverId: string): Promise<LeaveApproval[]> {
-    return this.approvalRepo.find({
+    const approvals = await this.approvalRepo.find({
       where: { approver: { id: approverId } },
       relations: [
         'leaveRequest',
@@ -772,14 +849,20 @@ export class LeaveService {
       ],
       order: { actionAt: 'DESC' },
     });
+    await this.overlayEmployeeNames(approvals.map((a) => a.leaveRequest?.user));
+    return approvals;
   }
 
   async getLeaveRequestsByUser(userId: string): Promise<LeaveRequest[]> {
-    return this.requestRepo.find({
+    const requests = await this.requestRepo.find({
       where: { user: { id: userId } },
       relations: ['leaveType', 'approvals', 'approvals.approver'],
       order: { createdAt: 'DESC' },
     });
+    await this.overlayEmployeeNames(
+      requests.flatMap((r) => r.approvals?.map((a) => a.approver) ?? []),
+    );
+    return requests;
   }
 
   async deleteLeaveRequestByUser(
@@ -822,7 +905,7 @@ export class LeaveService {
   }
 
   async getLeaveRequestsByOrg(orgId: string): Promise<LeaveRequest[]> {
-    return this.requestRepo
+    const requests = await this.requestRepo
       .createQueryBuilder('lr')
       .leftJoinAndSelect('lr.user', 'user')
       .leftJoinAndSelect('lr.leaveType', 'leaveType')
@@ -832,6 +915,11 @@ export class LeaveService {
       .where('emp.organization_id = :orgId', { orgId })
       .orderBy('lr.createdAt', 'DESC')
       .getMany();
+    await this.overlayEmployeeNames(requests.map((r) => r.user));
+    await this.overlayEmployeeNames(
+      requests.flatMap((r) => r.approvals?.map((a) => a.approver) ?? []),
+    );
+    return requests;
   }
 
   // ─── Approval Assignments ───
@@ -874,11 +962,14 @@ export class LeaveService {
   async getApprovalAssignmentsByOrg(
     orgId: string,
   ): Promise<LeaveApprovalAssignment[]> {
-    return this.assignmentRepo.find({
+    const assignments = await this.assignmentRepo.find({
       where: { organization: { id: orgId }, isActive: true },
       relations: ['approver', 'user'],
       order: { level: 'ASC' },
     });
+    await this.overlayEmployeeNames(assignments.map((a) => a.user));
+    await this.overlayEmployeeNames(assignments.map((a) => a.approver));
+    return assignments;
   }
 
   async deleteApprovalAssignment(id: string): Promise<void> {

@@ -10,6 +10,7 @@ import { UsersController } from './controllers/users.controller';
 import { RolesController } from './controllers/roles.controller';
 import { PermissionsController } from './controllers/permissions.controller';
 import { UserActivitiesController } from './controllers/user-activities.controller';
+import { SuperadminController } from './controllers/superadmin.controller';
 
 import { OrganizationService } from './services/organization.service';
 import { AuthService } from './services/auth.service';
@@ -20,6 +21,7 @@ import { UserActivitiesService } from './services/user-activities.service';
 import { AdminSeederService } from './services/admin-seeder.service';
 import { PricingTypeSeederService } from './services/pricing-type-seeder.service';
 import { StorageService } from '../attendance/storage.service';
+import { SuperadminService } from './services/superadmin.service';
 
 import { Organization } from './entities/organization.entity';
 import { OrganizationSettings } from './entities/organization-settings.entity';
@@ -40,6 +42,8 @@ import { LeaveModule } from '../leave/leave.module';
 import { WfhModule } from '../wfh/wfh.module';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { PricingPlan } from '../pricing/entities/pricing-plan.entity';
+import { Subscription } from '../pricing/entities/subscription.entity';
 
 @Module({
   imports: [
@@ -58,6 +62,8 @@ import { PricingModule } from '../pricing/pricing.module';
       Employee,
       LeaveApprovalAssignment,
       WfhApprovalAssignment,
+      PricingPlan,
+      Subscription,
     ]),
     LogReportModule,
     PassportModule,
@@ -77,6 +83,7 @@ import { PricingModule } from '../pricing/pricing.module';
     RolesController,
     PermissionsController,
     UserActivitiesController,
+    SuperadminController,
   ],
   providers: [
     JwtStrategy,
@@ -89,6 +96,7 @@ import { PricingModule } from '../pricing/pricing.module';
     AdminSeederService,
     PricingTypeSeederService,
     StorageService,
+    SuperadminService,
   ],
   exports: [
     OrganizationService,

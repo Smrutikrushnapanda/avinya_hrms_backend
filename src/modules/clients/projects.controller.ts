@@ -89,16 +89,13 @@ export class ProjectsController {
 
   @Get()
   @ApiOperation({ summary: 'List projects by organization' })
-  @ApiQuery({ name: 'organizationId', required: true, type: String })
   @ApiQuery({ name: 'clientId', required: false, type: String })
   @UseGuards(JwtAuthGuard)
   findAll(
     @GetUser() user: JwtPayload,
-    @Query('organizationId') organizationId: string,
     @Query('clientId') clientId?: string,
   ) {
-    const orgId = organizationId || user.organizationId;
-    return this.projectsService.findAll(orgId, clientId);
+    return this.projectsService.findAll(user.organizationId, clientId);
   }
 
   @Get(':id')
@@ -158,8 +155,8 @@ export class ProjectsController {
   @Get(':id/employees')
   @ApiOperation({ summary: 'Get employees assigned to a client project' })
   @UseGuards(JwtAuthGuard)
-  getProjectEmployees(@Param('id') id: string) {
-    return this.projectsService.getProjectEmployees(id);
+  getProjectEmployees(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.projectsService.getProjectEmployees(id, user.organizationId);
   }
 
   @Post(':id/employees')
@@ -174,7 +171,8 @@ export class ProjectsController {
       assignments?: { userId: string; role?: string }[];
     },
   ) {
-    const isAdmin = this.isAdmin(user);
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
     const assignments =
       body?.assignments && Array.isArray(body.assignments)
         ? body.assignments
@@ -184,15 +182,16 @@ export class ProjectsController {
       assignments,
       user.userId,
       user.organizationId,
-      isAdmin,
     );
   }
 
   @Delete(':id/employees/:userId')
   @ApiOperation({ summary: 'Remove an employee from a client project' })
   @UseGuards(JwtAuthGuard)
-  removeEmployee(@Param('id') id: string, @Param('userId') userId: string) {
-    return this.projectsService.removeEmployee(id, userId);
+  removeEmployee(@GetUser() user: JwtPayload, @Param('id') id: string, @Param('userId') userId: string) {
+    if (!this.isAdminOrManager(user))
+      throw new ForbiddenException('Access denied');
+    return this.projectsService.removeEmployee(id, userId, user.organizationId);
   }
 
   @Get(':id/documents')
@@ -281,14 +280,15 @@ export class ProjectsController {
       ...body,
       assignedByUserId: user.userId,
       organizationId: user.organizationId,
+      createdByAdmin: this.isAdmin(user),
     });
   }
 
   @Get(':id/tasks')
   @ApiOperation({ summary: 'Get all tasks for a project' })
   @UseGuards(JwtAuthGuard)
-  getProjectTasks(@Param('id') projectId: string) {
-    return this.projectsService.getProjectTasks(projectId);
+  getProjectTasks(@GetUser() user: JwtPayload, @Param('id') projectId: string) {
+    return this.projectsService.getProjectTasks(projectId, user.organizationId);
   }
 
   @Get(':id/test-sheet')
@@ -465,7 +465,7 @@ export class ProjectsController {
   @Get(':id/timesheets-summary')
   @ApiOperation({ summary: 'Get timesheet summary for P&L calculation' })
   @UseGuards(JwtAuthGuard)
-  getTimesheetsSummary(@Param('id') projectId: string) {
-    return this.projectsService.getTimesheetsSummary(projectId);
+  getTimesheetsSummary(@GetUser() user: JwtPayload, @Param('id') projectId: string) {
+    return this.projectsService.getTimesheetsSummary(projectId, user.organizationId);
   }
 }

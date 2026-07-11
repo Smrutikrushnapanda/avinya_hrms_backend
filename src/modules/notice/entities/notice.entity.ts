@@ -14,6 +14,9 @@ export class Notice {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'organization_id' })
+  organizationId: string;
+
   @Column()
   title: string;
 
@@ -25,6 +28,14 @@ export class Notice {
 
   @Column({ type: 'varchar', length: 50, default: 'info' })
   type: string;
+
+  /** Which roles this notice is visible to within its organization. */
+  @Column({
+    name: 'target_roles',
+    type: 'jsonb',
+    default: ['ADMIN', 'HR', 'EMPLOYEE'],
+  })
+  targetRoles: string[];
 
   @Column({ type: 'timestamptz' })
   start_at: Date;

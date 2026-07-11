@@ -552,8 +552,6 @@ export class AttendanceController {
   }
 
   @Get('monthly')
-  @UseInterceptors(CacheInterceptor)
-  @CacheTTL(300) // 5 minutes
   @ApiOperation({ summary: 'Get attendance logs for a user by month' })
   @ApiQuery({
     name: 'userId',
@@ -590,7 +588,7 @@ export class AttendanceController {
     @Query('date') dateStr: string, // format: 'YYYY-MM-DD'
   ) {
     if (!organizationId || !dateStr) {
-      throw new Error('Missing organizationId or date');
+      throw new BadRequestException('Missing organizationId or date');
     }
 
     return this.attendanceService.getDailyAttendanceStatsWithComparison(
@@ -703,7 +701,7 @@ export class AttendanceController {
   async processSummary(@Query('date') date?: string) {
     // If no date passed, use today's date in Asia/Kolkata
     const finalDate = date
-      ? new Date(date)
+      ? DateTime.fromISO(date, { zone: 'Asia/Kolkata' }).toJSDate()
       : new Date(
           DateTime.now().setZone('Asia/Kolkata').toISODate() ??
             new Date().toISOString().slice(0, 10),

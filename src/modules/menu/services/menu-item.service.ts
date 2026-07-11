@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MenuItem } from '../entities/menu-item.entity';
 import { PerformanceSettings } from '../../performance/entities/performance-settings.entity';
 import { WfhRequest } from '../../wfh/entities/wfh-request.entity';
+import { CreateMenuItemDto, UpdateMenuItemDto } from '../dto/menu-item.dto';
 
 @Injectable()
 export class MenuItemService {
@@ -92,5 +93,36 @@ export class MenuItemService {
     }
 
     return items.filter(filterItem);
+  }
+
+  // Unfiltered tree (incl. inactive) for the admin management UI —
+  // GET /menu-items is filtered per-viewer and isn't suitable for editing.
+  async findAllForAdmin(): Promise<MenuItem[]> {
+    return this.repo
+      .createQueryBuilder('m')
+      .leftJoinAndSelect('m.children', 'children')
+      .where('m.parent_id IS NULL')
+      .orderBy('m.sort_order', 'ASC')
+      .addOrderBy('children.sort_order', 'ASC')
+      .getMany();
+  }
+
+  async create(dto: CreateMenuItemDto): Promise<MenuItem> {
+    const item = this.repo.create({ isActive: true, sortOrder: 0, ...dto });
+    return this.repo.save(item);
+  }
+
+  async update(id: string, dto: UpdateMenuItemDto): Promise<MenuItem> {
+    const item = await this.repo.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('Menu item not found');
+    Object.assign(item, dto);
+    return this.repo.save(item);
+  }
+
+  async remove(id: string): Promise<{ success: boolean }> {
+    const item = await this.repo.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('Menu item not found');
+    await this.repo.remove(item);
+    return { success: true };
   }
 }

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -168,10 +169,31 @@ export class AttendanceService {
       latitude,
       longitude,
       wifiBssid,
-      enableFaceValidation,
-      enableWifiValidation,
-      enableGPSValidation,
     } = dto;
+
+    // 0️⃣ Cross-org validation: verify the user belongs to this organization
+    const userRecord = await this.attendanceLogRepo.findOne({
+      where: { user: { id: userId }, organization: { id: organizationId } },
+      select: ['id'],
+    });
+    // Check through employee table as a more reliable cross-reference
+    const empBelongsToOrg = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['id'],
+    });
+    if (!empBelongsToOrg) {
+      throw new ForbiddenException('User does not belong to this organization');
+    }
+
+    // Validation toggles are always derived from the org's stored
+    // AttendanceSettings, never trusted from the client — otherwise a
+    // direct API call (or a client that can't actually perform a check,
+    // e.g. a browser with no WiFi SSID/BSSID API) could pass every flag
+    // as false/true and bypass what the admin configured.
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const enableFaceValidation = settings.enableFaceValidation;
+    const enableWifiValidation = settings.enableWifiValidation;
+    const enableGPSValidation = settings.enableGpsValidation;
 
     const punchTime = new Date(timestamp);
     const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
@@ -204,7 +226,13 @@ export class AttendanceService {
       'check-in';
     if (existingLogs.length > 0) {
       const lastType = existingLogs[existingLogs.length - 1].type;
-      type = lastType === 'check-in' ? 'check-out' : 'check-in';
+      if (lastType === 'break-start') {
+        type = 'break-end';
+      } else if (lastType === 'break-end') {
+        type = 'break-start';
+      } else {
+        type = lastType === 'check-in' ? 'check-out' : 'check-in';
+      }
     }
 
     // 3️⃣ Anomaly Detection
@@ -212,36 +240,46 @@ export class AttendanceService {
     const anomalyReasons: string[] = [];
 
     // 3a. Wi-Fi + GPS
-    if (enableWifiValidation && wifiBssid) {
-      const knownWifis = await this.wifiRepo.find({
-        where: {
-          organization: { id: organizationId },
-          isActive: true,
-        },
-        select: ['bssid', 'latitude', 'longitude', 'allowedRadiusMeters'],
-      });
-
-      const matchedWifi = knownWifis.find((wifi) => wifi.bssid === wifiBssid);
-
-      if (!matchedWifi) {
+    if (enableWifiValidation) {
+      if (!wifiBssid) {
+        // Required but not supplied (e.g. a web client, which has no way
+        // to read the connected network's BSSID) — fail closed rather
+        // than silently skipping the check.
         anomalyFlag = true;
-        anomalyReasons.push('Unrecognized Wi-Fi');
-      } else if (
-        enableGPSValidation &&
-        latitude != null &&
-        longitude != null &&
-        matchedWifi.latitude != null &&
-        matchedWifi.longitude != null
-      ) {
-        const distance = this.calculateDistance(
-          latitude,
-          longitude,
-          matchedWifi.latitude,
-          matchedWifi.longitude,
+        anomalyReasons.push(
+          'WiFi validation required but no WiFi network detected',
         );
-        if (distance > (matchedWifi.allowedRadiusMeters ?? 50)) {
+      } else {
+        const knownWifis = await this.wifiRepo.find({
+          where: {
+            organization: { id: organizationId },
+            isActive: true,
+          },
+          select: ['bssid', 'latitude', 'longitude', 'allowedRadiusMeters'],
+        });
+
+        const matchedWifi = knownWifis.find((wifi) => wifi.bssid === wifiBssid);
+
+        if (!matchedWifi) {
           anomalyFlag = true;
-          anomalyReasons.push('GPS location mismatch for Wi-Fi');
+          anomalyReasons.push('Unrecognized Wi-Fi');
+        } else if (
+          enableGPSValidation &&
+          latitude != null &&
+          longitude != null &&
+          matchedWifi.latitude != null &&
+          matchedWifi.longitude != null
+        ) {
+          const distance = this.calculateDistance(
+            latitude,
+            longitude,
+            matchedWifi.latitude,
+            matchedWifi.longitude,
+          );
+          if (distance > (matchedWifi.allowedRadiusMeters ?? 50)) {
+            anomalyFlag = true;
+            anomalyReasons.push('GPS location mismatch for Wi-Fi');
+          }
         }
       }
     }
@@ -284,11 +322,16 @@ export class AttendanceService {
       signedPhotoUrl = await this.storageService.getSignedUrl(photoKey);
     }
 
-    if (enableFaceValidation && signedPhotoUrl) {
-      match = await this.performFaceMatch(userId, signedPhotoUrl);
-      if (!match.verified) {
+    if (enableFaceValidation) {
+      if (!signedPhotoUrl) {
         anomalyFlag = true;
-        anomalyReasons.push(`Face mismatch (score: ${match.score})`);
+        anomalyReasons.push('Face verification required but no photo provided');
+      } else {
+        match = await this.performFaceMatch(userId, signedPhotoUrl);
+        if (!match.verified) {
+          anomalyFlag = true;
+          anomalyReasons.push(`Face mismatch (score: ${match.score})`);
+        }
       }
     }
 
@@ -442,7 +485,7 @@ export class AttendanceService {
       .leftJoin(
         'employees',
         'emp',
-        'emp.user_id = user.id AND emp.organization_id = :organizationId',
+        'emp.user_id = user.user_id AND emp.organization_id = :organizationId',
         { organizationId },
       ) // join employees table
       .where('att.organization_id = :organizationId', { organizationId })
@@ -466,6 +509,9 @@ export class AttendanceService {
         'emp.employee_code AS "employeeCode"',
         'emp.photo_url AS "photoUrl"',
         'emp.passport_photo_url AS "passportPhotoUrl"',
+        'emp.first_name AS "empFirstName"',
+        'emp.middle_name AS "empMiddleName"',
+        'emp.last_name AS "empLastName"',
       ])
       .orderBy('att.inTime', 'ASC')
       .skip((safePage - 1) * safeLimit)
@@ -474,6 +520,13 @@ export class AttendanceService {
     const rawResults = await query.getRawAndEntities();
     const records = rawResults.entities;
     const raw = rawResults.raw;
+
+    // Build a map of raw data by attendance ID to avoid index-based alignment
+    const rawMap = new Map<string, Record<string, unknown>>();
+    for (const row of raw) {
+      const id = String(row.att_id ?? '');
+      if (id) rawMap.set(id, row);
+    }
 
     const formatTime = (date?: Date): string | undefined => {
       if (!date) return undefined;
@@ -492,14 +545,15 @@ export class AttendanceService {
     };
 
     const results = await Promise.all(
-      records.map(async (att, i) => {
+      records.map(async (att) => {
         const hasBothPunches = Boolean(att.inTime) && Boolean(att.outTime);
         const workedMinutes = att.workingMinutes ?? 0;
         const isIncompleteHours =
           att.status === 'absent' && hasBothPunches && workedMinutes > 0;
+        const rawRow = rawMap.get(att.id) ?? {};
         const profileImageKey =
-          (raw[i].passportPhotoUrl as string | null) ??
-          (raw[i].photoUrl as string | null);
+          (rawRow.passportPhotoUrl as string | null) ??
+          (rawRow.photoUrl as string | null);
         const profileImageSigned =
           profileImageKey && !profileImageKey.startsWith('http')
             ? await this.storageService
@@ -521,14 +575,24 @@ export class AttendanceService {
                 .catch(() => null)
             : att.outPhotoUrl;
 
-        return {
-          userId: att.user.id,
-          userName: [att.user.firstName, att.user.middleName, att.user.lastName]
-            .filter(Boolean)
-            .join(' '),
-          email: att.user.email,
+        // `employees` (HR profile) is the accurate name source; `users`
+        // (raw login identity) is often left at its account-creation
+        // default (e.g. "Admin" for accounts created via an admin invite).
+        const empFirstName = rawRow.empFirstName as string | null;
+        const userName = empFirstName
+          ? [empFirstName, rawRow.empMiddleName, rawRow.empLastName]
+              .filter(Boolean)
+              .join(' ')
+          : [att.user?.firstName, att.user?.middleName, att.user?.lastName]
+              .filter(Boolean)
+              .join(' ');
 
-          employeeCode: raw[i].employeeCode,
+        return {
+          userId: att.user?.id ?? null,
+          userName,
+           email: att.user?.email ?? null,
+
+          employeeCode: String(rawRow.employeeCode ?? ''),
           profileImage: profileImageKey,
           profileImageSigned,
 
@@ -625,6 +689,13 @@ export class AttendanceService {
     organizationId: string,
     dateStr: string,
   ) {
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const [wh, wm] = (settings.workStartTime || '09:00').split(':').map(Number);
+    const totalLateMinutes =
+      (settings.graceMinutes || 15) + (settings.lateThresholdMinutes || 30);
+    const lateCutoffH = wh + Math.floor((wm + totalLateMinutes) / 60);
+    const lateCutoffM = (wm + totalLateMinutes) % 60;
+
     const getStats = async (date: string) => {
       const attendance = await this.attendanceRepo.find({
         where: {
@@ -644,7 +715,7 @@ export class AttendanceService {
         if (!a.inTime) return false;
         const inTime = new Date(a.inTime);
         const clockLimit = new Date(a.attendanceDate);
-        clockLimit.setHours(10, 0, 0, 0); // 10:00 AM on that date
+        clockLimit.setHours(lateCutoffH, lateCutoffM, 0, 0);
         return inTime <= clockLimit;
       }).length;
 
@@ -652,7 +723,7 @@ export class AttendanceService {
         if (!a.inTime) return false;
         const inTime = new Date(a.inTime);
         const clockLimit = new Date(a.attendanceDate);
-        clockLimit.setHours(10, 0, 0, 0); // 10:00 AM
+        clockLimit.setHours(lateCutoffH, lateCutoffM, 0, 0);
         return inTime > clockLimit;
       }).length;
 
@@ -787,7 +858,6 @@ export class AttendanceService {
         user: { id: userId },
         organization: { id: organizationId },
         timestamp: Between(from, to),
-        anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
     });
@@ -848,7 +918,6 @@ export class AttendanceService {
         user: { id: dto.userId },
         organization: { id: dto.organizationId },
         timestamp: Between(logsWindowStart, logsWindowEnd),
-        anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
     });
@@ -959,6 +1028,7 @@ export class AttendanceService {
       relations: ['user'],
       order: { timestamp: 'ASC' },
     });
+    await this.overlayEmployeeNames(logs.map((l) => l.user));
 
     const logsByUser = new Map<string, AttendanceLog[]>();
     for (const log of logs) {
@@ -1097,11 +1167,17 @@ export class AttendanceService {
       outLocationAddress?: string;
     }[]
   > {
+    const fromDate = DateTime.fromObject(
+      { year, month, day: 1 },
+      { zone: 'Asia/Kolkata' },
+    ).toJSDate();
+    const toDate = DateTime.fromObject(
+      { year, month: month + 1, day: 0 },
+      { zone: 'Asia/Kolkata' },
+    ).toJSDate();
+
     const formatDateLocal = (date: Date): string => {
-      const yyyy = date.getFullYear();
-      const mm = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
+      return DateTime.fromJSDate(date).setZone('Asia/Kolkata').toFormat('yyyy-MM-dd');
     };
 
     const formatTime = (
@@ -1114,9 +1190,6 @@ export class AttendanceService {
       return formatTZ(zonedDate, 'hh:mm a');
     };
 
-    const fromDate = new Date(year, month - 1, 1);
-    const toDate = new Date(year, month, 0);
-
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
@@ -1128,6 +1201,7 @@ export class AttendanceService {
     const attendanceRecords = await this.attendanceRepo.find({
       where: {
         user: { id: userId },
+        organization: { id: organizationId },
         attendanceDate: Between(
           formatDateLocal(fromDate),
           formatDateLocal(toDate),
@@ -1150,6 +1224,7 @@ export class AttendanceService {
         'MAX(log.timestamp) AS out_time',
       ])
       .where('log.user_id = :userId', { userId })
+      .andWhere('log.organization_id = :organizationId', { organizationId })
       .andWhere('log.timestamp BETWEEN :start AND :end', {
         start: fromDate.toISOString(),
         end: toDate.toISOString(),
@@ -1280,11 +1355,79 @@ export class AttendanceService {
     return results;
   }
 
+  /**
+   * `users.firstName/lastName` is the raw login identity and is often left
+   * at its account-creation default (e.g. "Admin" for accounts created via
+   * an admin invite). The `employees` table (HR profile, kept up to date
+   * via the Employees admin form) is the accurate name source. Overlay it
+   * onto each already-loaded `user` relation in place so every admin-facing
+   * attendance view shows the real employee name.
+   */
+  private async overlayEmployeeNames(
+    users: Array<
+      | { id: string; firstName?: string; middleName?: string; lastName?: string }
+      | null
+      | undefined
+    >,
+  ): Promise<void> {
+    const userIds = [
+      ...new Set(
+        users
+          .filter(
+            (
+              u,
+            ): u is {
+              id: string;
+              firstName?: string;
+              middleName?: string;
+              lastName?: string;
+            } => !!u,
+          )
+          .map((u) => u.id),
+      ),
+    ];
+    if (userIds.length === 0) return;
+
+    const employees = await this.employeeRepo
+      .createQueryBuilder('employee')
+      .where('employee.userId IN (:...userIds)', { userIds })
+      .select([
+        'employee.userId',
+        'employee.firstName',
+        'employee.middleName',
+        'employee.lastName',
+      ])
+      .getMany();
+
+    const nameByUserId = new Map(
+      employees
+        .filter((e) => e.firstName)
+        .map((e) => [
+          e.userId,
+          {
+            firstName: e.firstName,
+            middleName: e.middleName,
+            lastName: e.lastName,
+          },
+        ]),
+    );
+
+    for (const user of users) {
+      if (!user) continue;
+      const resolved = nameByUserId.get(user.id);
+      if (resolved) {
+        user.firstName = resolved.firstName;
+        user.middleName = resolved.middleName;
+        user.lastName = resolved.lastName;
+      }
+    }
+  }
+
   // ✅ UPDATED METHOD: Include user information in today's anomalies
   async getTodayAnomalies(): Promise<any[]> {
-    const today = new Date();
-    const from = new Date(today.setHours(0, 0, 0, 0));
-    const to = new Date(today.setHours(23, 59, 59, 999));
+    const kolkataNow = DateTime.now().setZone('Asia/Kolkata');
+    const from = kolkataNow.startOf('day').toUTC().toJSDate();
+    const to = kolkataNow.endOf('day').toUTC().toJSDate();
 
     const queryBuilder = this.attendanceLogRepo
       .createQueryBuilder('log')
@@ -1294,6 +1437,7 @@ export class AttendanceService {
       .orderBy('log.timestamp', 'DESC');
 
     const results = await queryBuilder.getMany();
+    await this.overlayEmployeeNames(results.map((log) => log.user));
 
     // Transform the results to include userId at the root level and structured user info
     return results.map((log) => ({
@@ -1435,9 +1579,14 @@ export class AttendanceService {
 
   private combineDateTime(base: Date, timeStr: string): Date {
     const [hh, mm, ss] = timeStr.split(':').map((t) => parseInt(t, 10));
-    const dt = new Date(base);
-    dt.setHours(hh || 0, mm || 0, ss || 0, 0);
-    return dt;
+    const zoned = DateTime.fromJSDate(base).setZone('Asia/Kolkata');
+    const combined = zoned.set({
+      hour: hh || 0,
+      minute: mm || 0,
+      second: ss || 0,
+      millisecond: 0,
+    });
+    return combined.toUTC().toJSDate();
   }
 
   private isOvernightShift(
@@ -1480,7 +1629,9 @@ export class AttendanceService {
       }
     }
 
-    const attendanceDate = formatLocal(windowStart, 'yyyy-MM-dd');
+    const attendanceDate = DateTime.fromJSDate(windowStart)
+      .setZone('Asia/Kolkata')
+      .toFormat('yyyy-MM-dd');
     return { windowStart, windowEnd, attendanceDate };
   }
 
@@ -1644,9 +1795,10 @@ export class AttendanceService {
   }
 
   async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
-    const start = startOfDay(date);
-    const end = endOfDay(date);
-    const dateStr = formatLocal(start, 'yyyy-MM-dd');
+    const kolkataDate = DateTime.fromJSDate(date).setZone('Asia/Kolkata');
+    const start = kolkataDate.startOf('day').toUTC().toJSDate();
+    const end = kolkataDate.endOf('day').toUTC().toJSDate();
+    const dateStr = kolkataDate.toFormat('yyyy-MM-dd');
 
     // Cache user-level shift configs so branch calendar rules are reused during this run.
     const shiftConfigCache = new Map<
@@ -1850,15 +2002,8 @@ export class AttendanceService {
       )
       .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
       .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
-      // FIXED: Two-step join for manager
-      // 1. Join to get the manager employee record
+      // Manager's HR-profile record (employees, not users — see note below).
       .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to')
-      // 2. Join to get the manager's user details
-      .leftJoin(
-        'users',
-        'managerUser',
-        'managerUser.user_id = managerEmp.user_id',
-      )
       .where('att.organization_id = :organizationId', { organizationId })
       .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
         startDate: formatDateLocal(startDate),
@@ -1881,8 +2026,14 @@ export class AttendanceService {
         'emp.branch_id AS "branchId"',
         'dept.name AS "departmentName"',
         'desg.name AS "designationName"',
-        // FIXED: Use managerUser fields for concatenation
-        "CONCAT_WS(' ', NULLIF(managerUser.first_name, ''), NULLIF(managerUser.middle_name, ''), NULLIF(managerUser.last_name, '')) AS \"managerFullName\"",
+        // `employees` (HR profile) is the accurate name source; `users`
+        // (raw login identity) is often left at its account-creation
+        // default — select both the employee's and manager's names from
+        // `employees` here rather than `users`.
+        'emp.first_name AS "empFirstName"',
+        'emp.middle_name AS "empMiddleName"',
+        'emp.last_name AS "empLastName"',
+        "CONCAT_WS(' ', NULLIF(managerEmp.first_name, ''), NULLIF(managerEmp.middle_name, ''), NULLIF(managerEmp.last_name, '')) AS \"managerFullName\"",
       ])
       .orderBy('user.first_name', 'ASC')
       .addOrderBy('att.attendanceDate', 'ASC');
@@ -1940,28 +2091,41 @@ export class AttendanceService {
     const userAttendanceMap = new Map();
 
     // Process raw results to build user map
-    rawResults.entities.forEach((entry, index) => {
-      const userId = entry.user.id;
-      const rawData = rawResults.raw[index];
-      const empCode = rawData?.employeeCode || 'N/A';
-      const branchId = (rawData?.branchId as string | null | undefined) || null;
-      const departmentName = rawData?.departmentName || '';
-      const designationName = rawData?.designationName || '';
+    // Build raw data map by attendance ID to avoid index-based alignment
+    const rawMap = new Map<string, Record<string, unknown>>();
+    for (const row of rawResults.raw) {
+      const id = String(row.att_id ?? '');
+      if (id) rawMap.set(id, row);
+    }
+
+    rawResults.entities.forEach((entry) => {
+      const userId = entry.user?.id;
+      if (!userId) return;
+      const rawData = rawMap.get(entry.id) ?? {};
+      const empCode = String(rawData?.employeeCode || 'N/A');
+      const branchId = (rawData.branchId as string | null | undefined) || null;
+      const departmentName = String(rawData.departmentName ?? '');
+      const designationName = String(rawData.designationName ?? '');
 
       // Get the concatenated manager name from SQL and clean up spaces
-      let managerName = rawData?.managerFullName || '';
+      let managerName = String(rawData?.managerFullName ?? '');
       managerName = managerName.replace(/\s+/g, ' ').trim();
 
       if (!userAttendanceMap.has(userId)) {
+        const empFirstName = rawData.empFirstName as string | null;
         userAttendanceMap.set(userId, {
           userId: userId,
-          userName: [
-            entry.user.firstName,
-            entry.user.middleName,
-            entry.user.lastName,
-          ]
-            .filter(Boolean)
-            .join(' '),
+          userName: empFirstName
+            ? [empFirstName, rawData.empMiddleName, rawData.empLastName]
+                .filter(Boolean)
+                .join(' ')
+            : [
+                entry.user.firstName,
+                entry.user.middleName,
+                entry.user.lastName,
+              ]
+                .filter(Boolean)
+                .join(' '),
           email: entry.user.email,
           employeeCode: empCode,
           branchId,
@@ -2044,8 +2208,15 @@ export class AttendanceService {
         .addSelect('emp.branch_id', 'branchId')
         .addSelect('dept.name', 'departmentName')
         .addSelect('desg.name', 'designationName')
+        // `employees` (HR profile) is the accurate name source; `users`
+        // (raw login identity) is often left at its account-creation
+        // default — select both the employee's and manager's names from
+        // `employees` here rather than `users`.
+        .addSelect('emp.first_name', 'empFirstName')
+        .addSelect('emp.middle_name', 'empMiddleName')
+        .addSelect('emp.last_name', 'empLastName')
         .addSelect(
-          "CONCAT_WS(' ', NULLIF(managerUser.first_name, ''), NULLIF(managerUser.middle_name, ''), NULLIF(managerUser.last_name, '')) AS \"managerFullName\"",
+          "CONCAT_WS(' ', NULLIF(managerEmp.first_name, ''), NULLIF(managerEmp.middle_name, ''), NULLIF(managerEmp.last_name, '')) AS \"managerFullName\"",
         )
         .leftJoin('att.user', 'user')
         .leftJoin(
@@ -2056,13 +2227,8 @@ export class AttendanceService {
         )
         .leftJoin('departments', 'dept', 'emp.department_id = dept.id')
         .leftJoin('designations', 'desg', 'emp.designation_id = desg.id')
-        // FIXED: Two-step join for manager
+        // Manager's HR-profile record (employees, not users — see note above).
         .leftJoin('employees', 'managerEmp', 'managerEmp.id = emp.reporting_to')
-        .leftJoin(
-          'users',
-          'managerUser',
-          'managerUser.user_id = managerEmp.user_id',
-        )
         .where('att.organization_id = :organizationId', { organizationId })
         .andWhere('att.attendanceDate BETWEEN :startDate AND :endDate', {
           startDate: formatDateLocal(startDate),
@@ -2075,11 +2241,14 @@ export class AttendanceService {
         .addGroupBy('user.email')
         .addGroupBy('emp.employee_code')
         .addGroupBy('emp.branch_id')
+        .addGroupBy('emp.first_name')
+        .addGroupBy('emp.middle_name')
+        .addGroupBy('emp.last_name')
         .addGroupBy('dept.name')
         .addGroupBy('desg.name')
-        .addGroupBy('managerUser.first_name')
-        .addGroupBy('managerUser.middle_name')
-        .addGroupBy('managerUser.last_name')
+        .addGroupBy('managerEmp.first_name')
+        .addGroupBy('managerEmp.middle_name')
+        .addGroupBy('managerEmp.last_name')
         .getRawMany();
 
       allOrgUsers.forEach((user) => {
@@ -2087,11 +2256,13 @@ export class AttendanceService {
           let managerName = user.managerFullName || '';
           managerName = managerName.replace(/\s+/g, ' ').trim();
 
+          const nameParts = user.empFirstName
+            ? [user.empFirstName, user.empMiddleName, user.empLastName]
+            : [user.firstName, user.middleName, user.lastName];
+
           userAttendanceMap.set(user.userId, {
             userId: user.userId,
-            userName: [user.firstName, user.middleName, user.lastName]
-              .filter(Boolean)
-              .join(' '),
+            userName: nameParts.filter(Boolean).join(' '),
             email: user.email,
             employeeCode: user.employeeCode || 'N/A',
             branchId: user.branchId || null,

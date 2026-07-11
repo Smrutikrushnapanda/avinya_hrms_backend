@@ -76,6 +76,16 @@ export class User {
   @Column({ name: 'must_change_password', type: 'boolean', default: true })
   mustChangePassword: boolean;
 
+  @Column({ name: 'password_reset_otp_hash', type: 'varchar', nullable: true })
+  passwordResetOtpHash?: string | null;
+
+  @Column({
+    name: 'password_reset_otp_expires_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  passwordResetOtpExpiresAt?: Date | null;
+
   @OneToMany(() => UserRole, (userRole) => userRole.user)
   userRoles: UserRole[];
 }

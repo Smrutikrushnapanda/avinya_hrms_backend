@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { User } from '../../auth-core/entities/user.entity';
 
 @Entity('messages')
 export class Message {
@@ -16,6 +19,10 @@ export class Message {
 
   @Column({ name: 'sender_user_id', type: 'uuid' })
   senderUserId: string;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'sender_user_id' })
+  sender: User;
 
   @Column({ name: 'title', length: 200 })
   title: string;

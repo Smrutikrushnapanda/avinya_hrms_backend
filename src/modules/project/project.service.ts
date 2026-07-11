@@ -139,6 +139,8 @@ export class ProjectService implements OnModuleInit {
       status: dto.status ?? 'planning',
       priority: dto.priority ?? 'medium',
       estimatedEndDate: dto.estimatedEndDate ?? null,
+      projectCost: dto.projectCost ?? null,
+      hourlyRate: dto.hourlyRate ?? null,
     });
     await this.projectRepo.save(project);
 
@@ -166,6 +168,10 @@ export class ProjectService implements OnModuleInit {
       .orderBy('p.createdAt', 'DESC')
       .getMany();
 
+    await this.overlayEmployeeNames([
+      ...projects.map((p) => p.createdBy),
+      ...projects.flatMap((p) => p.members?.map((m) => m.user) ?? []),
+    ]);
     return projects.map((p) => this.formatProject(p));
   }
 
@@ -179,6 +185,10 @@ export class ProjectService implements OnModuleInit {
       .getOne();
 
     if (!p) throw new NotFoundException('Project not found');
+    await this.overlayEmployeeNames([
+      p.createdBy,
+      ...(p.members?.map((m) => m.user) ?? []),
+    ]);
     return this.formatProject(p);
   }
 
@@ -212,6 +222,8 @@ export class ProjectService implements OnModuleInit {
       ...(dto.estimatedEndDate !== undefined && {
         estimatedEndDate: dto.estimatedEndDate,
       }),
+      ...(dto.projectCost !== undefined && { projectCost: dto.projectCost }),
+      ...(dto.hourlyRate !== undefined && { hourlyRate: dto.hourlyRate }),
     });
 
     await this.projectRepo.save(project);
@@ -289,6 +301,12 @@ export class ProjectService implements OnModuleInit {
       .orderBy('p.createdAt', 'DESC')
       .getMany();
 
+    await this.overlayEmployeeNames([
+      ...memberships.map((m) => m.project.createdBy),
+      ...memberships.flatMap(
+        (m) => m.project.members?.map((pm) => pm.user) ?? [],
+      ),
+    ]);
     return memberships.map((m) => this.formatProject(m.project));
   }
 
@@ -386,6 +404,79 @@ export class ProjectService implements OnModuleInit {
       .where('pm.projectId = :projectId', { projectId })
       .andWhere('pm.userId IN (:...lookupIds)', { lookupIds })
       .getOne();
+  }
+
+  /**
+   * `users.firstName/lastName` is the raw login identity and is often left
+   * at its account-creation default (e.g. "Admin" for accounts created via
+   * an admin invite). The `employees` table (HR profile, kept up to date
+   * via the Employees admin form) is the accurate name source. Overlay it
+   * onto each already-loaded `user` relation in place so the admin
+   * Projects page shows the real employee name for members and creator.
+   */
+  private async overlayEmployeeNames(
+    users: Array<
+      | {
+          id: string;
+          firstName?: string;
+          middleName?: string;
+          lastName?: string;
+        }
+      | null
+      | undefined
+    >,
+  ): Promise<void> {
+    const userIds = [
+      ...new Set(
+        users
+          .filter(
+            (
+              u,
+            ): u is {
+              id: string;
+              firstName?: string;
+              middleName?: string;
+              lastName?: string;
+            } => !!u,
+          )
+          .map((u) => u.id),
+      ),
+    ];
+    if (userIds.length === 0) return;
+
+    const employees = await this.employeeRepo
+      .createQueryBuilder('employee')
+      .where('employee.userId IN (:...userIds)', { userIds })
+      .select([
+        'employee.userId',
+        'employee.firstName',
+        'employee.middleName',
+        'employee.lastName',
+      ])
+      .getMany();
+
+    const nameByUserId = new Map(
+      employees
+        .filter((e) => e.firstName)
+        .map((e) => [
+          e.userId,
+          {
+            firstName: e.firstName,
+            middleName: e.middleName,
+            lastName: e.lastName,
+          },
+        ]),
+    );
+
+    for (const user of users) {
+      if (!user) continue;
+      const resolved = nameByUserId.get(user.id);
+      if (resolved) {
+        user.firstName = resolved.firstName;
+        user.middleName = resolved.middleName;
+        user.lastName = resolved.lastName;
+      }
+    }
   }
 
   private formatProject(p: Project) {
@@ -548,7 +639,6 @@ export class ProjectService implements OnModuleInit {
     assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
-    isAdmin = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
@@ -623,16 +713,13 @@ export class ProjectService implements OnModuleInit {
       }
     }
 
-    // Send notification to newly assigned employees
-    // Only send notifications to newly assigned employees, not to the admin assigning them
-    if (!isAdmin) {
-      await this.sendAssignmentNotification(
-        project,
-        assignableAssignments,
-        requestingUserId,
-        organizationId,
-      );
-    }
+    // Send notification to newly assigned employees (never to the admin/manager assigning them)
+    await this.sendAssignmentNotification(
+      project,
+      assignableAssignments,
+      requestingUserId,
+      organizationId,
+    );
 
     return this.getProjectEmployees(projectId);
   }

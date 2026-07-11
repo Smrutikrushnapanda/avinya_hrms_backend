@@ -121,7 +121,9 @@ export class PayrollController {
   }
 
   @Put('bank-details/:employeeId')
-  @ApiOperation({ summary: 'Create or update employee bank/salary account details' })
+  @ApiOperation({
+    summary: 'Create or update employee bank/salary account details',
+  })
   upsertBankDetail(
     @Param('employeeId') employeeId: string,
     @Body() dto: UpsertEmployeeBankDetailDto,

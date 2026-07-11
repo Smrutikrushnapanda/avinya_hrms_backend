@@ -63,7 +63,7 @@ export class ProjectTask {
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'assigned_to_user_id' })
-  assignedToUser: User;
+  assignedToUser: User | null;
 
   @Column({ name: 'assigned_to_user_id', type: 'uuid', nullable: true })
   assignedToUserId: string | null;

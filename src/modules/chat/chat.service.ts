@@ -316,6 +316,36 @@ export class ChatService {
     return payloadMessage;
   }
 
+  async markConversationRead(
+    conversationId: string,
+    userId: string,
+  ): Promise<{ success: boolean }> {
+    const participant = await this.participantRepo.findOne({
+      where: { conversation: { id: conversationId }, user: { id: userId } },
+      relations: ['conversation'],
+    });
+    if (!participant) throw new ForbiddenException('Not a participant');
+
+    participant.lastReadAt = new Date();
+    await this.participantRepo.save(participant);
+
+    const allParticipants = await this.participantRepo.find({
+      where: { conversation: { id: conversationId } },
+    });
+    const participantIds = Array.from(
+      new Set(allParticipants.map((p) => p.userId).filter(Boolean)),
+    );
+
+    this.messageGateway.emitChatToUsers(participantIds, {
+      conversationId,
+      type: 'read',
+      userId,
+      readAt: participant.lastReadAt,
+    });
+
+    return { success: true };
+  }
+
   private isReadByAll(
     message: ChatMessage | null,
     participants: ChatParticipant[],

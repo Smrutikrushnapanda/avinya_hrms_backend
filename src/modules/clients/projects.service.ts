@@ -337,12 +337,15 @@ export class ProjectsService implements OnModuleInit {
 
   // ─── Employee Assignment ───────────────────────────────────────────────────
 
-  async getProjectEmployees(projectId: string) {
+  async getProjectEmployees(projectId: string, organizationId?: string) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
       relations: ['manager', 'manager.user'],
     });
     if (!project) throw new NotFoundException('Project not found');
+    if (organizationId && project.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
 
     const members = await this.memberRepo.find({
       where: { projectId },
@@ -435,7 +438,6 @@ export class ProjectsService implements OnModuleInit {
     assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
-    isAdmin = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
@@ -505,15 +507,13 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    // Send notification to newly assigned employees (only send to employees, not to admin/manager)
-    if (!isAdmin) {
-      await this.sendAssignmentNotification(
-        project,
-        assignableUserIds,
-        requestingUserId,
-        organizationId,
-      );
-    }
+    // Send notification to newly assigned employees (never to the admin/manager assigning them)
+    await this.sendAssignmentNotification(
+      project,
+      assignableUserIds,
+      requestingUserId,
+      organizationId,
+    );
 
     return this.getProjectEmployees(projectId);
   }
@@ -544,7 +544,15 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
-  async removeEmployee(projectId: string, userId: string) {
+  async removeEmployee(projectId: string, userId: string, organizationId?: string) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      select: ['id', 'organizationId'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (organizationId && project.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     const member = await this.memberRepo.findOne({
       where: { projectId, userId },
     });
@@ -793,6 +801,7 @@ export class ProjectsService implements OnModuleInit {
       organizationId: string;
       dueDate?: string;
       priority?: TaskPriority;
+      createdByAdmin?: boolean;
     },
   ) {
     const project = await this.projectRepo.findOne({
@@ -807,7 +816,11 @@ export class ProjectsService implements OnModuleInit {
       },
       select: ['id'],
     });
-    if (!actingEmployee || project.managerId !== actingEmployee.id) {
+    const isProjectManager = Boolean(
+      actingEmployee && project.managerId === actingEmployee.id,
+    );
+    const isAdmin = data.createdByAdmin ?? false;
+    if (!isProjectManager && !isAdmin) {
       throw new ForbiddenException(
         'Only the assigned project manager can create tasks',
       );
@@ -894,7 +907,15 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
-  async getProjectTasks(projectId: string) {
+  async getProjectTasks(projectId: string, organizationId?: string) {
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      select: ['id', 'organizationId'],
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    if (organizationId && project.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     const tasks = await this.taskRepo.find({
       where: { projectId },
       relations: ['assignedToUser', 'assignedByUser'],
@@ -981,13 +1002,15 @@ export class ProjectsService implements OnModuleInit {
     return { success: true };
   }
 
-  async getTimesheetsSummary(projectId: string) {
-    // Get project by ID to get project name and cost info
+  async getTimesheetsSummary(projectId: string, organizationId?: string) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
     });
     if (!project) {
       throw new NotFoundException('Project not found');
+    }
+    if (organizationId && project.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
     }
 
     const projectName = project.projectName;

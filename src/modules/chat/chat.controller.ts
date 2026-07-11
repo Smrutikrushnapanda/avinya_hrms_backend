@@ -93,6 +93,19 @@ export class ChatController {
     return this.chatService.getMessages(id, userId, take, before);
   }
 
+  @Post('conversations/:id/read')
+  @ApiOperation({ summary: 'Mark conversation as read' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
+  async markConversationRead(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const userId = this.getAuthenticatedUserId(
+      user as Partial<User> & { userId?: string },
+    );
+    return this.chatService.markConversationRead(id, userId);
+  }
+
   @Post('conversations/:id/messages')
   @ApiOperation({ summary: 'Send a chat message (text and/or attachments)' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })

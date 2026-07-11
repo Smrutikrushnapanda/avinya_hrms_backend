@@ -26,7 +26,9 @@ export class RolesGuard implements CanActivate {
       | JwtPayload
       | undefined;
 
-    const hasRole = user?.roles?.some((r) => requiredRoles.includes(r.roleName));
+    const hasRole = user?.roles?.some((r) =>
+      requiredRoles.includes(r.roleName),
+    );
 
     if (!hasRole) {
       throw new ForbiddenException(
