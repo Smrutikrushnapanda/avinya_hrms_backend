@@ -742,13 +742,16 @@ export class WfhMonitoringService {
       [userIds, today],
     );
 
-    const latestPerUser = new Map<string, {
-      appName: string;
-      windowTitle: string | null;
-      occurredAt: Date;
-      keystrokeCount: number;
-      mouseClicks: number;
-    }>();
+    const latestPerUser = new Map<
+      string,
+      {
+        appName: string;
+        windowTitle: string | null;
+        occurredAt: Date;
+        keystrokeCount: number;
+        mouseClicks: number;
+      }
+    >();
     for (const row of latestActivity) {
       latestPerUser.set(row.user_id, {
         appName: row.app_name,

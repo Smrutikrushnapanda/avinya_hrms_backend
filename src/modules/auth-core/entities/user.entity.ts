@@ -86,6 +86,19 @@ export class User {
   })
   passwordResetOtpExpiresAt?: Date | null;
 
+  @Column({ name: 'superadmin_otp_hash', type: 'varchar', nullable: true })
+  superadminOtpHash?: string | null;
+
+  @Column({
+    name: 'superadmin_otp_expires_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  superadminOtpExpiresAt?: Date | null;
+
+  @Column({ name: 'superadmin_otp_attempts', type: 'int', default: 0 })
+  superadminOtpAttempts: number;
+
   @OneToMany(() => UserRole, (userRole) => userRole.user)
   userRoles: UserRole[];
 }

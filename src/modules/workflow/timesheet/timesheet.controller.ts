@@ -47,8 +47,12 @@ export class TimesheetController {
   }
 
   @Post('batch')
-  @ApiOperation({ summary: 'Create multiple timesheet entries for one day in one request' })
-  @ApiBadRequestResponse({ description: 'Invalid timesheet payload or overlapping entries' })
+  @ApiOperation({
+    summary: 'Create multiple timesheet entries for one day in one request',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid timesheet payload or overlapping entries',
+  })
   createBatch(@Body() dto: CreateTimesheetBatchDto) {
     return this.timesheetService.createTimesheetBatch(dto);
   }
@@ -87,7 +91,9 @@ export class TimesheetController {
   }
 
   @Get('manager')
-  @ApiOperation({ summary: "List direct reports' timesheets for the acting manager" })
+  @ApiOperation({
+    summary: "List direct reports' timesheets for the acting manager",
+  })
   @ApiQuery({ name: 'employeeId', required: false, type: String })
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
@@ -145,12 +151,21 @@ export class TimesheetController {
   }
 
   @Post('day-approval')
-  @ApiOperation({ summary: "Approve or reject an employee's timesheet for a given day" })
-  async approveDay(@GetUser() user: JwtPayload, @Body() dto: ApproveTimesheetDayDto) {
+  @ApiOperation({
+    summary: "Approve or reject an employee's timesheet for a given day",
+  })
+  async approveDay(
+    @GetUser() user: JwtPayload,
+    @Body() dto: ApproveTimesheetDayDto,
+  ) {
     const actingEmployeeId = await this.timesheetService.resolveEmployeeId(
       user.userId,
       user.organizationId,
     );
-    return this.timesheetService.approveDay(actingEmployeeId, isAdminOrHr(user), dto);
+    return this.timesheetService.approveDay(
+      actingEmployeeId,
+      isAdminOrHr(user),
+      dto,
+    );
   }
 }

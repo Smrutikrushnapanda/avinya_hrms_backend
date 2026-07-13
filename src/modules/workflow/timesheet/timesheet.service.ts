@@ -7,7 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Timesheet, TimesheetWorkStatus } from './entities/timesheet.entity';
-import { CreateTimesheetDto, TimesheetEntryFieldsDto } from './dto/create-timesheet.dto';
+import {
+  CreateTimesheetDto,
+  TimesheetEntryFieldsDto,
+} from './dto/create-timesheet.dto';
 import { CreateTimesheetBatchDto } from './dto/create-timesheet-batch.dto';
 import { UpdateTimesheetDto } from './dto/update-timesheet.dto';
 import { ApproveTimesheetDayDto } from './dto/approve-timesheet-day.dto';
@@ -65,13 +68,18 @@ export class TimesheetService {
   }
 
   /** Resolves the acting user's Employee.id (timesheets are employee-keyed; JWT only carries userId). */
-  async resolveEmployeeId(userId: string, organizationId: string): Promise<string> {
+  async resolveEmployeeId(
+    userId: string,
+    organizationId: string,
+  ): Promise<string> {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
       select: ['id'],
     });
     if (!employee) {
-      throw new NotFoundException('No employee record found for the current user');
+      throw new NotFoundException(
+        'No employee record found for the current user',
+      );
     }
     return employee.id;
   }
@@ -106,7 +114,9 @@ export class TimesheetService {
       throw new BadRequestException(`${label}: invalid start or end time`);
     }
     if (end <= start) {
-      throw new BadRequestException(`${label}: end time must be after start time`);
+      throw new BadRequestException(
+        `${label}: end time must be after start time`,
+      );
     }
     return { start, end };
   }
@@ -179,7 +189,11 @@ export class TimesheetService {
     await this.assertNoOverlap(dto.employeeId, dateOnly, start, end);
 
     const timesheet = this.buildEntry(
-      { organizationId: dto.organizationId, employeeId: dto.employeeId, date: dateOnly },
+      {
+        organizationId: dto.organizationId,
+        employeeId: dto.employeeId,
+        date: dateOnly,
+      },
       dto,
       start,
       end,
@@ -220,14 +234,19 @@ export class TimesheetService {
       await this.assertNoOverlap(dto.employeeId, dateOnly, start, end);
     }
 
-    const queryRunner = this.timesheetRepo.manager.connection.createQueryRunner();
+    const queryRunner =
+      this.timesheetRepo.manager.connection.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
       const saved: Timesheet[] = [];
       for (const { entry, start, end } of parsed) {
         const row = this.buildEntry(
-          { organizationId: dto.organizationId, employeeId: dto.employeeId, date: dateOnly },
+          {
+            organizationId: dto.organizationId,
+            employeeId: dto.employeeId,
+            date: dateOnly,
+          },
           entry,
           start,
           end,
@@ -254,10 +273,14 @@ export class TimesheetService {
       throw new NotFoundException('Timesheet entry not found');
     }
     if (entry.employeeId !== requestingEmployeeId) {
-      throw new ForbiddenException('You can only edit your own timesheet entries');
+      throw new ForbiddenException(
+        'You can only edit your own timesheet entries',
+      );
     }
     if (entry.date !== this.today()) {
-      throw new ForbiddenException("Only today's timesheet entries can be edited");
+      throw new ForbiddenException(
+        "Only today's timesheet entries can be edited",
+      );
     }
 
     const start = dto.startTime ? new Date(dto.startTime) : entry.startTime;
@@ -268,19 +291,29 @@ export class TimesheetService {
     if (end <= start) {
       throw new BadRequestException('End time must be after start time');
     }
-    await this.assertNoOverlap(entry.employeeId, entry.date, start, end, entry.id);
+    await this.assertNoOverlap(
+      entry.employeeId,
+      entry.date,
+      start,
+      end,
+      entry.id,
+    );
 
     entry.startTime = start;
     entry.endTime = end;
     entry.workingMinutes =
       dto.workingMinutes ?? Math.max(0, Math.floor((+end - +start) / 60000));
-    if (dto.projectName !== undefined) entry.projectName = dto.projectName ?? null;
+    if (dto.projectName !== undefined)
+      entry.projectName = dto.projectName ?? null;
     if (dto.clientName !== undefined) entry.clientName = dto.clientName ?? null;
-    if (dto.moduleFeature !== undefined) entry.moduleFeature = dto.moduleFeature ?? null;
+    if (dto.moduleFeature !== undefined)
+      entry.moduleFeature = dto.moduleFeature ?? null;
     if (dto.pageScreen !== undefined) entry.pageScreen = dto.pageScreen ?? null;
-    if (dto.workDescription !== undefined) entry.workDescription = dto.workDescription;
+    if (dto.workDescription !== undefined)
+      entry.workDescription = dto.workDescription;
     if (dto.workStatus !== undefined) entry.workStatus = dto.workStatus;
-    if (dto.employeeRemark !== undefined) entry.employeeRemark = dto.employeeRemark ?? null;
+    if (dto.employeeRemark !== undefined)
+      entry.employeeRemark = dto.employeeRemark ?? null;
 
     return this.timesheetRepo.save(entry);
   }
@@ -291,10 +324,14 @@ export class TimesheetService {
       throw new NotFoundException('Timesheet entry not found');
     }
     if (entry.employeeId !== requestingEmployeeId) {
-      throw new ForbiddenException('You can only delete your own timesheet entries');
+      throw new ForbiddenException(
+        'You can only delete your own timesheet entries',
+      );
     }
     if (entry.date !== this.today()) {
-      throw new ForbiddenException("Only today's timesheet entries can be deleted");
+      throw new ForbiddenException(
+        "Only today's timesheet entries can be deleted",
+      );
     }
 
     await this.timesheetRepo.remove(entry);
@@ -302,8 +339,16 @@ export class TimesheetService {
   }
 
   async listTimesheets(query: TimesheetQuery) {
-    const { organizationId, employeeId, fromDate, toDate, status, projectName, page, limit } =
-      query;
+    const {
+      organizationId,
+      employeeId,
+      fromDate,
+      toDate,
+      status,
+      projectName,
+      page,
+      limit,
+    } = query;
 
     const qb = this.timesheetRepo
       .createQueryBuilder('ts')
@@ -317,7 +362,10 @@ export class TimesheetService {
       qb.andWhere('ts.employeeId = :employeeId', { employeeId });
     }
     if (fromDate && toDate) {
-      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', { fromDate, toDate });
+      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', {
+        fromDate,
+        toDate,
+      });
     }
     if (status) {
       qb.andWhere('ts.approvalStatus = :status', { status });
@@ -344,8 +392,12 @@ export class TimesheetService {
     };
   }
 
-  async getManagerTimesheets(managerEmployeeId: string, query: ManagerTimesheetQuery) {
-    const { employeeId, fromDate, toDate, status, projectName, page, limit } = query;
+  async getManagerTimesheets(
+    managerEmployeeId: string,
+    query: ManagerTimesheetQuery,
+  ) {
+    const { employeeId, fromDate, toDate, status, projectName, page, limit } =
+      query;
 
     const directReports = await this.employeeRepo.find({
       where: { reportingTo: managerEmployeeId },
@@ -378,7 +430,10 @@ export class TimesheetService {
       .where('ts.employeeId IN (:...scopedEmployeeIds)', { scopedEmployeeIds });
 
     if (fromDate && toDate) {
-      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', { fromDate, toDate });
+      qb.andWhere('ts.date BETWEEN :fromDate AND :toDate', {
+        fromDate,
+        toDate,
+      });
     }
     if (status) {
       qb.andWhere('ts.approvalStatus = :status', { status });
@@ -425,7 +480,9 @@ export class TimesheetService {
       where: { employeeId: dto.employeeId, date: dto.date },
     });
     if (entries.length === 0) {
-      throw new NotFoundException('No timesheet entries found for that employee/date');
+      throw new NotFoundException(
+        'No timesheet entries found for that employee/date',
+      );
     }
 
     const now = new Date();

@@ -6,6 +6,7 @@ import {
   Param,
   Get,
   Delete,
+  ForbiddenException,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import {
   StartTrialDto,
 } from '../dto/organization.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { RolesGuard } from '../guards/roles.guard';
+import { Roles } from '../decorators/roles.decorator';
 import {
   SwaggerCreateOrganization,
   SwaggerUpdateOrganization,
@@ -43,7 +46,8 @@ export class OrganizationController {
     return this.orgService.startTrial(body);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @Put(':id')
   @SwaggerUpdateOrganization()
   update(
@@ -51,6 +55,15 @@ export class OrganizationController {
     @Body() body: UpdateOrganizationDto,
     @Request() req: any,
   ) {
+    const isSuperadmin = (req.user?.roles as { roleName: string }[])?.some(
+      (r) => r.roleName === 'SUPERADMIN',
+    );
+    if (!isSuperadmin && req.user?.organizationId !== id) {
+      throw new ForbiddenException(
+        'You can only update your own organization.',
+      );
+    }
+
     return this.orgService.update(
       id,
       body,

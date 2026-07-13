@@ -595,4 +595,31 @@ export class MailService {
       html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
     });
   }
+
+  async sendSuperadminLoginOtp(details: {
+    email: string;
+    otp: string;
+    expiresInMinutes: number;
+  }): Promise<void> {
+    const content = `
+      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Super Admin Login OTP</h2>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">Use this OTP to sign in to the Avinya HRMS super admin console.</p>
+
+      <div style="background:#f8f9fb;border-radius:8px;padding:20px 24px;margin-bottom:24px;text-align:center;">
+        <div style="font-size:32px;letter-spacing:8px;font-weight:800;color:#111827;">${details.otp}</div>
+        <p style="margin:12px 0 0;font-size:13px;color:#6b7280;">Expires in ${details.expiresInMinutes} minutes.</p>
+      </div>
+
+      <p style="margin:0;font-size:14px;color:#6b7280;">
+        If you did not request this, someone may be trying to access the super admin console — you can safely ignore this email.
+      </p>
+    `;
+
+    await this.send({
+      from: this.fromAddress,
+      to: details.email,
+      subject: 'Avinya HRMS — Super Admin login OTP',
+      html: this.buildEmailWrapper('Avinya HRMS', null, content),
+    });
+  }
 }

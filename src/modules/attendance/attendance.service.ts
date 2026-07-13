@@ -590,7 +590,7 @@ export class AttendanceService {
         return {
           userId: att.user?.id ?? null,
           userName,
-           email: att.user?.email ?? null,
+          email: att.user?.email ?? null,
 
           employeeCode: String(rawRow.employeeCode ?? ''),
           profileImage: profileImageKey,
@@ -1177,7 +1177,9 @@ export class AttendanceService {
     ).toJSDate();
 
     const formatDateLocal = (date: Date): string => {
-      return DateTime.fromJSDate(date).setZone('Asia/Kolkata').toFormat('yyyy-MM-dd');
+      return DateTime.fromJSDate(date)
+        .setZone('Asia/Kolkata')
+        .toFormat('yyyy-MM-dd');
     };
 
     const formatTime = (
@@ -1365,7 +1367,12 @@ export class AttendanceService {
    */
   private async overlayEmployeeNames(
     users: Array<
-      | { id: string; firstName?: string; middleName?: string; lastName?: string }
+      | {
+          id: string;
+          firstName?: string;
+          middleName?: string;
+          lastName?: string;
+        }
       | null
       | undefined
     >,
@@ -2119,11 +2126,7 @@ export class AttendanceService {
             ? [empFirstName, rawData.empMiddleName, rawData.empLastName]
                 .filter(Boolean)
                 .join(' ')
-            : [
-                entry.user.firstName,
-                entry.user.middleName,
-                entry.user.lastName,
-              ]
+            : [entry.user.firstName, entry.user.middleName, entry.user.lastName]
                 .filter(Boolean)
                 .join(' '),
           email: entry.user.email,

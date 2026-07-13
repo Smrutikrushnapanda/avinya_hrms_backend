@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -189,7 +191,7 @@ export class AuthService {
         { isActive: true },
       )
       .leftJoin('rolePermission.permission', 'permission')
-      .addSelect(['organization.id'])
+      .addSelect(['organization.id', 'organization.isActive'])
       .addSelect(['role.id', 'role.roleName'])
       .addSelect(['permission.id', 'permission.permissionName'])
       .where('user.userName = :userName', { userName })
@@ -242,6 +244,21 @@ export class AuthService {
     }
 
     if (user && (await bcrypt.compare(password, user.password))) {
+      const isSuperadmin = (user['roles'] as { roleName: string }[])?.some(
+        (r) => r.roleName === 'SUPERADMIN',
+      );
+      if (isSuperadmin) {
+        throw new ForbiddenException(
+          'Super admin accounts must sign in with email OTP, not a password.',
+        );
+      }
+
+      if (user.organization && user.organization['isActive'] === false) {
+        throw new UnauthorizedException(
+          'Your organization has been suspended. Contact support for assistance.',
+        );
+      }
+
       await this.userRepository
         .createQueryBuilder()
         .update(User)
@@ -288,6 +305,159 @@ export class AuthService {
     } catch (err) {
       // Silently catch seeder/stale session FK issues so logout does not fail
     }
+  }
+
+  private getSuperadminEmail(): string {
+    const configured = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
+    if (!configured) {
+      throw new ForbiddenException('Super admin login is not configured.');
+    }
+    return configured;
+  }
+
+  private async loadSuperadminByEmail(
+    email: string,
+  ): Promise<UserWithRoles | null> {
+    const { raw, entities } = await this.userRepository
+      .createQueryBuilder('user')
+      .leftJoin('user.userRoles', 'userRole', 'userRole.isActive = :isActive', {
+        isActive: true,
+      })
+      .leftJoin('userRole.role', 'role')
+      .leftJoin(
+        'role.rolePermissions',
+        'rolePermission',
+        'rolePermission.isActive = :isActive',
+        { isActive: true },
+      )
+      .leftJoin('rolePermission.permission', 'permission')
+      .addSelect(['role.id', 'role.roleName'])
+      .addSelect(['permission.id', 'permission.permissionName'])
+      .where('LOWER(user.email) = :email', { email })
+      .andWhere('role.roleName = :roleName', { roleName: 'SUPERADMIN' })
+      .getRawAndEntities();
+
+    if (!entities.length) return null;
+
+    const user = entities[0] as UserWithRoles;
+    user.roles = raw
+      .filter((r) => r.role_role_id)
+      .map((r) => ({ id: r.role_role_id, roleName: r.role_role_name }))
+      .filter((r, i, self) => self.findIndex((x) => x.id === r.id) === i);
+    user.permissions = raw
+      .filter((r) => r.permission_permission_id)
+      .map((r) => ({
+        id: r.permission_permission_id,
+        permissionName: r.permission_permission_name,
+      }))
+      .filter((p, i, self) => self.findIndex((x) => x.id === p.id) === i);
+
+    return user;
+  }
+
+  async requestSuperadminOtp(rawEmail: string) {
+    const configuredEmail = this.getSuperadminEmail();
+    const email = rawEmail.trim().toLowerCase();
+
+    if (email !== configuredEmail) {
+      throw new ForbiddenException(
+        'This email is not authorized for super admin access.',
+      );
+    }
+
+    const user = await this.loadSuperadminByEmail(email);
+    if (!user) {
+      throw new NotFoundException(
+        'No super admin account is configured for this email yet. Restart the backend to seed it.',
+      );
+    }
+
+    if (user.superadminOtpExpiresAt) {
+      const otpIssuedAt =
+        user.superadminOtpExpiresAt.getTime() - 10 * 60 * 1000;
+      if (Date.now() - otpIssuedAt < 60 * 1000) {
+        throw new BadRequestException(
+          'An OTP was already sent recently. Please wait a moment before requesting another.',
+        );
+      }
+    }
+
+    const otp = String(randomInt(100000, 1000000));
+    user.superadminOtpHash = await bcrypt.hash(otp, 12);
+    user.superadminOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    user.superadminOtpAttempts = 0;
+    await this.userRepository.save(user);
+
+    await this.mailService.sendSuperadminLoginOtp({
+      email: user.email,
+      otp,
+      expiresInMinutes: 10,
+    });
+
+    return { message: 'OTP sent to the super admin email' };
+  }
+
+  async verifySuperadminOtp(rawEmail: string, otp: string, clientInfo?: any) {
+    const configuredEmail = this.getSuperadminEmail();
+    const email = rawEmail.trim().toLowerCase();
+
+    if (email !== configuredEmail) {
+      throw new ForbiddenException(
+        'This email is not authorized for super admin access.',
+      );
+    }
+
+    const user = await this.loadSuperadminByEmail(email);
+    if (!user) {
+      throw new NotFoundException('No super admin account found.');
+    }
+
+    if (!user.superadminOtpHash || !user.superadminOtpExpiresAt) {
+      throw new BadRequestException('Request a new OTP before verifying.');
+    }
+
+    if (user.superadminOtpExpiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('OTP expired. Request a new OTP.');
+    }
+
+    if (user.superadminOtpAttempts >= 5) {
+      throw new BadRequestException(
+        'Too many incorrect attempts. Request a new OTP.',
+      );
+    }
+
+    const isValidOtp = await bcrypt.compare(otp.trim(), user.superadminOtpHash);
+    if (!isValidOtp) {
+      user.superadminOtpAttempts += 1;
+      await this.userRepository.save(user);
+      throw new BadRequestException('Invalid OTP');
+    }
+
+    user.superadminOtpHash = null;
+    user.superadminOtpExpiresAt = null;
+    user.superadminOtpAttempts = 0;
+    await this.userRepository.save(user);
+
+    await this.userRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({ lastLoginAt: () => 'NOW()' })
+      .where('id = :id', { id: user.id })
+      .execute();
+
+    await this.userActivitiesService.create({
+      userId: user.id,
+      activityType: 'LOGIN',
+      activityDescription: 'Super admin logged in via email OTP.',
+      metadata: clientInfo,
+      module: 'Auth',
+      actionTaken: 'Login',
+      performedBy: user.id,
+      isSuccess: true,
+    });
+
+    const { access_token } = await this.login(user);
+    return { access_token, user };
   }
 
   async sendAdminPasswordResetOtp(identifier: string) {

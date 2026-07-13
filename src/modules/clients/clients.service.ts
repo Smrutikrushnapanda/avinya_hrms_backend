@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client } from './entities/client.entity';
@@ -50,14 +54,18 @@ export class ClientsService {
   }
 
   async update(id: string, dto: UpdateClientDto, organizationId: string) {
-    const client = await this.clientRepo.findOne({ where: { id, organizationId } });
+    const client = await this.clientRepo.findOne({
+      where: { id, organizationId },
+    });
     if (!client) throw new NotFoundException('Client not found');
     Object.assign(client, dto);
     return this.clientRepo.save(client);
   }
 
   async remove(id: string, organizationId: string) {
-    const client = await this.clientRepo.findOne({ where: { id, organizationId } });
+    const client = await this.clientRepo.findOne({
+      where: { id, organizationId },
+    });
     if (!client) throw new NotFoundException('Client not found');
     return this.clientRepo.remove(client);
   }

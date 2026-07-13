@@ -9,7 +9,13 @@ import {
   Req,
 } from '@nestjs/common';
 import { AuthService, UserWithRoles } from '../services/auth.service';
-import { ForgotPasswordDto, LoginDto, ResetPasswordDto } from '../dto/auth.dto';
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  ResetPasswordDto,
+  SuperadminOtpRequestDto,
+  SuperadminOtpVerifyDto,
+} from '../dto/auth.dto';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { GetUser } from '../decorators/get-user.decorator';
@@ -149,6 +155,52 @@ export class AuthController {
   @ApiOperation({ summary: 'Reset admin user ID and password with email OTP' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetAdminCredentials(resetPasswordDto);
+  }
+
+  @Post('superadmin/login/request-otp')
+  @ApiOperation({
+    summary: 'Request a login OTP for the configured super admin email',
+  })
+  async requestSuperadminOtp(@Body() dto: SuperadminOtpRequestDto) {
+    return this.authService.requestSuperadminOtp(dto.email);
+  }
+
+  @Post('superadmin/login/verify-otp')
+  @ApiOperation({ summary: 'Verify super admin OTP and get a JWT token' })
+  async verifySuperadminOtp(
+    @Body() dto: SuperadminOtpVerifyDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: any,
+  ) {
+    const { access_token, user } = await this.authService.verifySuperadminOtp(
+      dto.email,
+      dto.otp,
+      {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    );
+
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('token', access_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: 1000 * 60 * 60,
+    });
+
+    await this.logReportService.create({
+      organizationId: '00000000-0000-0000-0000-000000000000',
+      userId: user.id,
+      userName: user.userName,
+      actionType: 'LOGIN',
+      module: 'auth',
+      description: 'Super admin login via email OTP',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return { access_token, user };
   }
 
   @Post('logout')

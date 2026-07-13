@@ -1,4 +1,5 @@
 import {
+  IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -41,6 +42,20 @@ export class ResetPasswordDto {
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters' })
   newPassword: string;
+}
+
+export class SuperadminOtpRequestDto {
+  @IsEmail({}, { message: 'A valid email is required' })
+  email: string;
+}
+
+export class SuperadminOtpVerifyDto {
+  @IsEmail({}, { message: 'A valid email is required' })
+  email: string;
+
+  @IsString()
+  @Length(6, 6, { message: 'OTP must be 6 digits' })
+  otp: string;
 }
 
 export interface JwtPayload {

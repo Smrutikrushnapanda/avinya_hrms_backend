@@ -7,6 +7,7 @@ import { Role } from '../entities/role.entity';
 import { UserRole } from '../entities/user-role.entity';
 import { RoleType } from '../enums/role-type.enum';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AdminSeederService implements OnModuleInit {
@@ -43,7 +44,19 @@ export class AdminSeederService implements OnModuleInit {
       this.logger.log(`Created SUPERADMIN role: ${superadminRole.id}`);
     }
 
-    const hashedPassword = await bcrypt.hash('password', 12);
+    // Superadmin no longer logs in with a password (email-OTP only), but we
+    // still keep a random hash in the column since it's NOT NULL.
+    const hashedPassword = await bcrypt.hash(
+      randomBytes(32).toString('hex'),
+      12,
+    );
+
+    const configuredEmail = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
+    if (!configuredEmail) {
+      this.logger.warn(
+        'SUPERADMIN_EMAIL is not set — superadmin OTP login will be unusable until it is configured.',
+      );
+    }
 
     // Seed SUPERADMIN user if not exists
     const existingSuperadmin = await this.userRepo.findOne({
@@ -54,7 +67,7 @@ export class AdminSeederService implements OnModuleInit {
       const superadminUser = await this.userRepo.save(
         this.userRepo.create({
           userName: 'superadmin',
-          email: 'superadmin@avinya.com',
+          email: configuredEmail || 'superadmin@avinya.com',
           password: hashedPassword,
           firstName: 'Super',
           middleName: '',
@@ -73,6 +86,22 @@ export class AdminSeederService implements OnModuleInit {
         }),
       );
       this.logger.log('Superadmin user and role seeded.');
+    } else if (
+      configuredEmail &&
+      existingSuperadmin.email.toLowerCase() !== configuredEmail
+    ) {
+      const emailTaken = await this.userRepo.findOne({
+        where: { email: configuredEmail },
+      });
+      if (emailTaken) {
+        this.logger.error(
+          `Cannot sync superadmin email to ${configuredEmail} — that email is already used by another user (${emailTaken.id}).`,
+        );
+      } else {
+        existingSuperadmin.email = configuredEmail;
+        await this.userRepo.save(existingSuperadmin);
+        this.logger.log(`Synced superadmin email to ${configuredEmail}.`);
+      }
     }
 
     this.logger.log('Superadmin seeding validation complete.');

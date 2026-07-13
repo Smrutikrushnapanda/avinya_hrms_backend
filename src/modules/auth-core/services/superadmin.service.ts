@@ -164,6 +164,21 @@ export class SuperadminService {
   }
 
   /**
+   * Block an organization — its users can no longer log in, and any
+   * already-issued tokens for that org are rejected on the next request.
+   */
+  async blockOrganization(id: string, updatedBy: string) {
+    return this.orgService.blockOrganization(id, updatedBy);
+  }
+
+  /**
+   * Unblock a previously blocked organization.
+   */
+  async unblockOrganization(id: string, updatedBy: string) {
+    return this.orgService.unblockOrganization(id, updatedBy);
+  }
+
+  /**
    * Get system-wide user logs
    */
   async getSystemLogs(limit = 100, offset = 0) {

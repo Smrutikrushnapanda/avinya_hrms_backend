@@ -441,6 +441,29 @@ export class OrganizationService {
     return this.userRepo.save(user);
   }
 
+  async setActiveStatus(id: string, isActive: boolean, updatedBy: string) {
+    const org = await this.orgRepo.findOne({ where: { id } });
+    if (!org) throw new NotFoundException('Organization not found');
+
+    org.isActive = isActive;
+    org.updatedBy = updatedBy;
+    await this.orgRepo.save(org);
+
+    return {
+      message: `Organization ${isActive ? 'unblocked' : 'blocked'} successfully`,
+      id: org.id,
+      isActive: org.isActive,
+    };
+  }
+
+  async blockOrganization(id: string, updatedBy: string) {
+    return this.setActiveStatus(id, false, updatedBy);
+  }
+
+  async unblockOrganization(id: string, updatedBy: string) {
+    return this.setActiveStatus(id, true, updatedBy);
+  }
+
   async delete(id: string) {
     const org = await this.orgRepo.findOne({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');

@@ -1,10 +1,11 @@
 import {
   Controller,
   Get,
+  Param,
+  Patch,
   Query,
+  Request,
   UseGuards,
-  HttpStatus,
-  HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
@@ -54,5 +55,25 @@ export class SuperadminController {
   @Get('logs')
   async getLogs(@Query('limit') limit = 100, @Query('offset') offset = 0) {
     return this.superadminService.getSystemLogs(Number(limit), Number(offset));
+  }
+
+  @ApiOperation({ summary: 'Block an organization (suspend all access)' })
+  @ApiResponse({ status: 200, description: 'Organization blocked' })
+  @Patch('organizations/:id/block')
+  async blockOrganization(@Param('id') id: string, @Request() req: any) {
+    return this.superadminService.blockOrganization(
+      id,
+      req.user?.userId || 'superadmin',
+    );
+  }
+
+  @ApiOperation({ summary: 'Unblock a previously blocked organization' })
+  @ApiResponse({ status: 200, description: 'Organization unblocked' })
+  @Patch('organizations/:id/unblock')
+  async unblockOrganization(@Param('id') id: string, @Request() req: any) {
+    return this.superadminService.unblockOrganization(
+      id,
+      req.user?.userId || 'superadmin',
+    );
   }
 }

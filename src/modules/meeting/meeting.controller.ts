@@ -79,7 +79,10 @@ export class MeetingController {
   }
 
   @Get(':id')
-  async getMeetingById(@GetUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
+  async getMeetingById(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.meetingService.findMeetingById(id);
   }
 
@@ -93,7 +96,10 @@ export class MeetingController {
   }
 
   @Delete(':id')
-  async deleteMeeting(@GetUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
+  async deleteMeeting(
+    @GetUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.meetingService.deleteMeeting(id);
   }
 

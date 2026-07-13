@@ -544,7 +544,11 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
-  async removeEmployee(projectId: string, userId: string, organizationId?: string) {
+  async removeEmployee(
+    projectId: string,
+    userId: string,
+    organizationId?: string,
+  ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
       select: ['id', 'organizationId'],
