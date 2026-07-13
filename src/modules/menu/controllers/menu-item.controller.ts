@@ -60,24 +60,26 @@ export class MenuItemController {
     return this.menuItemService.findAll(role, planType, userId, organizationId);
   }
 
-  // Unfiltered tree (incl. inactive items) for the admin menu editor.
+  // Unfiltered tree (incl. inactive items) for the super admin menu editor.
+  // Menu items are global/platform-wide (no organizationId column), so only
+  // the super admin — not individual org admins — may configure them.
   @Get('admin/all')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  @Roles('SUPERADMIN')
   findAllForAdmin(): Promise<MenuItem[]> {
     return this.menuItemService.findAllForAdmin();
   }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  @Roles('SUPERADMIN')
   create(@Body() dto: CreateMenuItemDto): Promise<MenuItem> {
     return this.menuItemService.create(dto);
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  @Roles('SUPERADMIN')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateMenuItemDto,
@@ -87,7 +89,7 @@ export class MenuItemController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  @Roles('SUPERADMIN')
   remove(@Param('id') id: string): Promise<{ success: boolean }> {
     return this.menuItemService.remove(id);
   }

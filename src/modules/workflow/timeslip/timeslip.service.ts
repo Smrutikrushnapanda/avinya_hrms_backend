@@ -78,14 +78,15 @@ export class TimeslipService {
     const workEnd = settings?.workEndTime || '18:00:00';
     const [startH, startM] = workStart.split(':').map(Number);
     const [endH, endM] = workEnd.split(':').map(Number);
-    let fullShiftMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+    let fullShiftMinutes = endH * 60 + endM - (startH * 60 + startM);
     if (fullShiftMinutes <= 0) fullShiftMinutes += 24 * 60;
 
     const halfDayCutoff = settings?.halfDayCutoffTime || '14:00:00';
     const [cutH, cutM] = halfDayCutoff.split(':').map(Number);
-    let halfDayThreshold = (cutH * 60 + cutM) - (startH * 60 + startM);
+    let halfDayThreshold = cutH * 60 + cutM - (startH * 60 + startM);
     if (halfDayThreshold <= 0) halfDayThreshold += 24 * 60;
-    if (halfDayThreshold > fullShiftMinutes) halfDayThreshold = Math.floor(fullShiftMinutes / 2);
+    if (halfDayThreshold > fullShiftMinutes)
+      halfDayThreshold = Math.floor(fullShiftMinutes / 2);
 
     const absentThreshold = Math.max(1, Math.floor(fullShiftMinutes * 0.25));
 
@@ -239,9 +240,7 @@ export class TimeslipService {
     // 0a) Cross-field validation: correctedIn must be before correctedOut
     if (dto.correctedIn && dto.correctedOut) {
       if (new Date(dto.correctedIn) >= new Date(dto.correctedOut)) {
-        throw new BadRequestException(
-          'correctedOut must be after correctedIn',
-        );
+        throw new BadRequestException('correctedOut must be after correctedIn');
       }
     }
 
@@ -613,8 +612,12 @@ export class TimeslipService {
     }));
 
     const totalSteps = approvals.length;
-    const approvedSteps = approvals.filter((a) => a.action === 'APPROVED').length;
-    const rejectedSteps = approvals.filter((a) => a.action === 'REJECTED').length;
+    const approvedSteps = approvals.filter(
+      (a) => a.action === 'APPROVED',
+    ).length;
+    const rejectedSteps = approvals.filter(
+      (a) => a.action === 'REJECTED',
+    ).length;
     const pendingSteps = approvals.filter((a) => a.action === 'PENDING').length;
     const isRejected = rejectedSteps > 0;
     const isApproved = approvedSteps > 0 && pendingSteps === 0 && !isRejected;

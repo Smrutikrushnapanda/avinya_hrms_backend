@@ -387,7 +387,17 @@ const MENU_DATA: Array<{
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
     sortOrder: 5,
   },
+  {
+    label: 'Menu Items',
+    iconName: 'ListTree',
+    route: '/superadmin/menu-items',
+    roles: ['SUPERADMIN'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 6,
+  },
 ];
+
+const SUPERADMIN_MENU_ITEMS_ROUTE = '/superadmin/menu-items';
 
 @Injectable()
 export class MenuSeederService implements OnModuleInit {
@@ -412,6 +422,7 @@ export class MenuSeederService implements OnModuleInit {
       this.logger.log(
         `Menu items already seeded (${existingCount} rows) — skipping.`,
       );
+      await this.ensureSuperadminMenuItemsLink();
       return;
     }
 
@@ -450,5 +461,28 @@ export class MenuSeederService implements OnModuleInit {
     }
 
     this.logger.log(`Seeded ${MENU_DATA.length} menu groups with children.`);
+  }
+
+  // Runs even on an already-seeded DB so existing installs pick up the
+  // "Menu Items" super admin nav link without a full reseed (which would
+  // wipe admin customizations — see the comment on seed() above).
+  private async ensureSuperadminMenuItemsLink() {
+    const existing = await this.repo.findOne({
+      where: { route: SUPERADMIN_MENU_ITEMS_ROUTE },
+    });
+    if (existing) return;
+
+    await this.repo.save(
+      this.repo.create({
+        label: 'Menu Items',
+        iconName: 'ListTree',
+        route: SUPERADMIN_MENU_ITEMS_ROUTE,
+        roles: ['SUPERADMIN'],
+        planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+        sortOrder: 6,
+        isActive: true,
+      }),
+    );
+    this.logger.log('Added missing "Menu Items" super admin nav entry.');
   }
 }

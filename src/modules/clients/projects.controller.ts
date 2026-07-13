@@ -27,6 +27,7 @@ import { CreateProjectTestCaseDto } from '../project/dto/create-project-test-cas
 import { UpdateProjectTestCaseDto } from '../project/dto/update-project-test-case.dto';
 import { CreateProjectDocumentDto } from '../project/dto/create-project-document.dto';
 import { UpdateProjectDocumentDto } from '../project/dto/update-project-document.dto';
+import { CreateProjectLinkDto } from './dto/create-project-link.dto';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { JwtPayload } from '../auth-core/dto/auth.dto';
@@ -254,6 +255,56 @@ export class ProjectsController {
     return this.projectsService.deleteDocument(
       id,
       documentId,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  // ─── Quick Links ────────────────────────────────────────────────────────
+
+  @Get(':id/links')
+  @ApiOperation({ summary: 'Get quick links for a client project' })
+  @UseGuards(JwtAuthGuard)
+  listLinks(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.projectsService.listLinks(
+      id,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Post(':id/links')
+  @ApiOperation({
+    summary: 'Add a quick link to a client project (max 5 per project)',
+  })
+  @UseGuards(JwtAuthGuard)
+  createLink(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateProjectLinkDto,
+  ) {
+    return this.projectsService.createLink(
+      id,
+      dto,
+      user.userId,
+      user.organizationId,
+      this.isAdminOrManager(user),
+    );
+  }
+
+  @Delete(':id/links/:linkId')
+  @ApiOperation({ summary: 'Delete a quick link from a client project' })
+  @UseGuards(JwtAuthGuard)
+  deleteLink(
+    @GetUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('linkId') linkId: string,
+  ) {
+    return this.projectsService.deleteLink(
+      id,
+      linkId,
       user.userId,
       user.organizationId,
       this.isAdminOrManager(user),

@@ -222,7 +222,8 @@ export class AuthController {
 
       const user = await this.usersService.findOne(body.userId);
       await this.logReportService.create({
-        organizationId: user.organizationId,
+        organizationId:
+          user.organizationId || '00000000-0000-0000-0000-000000000000',
         userId: user.id,
         userName: user.userName,
         actionType: 'LOGOUT',

@@ -201,7 +201,8 @@ export class AttendanceService {
 
     const punchTime = new Date(timestamp);
     const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
-    const shiftTz = (shiftConfig as any).timezone || settings.timezone || 'Asia/Kolkata';
+    const shiftTz =
+      (shiftConfig as any).timezone || settings.timezone || 'Asia/Kolkata';
     const { windowStart, windowEnd, attendanceDate } = this.computeShiftWindow(
       punchTime,
       shiftConfig.workStartTime,
@@ -1605,8 +1606,11 @@ export class AttendanceService {
         const response = await fetch(url, {
           headers: { Authorization: `Basic ${auth}` },
         });
-        const data = await response.json() as any;
-        const faces = data?.faces || data?.info?.detection?.face_detection?.data?.faces || [];
+        const data = await response.json();
+        const faces =
+          data?.faces ||
+          data?.info?.detection?.face_detection?.data?.faces ||
+          [];
         return {
           score: faces.length > 0 ? 0.92 : 0,
           verified: faces.length > 0,
@@ -1676,7 +1680,11 @@ export class AttendanceService {
     workEndTime: string,
     timezone = 'Asia/Kolkata',
   ): { windowStart: Date; windowEnd: Date; attendanceDate: string } {
-    const windowStart = this.combineDateTime(punchTime, workStartTime, timezone);
+    const windowStart = this.combineDateTime(
+      punchTime,
+      workStartTime,
+      timezone,
+    );
     const windowEnd = this.combineDateTime(punchTime, workEndTime, timezone);
     const crossesMidnight = windowEnd <= windowStart;
 

@@ -111,6 +111,17 @@ export class WfhService {
           status: a.level === 1 ? 'PENDING' : 'WAITING',
         }),
       );
+      await this.approvalRepo.save(approvalEntities);
+
+      // Notify level-1 approver via WebSocket
+      const level1 = approvalEntities.find((a) => a.level === 1);
+      if (level1?.approver) {
+        this.messageGateway.emitToUser(level1.approver.id, {
+          type: 'wfh:new_request',
+          message: `New WFH request received`,
+          requestId: request.id,
+        });
+      }
     } else {
       const fallbackApprovers: { approverId: string; level: number }[] = [];
 

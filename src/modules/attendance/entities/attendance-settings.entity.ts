@@ -96,7 +96,12 @@ export class AttendanceSettings {
   workingDays!: number[];
 
   // Timezone Configuration
-  @Column({ name: 'timezone', type: 'varchar', length: 50, default: 'Asia/Kolkata' })
+  @Column({
+    name: 'timezone',
+    type: 'varchar',
+    length: 50,
+    default: 'Asia/Kolkata',
+  })
   timezone!: string;
 
   // Optional: Weekday off rules by week-of-month (keys: 1-5 as strings)

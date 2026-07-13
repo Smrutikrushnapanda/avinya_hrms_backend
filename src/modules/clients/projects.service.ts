@@ -15,6 +15,8 @@ import {
   TaskPriority,
 } from './entities/project-task.entity';
 import { ClientProjectDocument } from './entities/client-project-document.entity';
+import { ClientProjectLink } from './entities/client-project-link.entity';
+import { CreateProjectLinkDto } from './dto/create-project-link.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
@@ -56,6 +58,8 @@ export class ProjectsService implements OnModuleInit {
     private taskRepo: Repository<ProjectTask>,
     @InjectRepository(ClientProjectDocument)
     private documentRepo: Repository<ClientProjectDocument>,
+    @InjectRepository(ClientProjectLink)
+    private linkRepo: Repository<ClientProjectLink>,
     @InjectRepository(ProjectTestSheetTab)
     private testSheetTabRepo: Repository<ProjectTestSheetTab>,
     @InjectRepository(ProjectTestSheetCase)
@@ -790,6 +794,112 @@ export class ProjectsService implements OnModuleInit {
     if (!document) throw new NotFoundException('Document not found');
 
     await this.documentRepo.remove(document);
+    return { success: true };
+  }
+
+  // ─── Quick Links ────────────────────────────────────────────────────────────────────
+  // Unlike documents (admin/manager only), any assigned member, the project
+  // manager, or an admin/manager-role user may add a link — capped at 5 per
+  // project total, enforced here regardless of who is adding.
+
+  private readonly maxLinksPerProject = 5;
+
+  private formatLink(link: ClientProjectLink) {
+    return {
+      id: link.id,
+      projectId: link.projectId,
+      title: link.title,
+      url: link.url,
+      createdByUserId: link.createdByUserId,
+      createdAt: link.createdAt,
+    };
+  }
+
+  async listLinks(
+    projectId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+    const links = await this.linkRepo.find({
+      where: { projectId, organizationId },
+      order: { createdAt: 'ASC' },
+    });
+    return links.map((link) => this.formatLink(link));
+  }
+
+  async createLink(
+    projectId: string,
+    dto: CreateProjectLinkDto,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    const project = await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+
+    const title = this.sanitizeDocumentText(dto.title, 255);
+    const url = this.sanitizeDocumentText(dto.url, 3000);
+    if (!title || !url) {
+      throw new BadRequestException('title and url are required');
+    }
+
+    const existingCount = await this.linkRepo.count({
+      where: { projectId, organizationId: project.organizationId },
+    });
+    if (existingCount >= this.maxLinksPerProject) {
+      throw new BadRequestException(
+        `This project already has the maximum of ${this.maxLinksPerProject} quick links`,
+      );
+    }
+
+    const link = await this.linkRepo.save(
+      this.linkRepo.create({
+        projectId,
+        organizationId: project.organizationId,
+        title,
+        url,
+        createdByUserId: userId,
+      }),
+    );
+
+    return this.formatLink(link);
+  }
+
+  async deleteLink(
+    projectId: string,
+    linkId: string,
+    userId: string,
+    organizationId: string,
+    isAdminOrManager = false,
+  ) {
+    await this.ensureClientProjectAccess(
+      projectId,
+      userId,
+      organizationId,
+      isAdminOrManager,
+    );
+
+    const link = await this.linkRepo.findOne({
+      where: { id: linkId, projectId, organizationId },
+    });
+    if (!link) throw new NotFoundException('Link not found');
+
+    if (!isAdminOrManager && link.createdByUserId !== userId) {
+      throw new ForbiddenException('You can only remove links you added');
+    }
+
+    await this.linkRepo.remove(link);
     return { success: true };
   }
 
