@@ -162,6 +162,14 @@ const MENU_DATA: Array<{
     sortOrder: 14,
   },
   {
+    label: 'Office Trips',
+    iconName: 'Plane',
+    route: '/admin/office-trips',
+    roles: ['ADMIN', 'HR'],
+    planTiers: ['PRO', 'ENTERPRISE'],
+    sortOrder: 15,
+  },
+  {
     label: 'Messages',
     iconName: 'MessageSquarePlus',
     route: '/admin/messages',

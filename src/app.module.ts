@@ -29,6 +29,7 @@ import { PolicyModule } from './modules/policy/policy.module';
 import { PerformanceModule } from './modules/performance/performance.module';
 import { ProjectModule } from './modules/project/project.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { OfficeTripModule } from './modules/office-trip/office-trip.module';
 import { MeetingModule } from './modules/meeting/meeting.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { MailModule } from './modules/mail/mail.module';
@@ -90,6 +91,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     PerformanceModule,
     ProjectModule,
     ExpensesModule,
+    OfficeTripModule,
     MeetingModule,
     MenuModule,
     MailModule,

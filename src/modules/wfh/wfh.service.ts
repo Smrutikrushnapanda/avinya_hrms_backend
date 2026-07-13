@@ -12,10 +12,13 @@ import { WfhApprovalAssignment } from './entities/wfh-approval-assignment.entity
 import { WfhBalance } from './entities/wfh-balance.entity';
 import { WfhBalanceTemplate } from './entities/wfh-balance-template.entity';
 import { EmployeeWfhLimitEntity } from './entities/employee-wfh-limit.entity';
+import { EmployeeWorkArrangement } from './entities/employee-work-arrangement.entity';
 import { UserRole } from '../auth-core/entities/user-role.entity';
 import { MessageService } from '../message/message.service';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
+import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
+import { AttendanceService } from '../attendance/attendance.service';
 import { ApplyWfhDto } from './dto/apply-wfh.dto';
 import { CreateWfhAssignmentDto } from './dto/create-wfh-assignment.dto';
 import { InitializeWfhBalanceDto } from './dto/initialize-wfh-balance.dto';
@@ -24,6 +27,10 @@ import {
   SetEmployeeWfhLimitDto,
   UpdateEmployeeWfhLimitDto,
 } from './dto/set-employee-wfh-limit.dto';
+import {
+  SetEmployeeWorkArrangementDto,
+  UpdateEmployeeWorkArrangementDto,
+} from './dto/set-employee-work-arrangement.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { MailService } from '../mail/mail.service';
 
@@ -42,12 +49,17 @@ export class WfhService {
     private wfhBalanceTemplateRepo: Repository<WfhBalanceTemplate>,
     @InjectRepository(EmployeeWfhLimitEntity)
     private employeeWfhLimitRepo: Repository<EmployeeWfhLimitEntity>,
+    @InjectRepository(EmployeeWorkArrangement)
+    private workArrangementRepo: Repository<EmployeeWorkArrangement>,
     @InjectRepository(UserRole)
     private userRoleRepo: Repository<UserRole>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
     @InjectRepository(Organization)
     private organizationRepo: Repository<Organization>,
+    @InjectRepository(OrganizationSettings)
+    private organizationSettingsRepo: Repository<OrganizationSettings>,
+    private attendanceService: AttendanceService,
     private messageGateway: MessageGateway,
     private messageService: MessageService,
     private mailService: MailService,
@@ -55,31 +67,103 @@ export class WfhService {
 
   async applyForWfh(userId: string, dto: ApplyWfhDto) {
     const numberOfDays = this.calculateDays(dto.date, dto.endDate);
-    const wfhLimitCheck = await this.checkWfhLimit(
-      userId,
-      numberOfDays,
-      dto.date,
-    );
-    if (!wfhLimitCheck.allowed) {
-      throw new BadRequestException(
-        wfhLimitCheck.reason || 'WFH monthly limit reached',
-      );
-    }
-    const balance = await this.wfhBalanceRepo.findOne({
-      where: { user: { id: userId } },
+
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId }, isActive: true },
     });
-    if (!balance || balance.closingBalance < numberOfDays) {
-      throw new BadRequestException('Insufficient WFH balance');
+
+    let autoApprove = false;
+
+    if (arrangement?.arrangementType === 'PERMANENT_REMOTE') {
+      // Every working day is already implicitly WFH-approved for this
+      // employee; a request here is just a formality, so wave it through.
+      autoApprove = true;
+    } else if (arrangement?.arrangementType === 'HYBRID') {
+      const employeeForOrg = await this.employeeRepo.findOne({
+        where: { userId },
+      });
+      const orgIdForQuota = employeeForOrg?.organizationId;
+      if (!orgIdForQuota) {
+        throw new BadRequestException('Organization not found for this user');
+      }
+      const quotaCheck = await this.checkHybridWfhQuota(
+        userId,
+        orgIdForQuota,
+        arrangement,
+        numberOfDays,
+        dto.date,
+      );
+      if (!quotaCheck.allowed) {
+        throw new BadRequestException(
+          quotaCheck.reason || 'Hybrid WFH quota exceeded for this month',
+        );
+      }
+      autoApprove = arrangement.autoApproveWfh !== false;
+    } else {
+      // OFFICE / no arrangement row — unchanged legacy behavior.
+      const wfhLimitCheck = await this.checkWfhLimit(
+        userId,
+        numberOfDays,
+        dto.date,
+      );
+      if (!wfhLimitCheck.allowed) {
+        throw new BadRequestException(
+          wfhLimitCheck.reason || 'WFH monthly limit reached',
+        );
+      }
+      const balance = await this.wfhBalanceRepo.findOne({
+        where: { user: { id: userId } },
+      });
+      if (!balance || balance.closingBalance < numberOfDays) {
+        throw new BadRequestException('Insufficient WFH balance');
+      }
     }
 
+    const now = new Date();
     const request = await this.requestRepo.save({
       user: { id: userId },
       date: dto.date,
       endDate: dto.endDate || dto.date,
       numberOfDays,
       reason: dto.reason,
-      status: 'PENDING',
+      status: autoApprove ? 'APPROVED' : 'PENDING',
+      ...(autoApprove
+        ? { approvedBy: { id: userId } as any, approvedAt: now }
+        : {}),
     });
+
+    if (autoApprove) {
+      await this.approvalRepo.save(
+        this.approvalRepo.create({
+          wfhRequest: request,
+          approver: { id: userId } as any,
+          level: 1,
+          status: 'APPROVED',
+          remarks: `Auto-approved (${arrangement?.arrangementType} work arrangement, within monthly quota)`,
+          actionAt: now,
+        }),
+      );
+
+      // Best-effort balance tracking for combined reporting — hybrid/
+      // permanent-remote employees are governed by the quota above, not
+      // the balance, so a missing balance row must not block them.
+      const balance = await this.wfhBalanceRepo.findOne({
+        where: { user: { id: userId } },
+      });
+      if (balance) {
+        balance.consumed += numberOfDays;
+        balance.closingBalance -= numberOfDays;
+        await this.wfhBalanceRepo.save(balance);
+      }
+
+      this.messageGateway.emitToUser(userId, {
+        type: 'wfh:approved',
+        message: `Your WFH request has been auto-approved`,
+        requestId: request.id,
+      });
+
+      return request;
+    }
 
     const approvers = await this.assignmentRepo.find({
       where: { user: { id: userId }, isActive: true },
@@ -881,6 +965,270 @@ export class WfhService {
     await this.employeeWfhLimitRepo.remove(limit);
   }
 
+  private async sumWfhDaysInRange(
+    userId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<number> {
+    const row = await this.requestRepo
+      .createQueryBuilder('wfh')
+      .select('COALESCE(SUM(COALESCE(wfh.number_of_days, 1)), 0)', 'total')
+      .where('wfh.user_id = :userId', { userId })
+      .andWhere('wfh.status IN (:...statuses)', {
+        statuses: ['PENDING', 'APPROVED'],
+      })
+      .andWhere('wfh.date BETWEEN :fromDate AND :toDate', {
+        fromDate,
+        toDate,
+      })
+      .getRawOne<{ total: string }>();
+
+    return Number(row?.total || 0);
+  }
+
+  /**
+   * HYBRID quota: instead of a static admin-set day cap, the allowance is
+   * derived each month as (working days in month − mandatory office days),
+   * so employees can freely pick which days are WFH as long as they still
+   * clock the required number of office days.
+   */
+  async checkHybridWfhQuota(
+    userId: string,
+    organizationId: string,
+    arrangement: EmployeeWorkArrangement,
+    requestedDays: number,
+    startDate?: string,
+  ): Promise<{ allowed: boolean; reason?: string; remaining?: number }> {
+    const referenceDate = startDate ? new Date(startDate) : new Date();
+    const refYear = referenceDate.getFullYear();
+    const refMonth = referenceDate.getMonth();
+
+    const orgSettings = await this.organizationSettingsRepo.findOne({
+      where: { organizationId },
+    });
+    const mandatoryOfficeDays =
+      arrangement.mandatoryOfficeDaysPerMonth ??
+      orgSettings?.hybridDefaultMandatoryOfficeDays ??
+      15;
+
+    const workingDaysInMonth =
+      await this.attendanceService.countWorkingDaysInMonth(
+        organizationId,
+        userId,
+        refYear,
+        refMonth,
+      );
+    const monthlyQuota = Math.max(0, workingDaysInMonth - mandatoryOfficeDays);
+
+    const monthStart = new Date(refYear, refMonth, 1)
+      .toISOString()
+      .slice(0, 10);
+    const monthEnd = new Date(refYear, refMonth + 1, 0)
+      .toISOString()
+      .slice(0, 10);
+    const usedThisMonth = await this.sumWfhDaysInRange(
+      userId,
+      monthStart,
+      monthEnd,
+    );
+
+    if (usedThisMonth + requestedDays > monthlyQuota) {
+      const remaining = Math.max(0, monthlyQuota - usedThisMonth);
+      return {
+        allowed: false,
+        remaining,
+        reason: `Hybrid WFH quota this month is ${monthlyQuota} day(s) (requires ${mandatoryOfficeDays} office day(s) out of ${workingDaysInMonth} working days). Remaining: ${remaining}.`,
+      };
+    }
+
+    return { allowed: true, remaining: monthlyQuota - usedThisMonth };
+  }
+
+  // ─── Employee Work Arrangement (Hybrid / Permanent Remote / Office) ───
+
+  async setEmployeeWorkArrangement(
+    dto: SetEmployeeWorkArrangementDto,
+    createdByUserId?: string,
+  ): Promise<EmployeeWorkArrangement> {
+    const employee = await this.employeeRepo.findOne({
+      where: { userId: dto.userId },
+      relations: ['organization'],
+    });
+    if (!employee || !employee.organization) {
+      throw new NotFoundException('Employee organization not found');
+    }
+
+    let arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: dto.userId } },
+    });
+
+    if (arrangement) {
+      arrangement.arrangementType = dto.arrangementType;
+      arrangement.mandatoryOfficeDaysPerMonth =
+        dto.mandatoryOfficeDaysPerMonth ?? null;
+      if (dto.autoApproveWfh !== undefined)
+        arrangement.autoApproveWfh = dto.autoApproveWfh;
+      arrangement.effectiveFrom =
+        dto.effectiveFrom ?? arrangement.effectiveFrom;
+      arrangement.isActive = true;
+    } else {
+      arrangement = this.workArrangementRepo.create({
+        user: { id: dto.userId } as any,
+        organization: { id: employee.organization.id } as any,
+        arrangementType: dto.arrangementType,
+        mandatoryOfficeDaysPerMonth: dto.mandatoryOfficeDaysPerMonth ?? null,
+        autoApproveWfh: dto.autoApproveWfh ?? true,
+        effectiveFrom:
+          dto.effectiveFrom ?? new Date().toISOString().slice(0, 10),
+        isActive: true,
+        createdBy: createdByUserId ? ({ id: createdByUserId } as any) : null,
+      });
+    }
+
+    return this.workArrangementRepo.save(arrangement);
+  }
+
+  async getEmployeeWorkArrangement(
+    userId: string,
+  ): Promise<EmployeeWorkArrangement | null> {
+    return this.workArrangementRepo.findOne({
+      where: { user: { id: userId } },
+    });
+  }
+
+  /**
+   * Self-service view for the employee WFH page: the arrangement plus,
+   * for HYBRID, the computed monthly quota (working days − mandatory
+   * office days) and how much of it is already used this month — so the
+   * UI can show progress without the employee needing to submit a
+   * request first.
+   */
+  async getMyWorkArrangementStatus(userId: string): Promise<{
+    arrangementType: 'OFFICE' | 'HYBRID' | 'PERMANENT_REMOTE';
+    autoApproveWfh: boolean;
+    mandatoryOfficeDaysPerMonth: number | null;
+    quota: {
+      workingDaysInMonth: number;
+      mandatoryOfficeDays: number;
+      monthlyQuota: number;
+      usedThisMonth: number;
+      remaining: number;
+    } | null;
+  }> {
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId }, isActive: true },
+    });
+
+    if (!arrangement || arrangement.arrangementType !== 'HYBRID') {
+      return {
+        arrangementType: arrangement?.arrangementType ?? 'OFFICE',
+        autoApproveWfh: arrangement?.autoApproveWfh ?? false,
+        mandatoryOfficeDaysPerMonth:
+          arrangement?.mandatoryOfficeDaysPerMonth ?? null,
+        quota: null,
+      };
+    }
+
+    const employee = await this.employeeRepo.findOne({ where: { userId } });
+    const organizationId = employee?.organizationId;
+    if (!organizationId) {
+      return {
+        arrangementType: arrangement.arrangementType,
+        autoApproveWfh: arrangement.autoApproveWfh,
+        mandatoryOfficeDaysPerMonth: arrangement.mandatoryOfficeDaysPerMonth,
+        quota: null,
+      };
+    }
+
+    const now = new Date();
+    const orgSettings = await this.organizationSettingsRepo.findOne({
+      where: { organizationId },
+    });
+    const mandatoryOfficeDays =
+      arrangement.mandatoryOfficeDaysPerMonth ??
+      orgSettings?.hybridDefaultMandatoryOfficeDays ??
+      15;
+    const workingDaysInMonth =
+      await this.attendanceService.countWorkingDaysInMonth(
+        organizationId,
+        userId,
+        now.getFullYear(),
+        now.getMonth(),
+      );
+    const monthlyQuota = Math.max(0, workingDaysInMonth - mandatoryOfficeDays);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      .toISOString()
+      .slice(0, 10);
+    const usedThisMonth = await this.sumWfhDaysInRange(
+      userId,
+      monthStart,
+      monthEnd,
+    );
+
+    return {
+      arrangementType: arrangement.arrangementType,
+      autoApproveWfh: arrangement.autoApproveWfh,
+      mandatoryOfficeDaysPerMonth: arrangement.mandatoryOfficeDaysPerMonth,
+      quota: {
+        workingDaysInMonth,
+        mandatoryOfficeDays,
+        monthlyQuota,
+        usedThisMonth,
+        remaining: Math.max(0, monthlyQuota - usedThisMonth),
+      },
+    };
+  }
+
+  async getWorkArrangementsByOrg(
+    organizationId: string,
+  ): Promise<EmployeeWorkArrangement[]> {
+    const arrangements = await this.workArrangementRepo.find({
+      where: { organization: { id: organizationId } },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
+    await this.overlayEmployeeNames(arrangements.map((a) => a.user));
+    return arrangements;
+  }
+
+  async updateEmployeeWorkArrangement(
+    userId: string,
+    dto: UpdateEmployeeWorkArrangementDto,
+  ): Promise<EmployeeWorkArrangement> {
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId } },
+    });
+    if (!arrangement) {
+      throw new NotFoundException(
+        'Work arrangement not found for this employee',
+      );
+    }
+    if (dto.arrangementType !== undefined)
+      arrangement.arrangementType = dto.arrangementType;
+    if (dto.mandatoryOfficeDaysPerMonth !== undefined)
+      arrangement.mandatoryOfficeDaysPerMonth = dto.mandatoryOfficeDaysPerMonth;
+    if (dto.autoApproveWfh !== undefined)
+      arrangement.autoApproveWfh = dto.autoApproveWfh;
+    if (dto.isActive !== undefined) arrangement.isActive = dto.isActive;
+
+    return this.workArrangementRepo.save(arrangement);
+  }
+
+  async deleteEmployeeWorkArrangement(userId: string): Promise<void> {
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId } },
+    });
+    if (!arrangement) {
+      throw new NotFoundException(
+        'Work arrangement not found for this employee',
+      );
+    }
+    await this.workArrangementRepo.remove(arrangement);
+  }
+
   async checkWfhLimit(
     userId: string,
     requestedDays: number,
@@ -902,26 +1250,6 @@ export class WfhService {
     const refYear = referenceDate.getFullYear();
     const refMonth = referenceDate.getMonth();
 
-    const sumRequestedDays = async (
-      fromDate: string,
-      toDate: string,
-    ): Promise<number> => {
-      const row = await this.requestRepo
-        .createQueryBuilder('wfh')
-        .select('COALESCE(SUM(COALESCE(wfh.number_of_days, 1)), 0)', 'total')
-        .where('wfh.user_id = :userId', { userId })
-        .andWhere('wfh.status IN (:...statuses)', {
-          statuses: ['PENDING', 'APPROVED'],
-        })
-        .andWhere('wfh.date BETWEEN :fromDate AND :toDate', {
-          fromDate,
-          toDate,
-        })
-        .getRawOne<{ total: string }>();
-
-      return Number(row?.total || 0);
-    };
-
     // Check monthly limit
     if (limit.maxDaysPerMonth !== null && limit.maxDaysPerMonth !== undefined) {
       const monthStart = new Date(refYear, refMonth, 1)
@@ -930,7 +1258,11 @@ export class WfhService {
       const monthEnd = new Date(refYear, refMonth + 1, 0)
         .toISOString()
         .slice(0, 10);
-      const usedThisMonth = await sumRequestedDays(monthStart, monthEnd);
+      const usedThisMonth = await this.sumWfhDaysInRange(
+        userId,
+        monthStart,
+        monthEnd,
+      );
       if (usedThisMonth + requestedDays > limit.maxDaysPerMonth) {
         const remaining = Math.max(0, limit.maxDaysPerMonth - usedThisMonth);
         return {
@@ -947,7 +1279,8 @@ export class WfhService {
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6); // Saturday
 
-      const usedThisWeek = await sumRequestedDays(
+      const usedThisWeek = await this.sumWfhDaysInRange(
+        userId,
         weekStart.toISOString().slice(0, 10),
         weekEnd.toISOString().slice(0, 10),
       );
@@ -964,7 +1297,11 @@ export class WfhService {
     if (limit.maxDaysPerYear !== null && limit.maxDaysPerYear !== undefined) {
       const yearStart = new Date(refYear, 0, 1).toISOString().slice(0, 10);
       const yearEnd = new Date(refYear, 11, 31).toISOString().slice(0, 10);
-      const usedThisYear = await sumRequestedDays(yearStart, yearEnd);
+      const usedThisYear = await this.sumWfhDaysInRange(
+        userId,
+        yearStart,
+        yearEnd,
+      );
       if (usedThisYear + requestedDays > limit.maxDaysPerYear) {
         const remaining = Math.max(0, limit.maxDaysPerYear - usedThisYear);
         return {

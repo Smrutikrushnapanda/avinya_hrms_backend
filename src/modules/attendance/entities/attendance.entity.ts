@@ -10,6 +10,7 @@ import {
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
 import { Branch } from './branch.entity';
+import { OfficeTripRequest } from '../../office-trip/entities/office-trip-request.entity';
 
 @Entity('attendance')
 export class Attendance {
@@ -125,6 +126,16 @@ export class Attendance {
   @ManyToOne(() => Branch, { nullable: true })
   @JoinColumn({ name: 'branch_id' })
   branch?: Branch | null;
+
+  @ManyToOne(() => OfficeTripRequest, { nullable: true })
+  @JoinColumn({ name: 'office_trip_id' })
+  officeTrip?: OfficeTripRequest | null;
+
+  @Column({ name: 'office_trip_id', type: 'uuid', nullable: true })
+  officeTripId?: string | null;
+
+  @Column({ name: 'trip_type', type: 'varchar', length: 20, nullable: true })
+  tripType?: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

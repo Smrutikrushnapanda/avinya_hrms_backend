@@ -596,6 +596,40 @@ export class MailService {
     });
   }
 
+  // ─── WFH Monitor Reminder ────────────────────────────────────────────────────
+
+  async sendWfhMonitorReminder(
+    recipient: MailRecipient,
+    organizationId: string,
+  ): Promise<void> {
+    const org = await this.getOrg(organizationId);
+    const orgName = org?.organizationName ?? 'Your Organization';
+    const orgEmail = org?.email;
+
+    const content = `
+      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Start Your WFH Monitor</h2>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">
+        Hi ${recipient.firstName}, you have approved Work from Home today but haven't started a monitoring session yet.
+      </p>
+
+      <div style="background:#fff7ed;border-left:4px solid #f59e0b;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#92400e;">
+          Please open the WFH Monitor app and click <strong>Start Monitoring</strong> to log your work hours for today. Your attendance for today depends on starting this session.
+        </p>
+      </div>
+
+      <p style="margin:0;font-size:14px;color:#6b7280;">If you believe this is a mistake, please contact your manager or HR.</p>
+    `;
+
+    await this.send({
+      from: this.fromAddress,
+      to: recipient.email,
+      replyTo: orgEmail,
+      subject: `Reminder: Start your WFH Monitor session — ${orgName}`,
+      html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
+    });
+  }
+
   async sendSuperadminLoginOtp(details: {
     email: string;
     otp: string;

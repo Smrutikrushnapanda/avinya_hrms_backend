@@ -424,6 +424,30 @@ export class AttendanceController {
           format: 'date-time',
           nullable: true,
         },
+        attendanceStatus: {
+          type: 'string',
+          nullable: true,
+          description: 'Daily attendance status (present, late, absent, etc.)',
+        },
+        workStartTime: {
+          type: 'string',
+          nullable: true,
+          description: 'Shift work start time (HH:mm)',
+        },
+        graceMinutes: {
+          type: 'number',
+          nullable: true,
+          description: 'Late arrival grace period in minutes',
+        },
+        lateThresholdMinutes: {
+          type: 'number',
+          nullable: true,
+          description: 'Late threshold in minutes',
+        },
+        timezone: {
+          type: 'string',
+          description: 'Timezone used for attendance calculations',
+        },
       },
       example: {
         logs: [
@@ -489,6 +513,11 @@ export class AttendanceController {
         lastPunch: '2025-07-13T10:15:00.000Z',
         isOnBreak: false,
         activeBreakSince: null,
+        attendanceStatus: 'present',
+        workStartTime: '09:00:00',
+        graceMinutes: 15,
+        lateThresholdMinutes: 30,
+        timezone: 'Asia/Kolkata',
       },
     },
   })

@@ -76,6 +76,44 @@ export class OrganizationSettings {
   })
   wfhCarryForwardEnabled: boolean;
 
+  @Column({
+    name: 'hybrid_default_mandatory_office_days',
+    type: 'int',
+    default: 15,
+  })
+  hybridDefaultMandatoryOfficeDays: number;
+
+  @Column({
+    name: 'wfh_monitor_reminder_enabled',
+    type: 'boolean',
+    default: true,
+  })
+  wfhMonitorReminderEnabled: boolean;
+
+  @Column({
+    name: 'wfh_monitor_reminder_interval_minutes',
+    type: 'int',
+    default: 30,
+  })
+  wfhMonitorReminderIntervalMinutes: number;
+
+  @Column({
+    name: 'wfh_monitor_reminder_max_per_day',
+    type: 'int',
+    nullable: true,
+    comment: 'NULL = keep reminding until the monitoring session starts',
+  })
+  wfhMonitorReminderMaxPerDay?: number | null;
+
+  @Column({
+    name: 'wfh_monitor_reminder_email_cutoff_minutes',
+    type: 'int',
+    default: 120,
+    comment:
+      'Minutes after shift start before a one-time email reminder is sent if no session has started',
+  })
+  wfhMonitorReminderEmailCutoffMinutes: number;
+
   @CreateDateColumn({ name: 'created_on', type: 'timestamptz' })
   createdOn: Date;
 

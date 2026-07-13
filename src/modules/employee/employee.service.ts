@@ -102,6 +102,17 @@ export class EmployeeService {
         dto.organizationId,
         dto.shiftId ?? null,
       );
+
+      if (dto.reportingTo) {
+        const validation = await this.validateManagerAssignment({
+          organizationId: dto.organizationId,
+          reportingTo: dto.reportingTo,
+        });
+        if (!validation.isValid) {
+          throw new BadRequestException(validation.errors.join('; '));
+        }
+      }
+
       const selectedRole = await this.resolveRoleForEmployee(
         dto.organizationId,
         roleId,
@@ -452,6 +463,20 @@ export class EmployeeService {
         existingEmployee.organizationId,
         employeeUpdate.shiftId ?? null,
       );
+    }
+
+    if (Object.prototype.hasOwnProperty.call(employeeUpdate, 'reportingTo')) {
+      const existingEmployee = await this.findOne(id);
+      if (employeeUpdate.reportingTo) {
+        const validation = await this.validateManagerAssignment({
+          organizationId: existingEmployee.organizationId,
+          employeeId: id,
+          reportingTo: employeeUpdate.reportingTo,
+        });
+        if (!validation.isValid) {
+          throw new BadRequestException(validation.errors.join('; '));
+        }
+      }
     }
 
     if (Object.keys(employeeUpdate).length > 0) {

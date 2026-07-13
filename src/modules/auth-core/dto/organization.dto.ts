@@ -245,6 +245,30 @@ export class UpdateOrganizationDto {
   wfhCarryForwardEnabled?: boolean;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  hybridDefaultMandatoryOfficeDays?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  wfhMonitorReminderEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  wfhMonitorReminderIntervalMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  wfhMonitorReminderMaxPerDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  wfhMonitorReminderEmailCutoffMinutes?: number;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 

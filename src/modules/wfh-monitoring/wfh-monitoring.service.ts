@@ -15,7 +15,9 @@ import { HeartbeatDto } from './dto/heartbeat.dto';
 import { LogAppActivityDto } from './dto/log-app-activity.dto';
 import { AcceptTermsDto } from './dto/accept-terms.dto';
 import { WfhRequest } from '../wfh/entities/wfh-request.entity';
+import { EmployeeWorkArrangement } from '../wfh/entities/employee-work-arrangement.entity';
 import { Employee } from '../employee/entities/employee.entity';
+import { AttendanceService } from '../attendance/attendance.service';
 import {
   TAC_CURRENT_VERSION,
   WFH_MONITORING_TAC_TEXT,
@@ -38,8 +40,11 @@ export class WfhMonitoringService {
     private tacRepo: Repository<WfhMonitoringTacAcceptance>,
     @InjectRepository(WfhRequest)
     private wfhRequestRepo: Repository<WfhRequest>,
+    @InjectRepository(EmployeeWorkArrangement)
+    private workArrangementRepo: Repository<EmployeeWorkArrangement>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    private attendanceService: AttendanceService,
   ) {}
 
   /**
@@ -86,7 +91,89 @@ export class WfhMonitoringService {
       .andWhere('req.date <= :today', { today })
       .andWhere('(req.endDate IS NULL OR req.endDate >= :today)', { today })
       .getOne();
-    return !!req;
+    if (req) return true;
+
+    // PERMANENT_REMOTE employees never file a per-day request — every
+    // working day is implicitly WFH-approved.
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId }, isActive: true },
+      relations: ['user'],
+    });
+    if (arrangement?.arrangementType !== 'PERMANENT_REMOTE') return false;
+
+    const organizationId = arrangement.user?.organizationId;
+    if (!organizationId) return false;
+
+    const shiftConfig = await this.attendanceService.resolveShiftConfig(
+      organizationId,
+      userId,
+    );
+    return this.attendanceService.isWorkingDayForDate(new Date(), shiftConfig);
+  }
+
+  /**
+   * Org-wide equivalent of `hasApprovedWfhToday`: every user (with basic
+   * identity fields) who is WFH-approved on `date` — ad-hoc approved
+   * `wfh_requests`, plus PERMANENT_REMOTE employees on a working day.
+   * Single source of truth for the admin/manager team-activity views
+   * below, which previously each re-ran their own inline copy of the
+   * `wfh_requests` query and silently missed PERMANENT_REMOTE employees.
+   */
+  private async getApprovedWfhUsersForOrg(
+    organizationId: string,
+    date: string,
+  ): Promise<
+    Array<{ id: string; email?: string; firstName?: string; lastName?: string }>
+  > {
+    const byUserId = new Map<
+      string,
+      { id: string; email?: string; firstName?: string; lastName?: string }
+    >();
+
+    const approvedRequests = await this.wfhRequestRepo
+      .createQueryBuilder('req')
+      .leftJoinAndSelect('req.user', 'user')
+      .where('user.organizationId = :orgId', { orgId: organizationId })
+      .andWhere('req.status = :status', { status: 'APPROVED' })
+      .andWhere('req.date <= :date', { date })
+      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', { date })
+      .select([
+        'req.id',
+        'user.id',
+        'user.email',
+        'user.firstName',
+        'user.lastName',
+      ])
+      .getMany();
+    for (const req of approvedRequests) {
+      if (req.user?.id) byUserId.set(req.user.id, req.user);
+    }
+
+    const permanentRemote = await this.workArrangementRepo
+      .createQueryBuilder('arrangement')
+      .leftJoinAndSelect('arrangement.user', 'user')
+      .where('user.organizationId = :orgId', { orgId: organizationId })
+      .andWhere('arrangement.arrangementType = :type', {
+        type: 'PERMANENT_REMOTE',
+      })
+      .andWhere('arrangement.isActive = true')
+      .getMany();
+    const referenceDate = new Date(`${date}T00:00:00`);
+    for (const arrangement of permanentRemote) {
+      const userId = arrangement.user?.id;
+      if (!userId || byUserId.has(userId)) continue;
+      const shiftConfig = await this.attendanceService.resolveShiftConfig(
+        organizationId,
+        userId,
+      );
+      if (
+        this.attendanceService.isWorkingDayForDate(referenceDate, shiftConfig)
+      ) {
+        byUserId.set(userId, arrangement.user);
+      }
+    }
+
+    return [...byUserId.values()];
   }
 
   private async getOrCreateTodayLog(userId: string): Promise<WfhActivityLog> {
@@ -342,27 +429,14 @@ export class WfhMonitoringService {
     const targetDate = date ?? this.today();
 
     // 1. Find all users with approved WFH for this date in the org
-    const approvedRequests = await this.wfhRequestRepo
-      .createQueryBuilder('req')
-      .leftJoinAndSelect('req.user', 'user')
-      .where('user.organizationId = :orgId', { orgId: organizationId })
-      .andWhere('req.status = :status', { status: 'APPROVED' })
-      .andWhere('req.date <= :date', { date: targetDate })
-      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', {
-        date: targetDate,
-      })
-      .select([
-        'req.id',
-        'user.id',
-        'user.email',
-        'user.firstName',
-        'user.lastName',
-      ])
-      .getMany();
+    const approvedUsers = await this.getApprovedWfhUsersForOrg(
+      organizationId,
+      targetDate,
+    );
 
-    if (approvedRequests.length === 0) return [];
+    if (approvedUsers.length === 0) return [];
 
-    const userIds = approvedRequests.map((r) => r.user.id);
+    const userIds = approvedUsers.map((u) => u.id);
 
     // 2. Get existing activity logs for those users on this date
     const logs = await this.activityRepo
@@ -392,11 +466,11 @@ export class WfhMonitoringService {
     const logMap = new Map(logs.map((l) => [l.user.id, l]));
 
     // 3. Merge — return activity log if available, else a zero-state row
-    return approvedRequests.map((req) => {
-      const log = logMap.get(req.user.id);
+    return approvedUsers.map((user) => {
+      const log = logMap.get(user.id);
       if (log) return log;
       return {
-        id: `pending-${req.user.id}`,
+        id: `pending-${user.id}`,
         date: targetDate,
         mouseEvents: 0,
         keyboardEvents: 0,
@@ -407,7 +481,7 @@ export class WfhMonitoringService {
         lunchEnd: null,
         workStartedAt: null,
         workEndedAt: null,
-        user: req.user,
+        user,
       };
     });
   }
@@ -606,27 +680,14 @@ export class WfhMonitoringService {
   async getTeamAppSummary(organizationId: string, date?: string) {
     const targetDate = date ?? this.today();
 
-    const approvedRequests = await this.wfhRequestRepo
-      .createQueryBuilder('req')
-      .leftJoinAndSelect('req.user', 'user')
-      .where('user.organizationId = :orgId', { orgId: organizationId })
-      .andWhere('req.status = :status', { status: 'APPROVED' })
-      .andWhere('req.date <= :date', { date: targetDate })
-      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', {
-        date: targetDate,
-      })
-      .select([
-        'req.id',
-        'user.id',
-        'user.email',
-        'user.firstName',
-        'user.lastName',
-      ])
-      .getMany();
+    const approvedUsers = await this.getApprovedWfhUsersForOrg(
+      organizationId,
+      targetDate,
+    );
 
-    if (approvedRequests.length === 0) return [];
+    if (approvedUsers.length === 0) return [];
 
-    const userIds = approvedRequests.map((r) => r.user.id);
+    const userIds = approvedUsers.map((u) => u.id);
 
     const sessions = await this.sessionRepo
       .createQueryBuilder('session')
@@ -662,8 +723,8 @@ export class WfhMonitoringService {
 
     const displayNames = await this.resolveDisplayNames(userIds);
 
-    return approvedRequests.map((req) => {
-      const uid = req.user.id;
+    return approvedUsers.map((approvedUser) => {
+      const uid = approvedUser.id;
       const session = latestSessionByUser.get(uid);
       const appRows = appsByUser.get(uid) ?? [];
 
@@ -687,9 +748,11 @@ export class WfhMonitoringService {
         userId: uid,
         name:
           displayNames.get(uid) ||
-          [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') ||
-          req.user.email,
-        email: req.user.email,
+          [approvedUser.firstName, approvedUser.lastName]
+            .filter(Boolean)
+            .join(' ') ||
+          approvedUser.email,
+        email: approvedUser.email,
         isMonitoring: session?.isActive ?? false,
         sessionStart: session?.sessionStart ?? null,
         sessionEnd: session?.sessionEnd ?? null,
@@ -706,21 +769,14 @@ export class WfhMonitoringService {
   async getTeamCurrentActivity(organizationId: string) {
     const today = this.today();
 
-    const approvedRequests = await this.wfhRequestRepo
-      .createQueryBuilder('req')
-      .leftJoinAndSelect('req.user', 'user')
-      .where('user.organizationId = :orgId', { orgId: organizationId })
-      .andWhere('req.status = :status', { status: 'APPROVED' })
-      .andWhere('req.date <= :date', { date: today })
-      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', {
-        date: today,
-      })
-      .select(['req.id', 'user.id'])
-      .getMany();
+    const approvedUsers = await this.getApprovedWfhUsersForOrg(
+      organizationId,
+      today,
+    );
 
-    if (approvedRequests.length === 0) return [];
+    if (approvedUsers.length === 0) return [];
 
-    const userIds = approvedRequests.map((r) => r.user.id);
+    const userIds = approvedUsers.map((u) => u.id);
     const displayNames = await this.resolveDisplayNames(userIds);
 
     // Get latest app activity row per user (for today) — DISTINCT ON avoids fetching all rows

@@ -21,6 +21,10 @@ import {
   UpdateEmployeeWfhLimitDto,
 } from './dto/set-employee-wfh-limit.dto';
 import {
+  SetEmployeeWorkArrangementDto,
+  UpdateEmployeeWorkArrangementDto,
+} from './dto/set-employee-work-arrangement.dto';
+import {
   ApiTags,
   ApiOperation,
   ApiResponse,
@@ -28,6 +32,8 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
 
 @ApiTags('WFH')
 @Controller('wfh')
@@ -211,5 +217,77 @@ export class WfhController {
   async deleteEmployeeWfhLimit(@Param('userId', ParseUUIDPipe) userId: string) {
     await this.wfhService.deleteEmployeeWfhLimit(userId);
     return { message: 'WFH limit removed successfully' };
+  }
+
+  // ─── Employee Work Arrangement (Office / Hybrid / Permanent Remote) ───
+
+  @Get('work-arrangement/me')
+  @ApiOperation({ summary: "Get the current user's own work arrangement" })
+  async getMyWorkArrangement(@GetUser() user: User) {
+    return this.wfhService.getEmployeeWorkArrangement(user.id);
+  }
+
+  @Get('work-arrangement/me/status')
+  @ApiOperation({
+    summary:
+      "Get the current user's work arrangement plus computed Hybrid monthly quota",
+  })
+  async getMyWorkArrangementStatus(@GetUser() user: User) {
+    return this.wfhService.getMyWorkArrangementStatus(user.id);
+  }
+
+  @Get('work-arrangement/org/:organizationId')
+  @ApiOperation({
+    summary: 'Get all employee work arrangements for an organization',
+  })
+  @ApiParam({ name: 'organizationId', type: 'string', format: 'uuid' })
+  async getWorkArrangementsByOrg(
+    @Param('organizationId', ParseUUIDPipe) organizationId: string,
+  ) {
+    return this.wfhService.getWorkArrangementsByOrg(organizationId);
+  }
+
+  @Get('work-arrangement/:userId')
+  @ApiOperation({ summary: "Get an employee's work arrangement" })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async getEmployeeWorkArrangement(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.wfhService.getEmployeeWorkArrangement(userId);
+  }
+
+  @Post('work-arrangement')
+  @ApiOperation({
+    summary:
+      'Set or update an employee work arrangement (Office/Hybrid/Permanent Remote)',
+  })
+  @ApiBody({ type: SetEmployeeWorkArrangementDto })
+  async setEmployeeWorkArrangement(
+    @Body() dto: SetEmployeeWorkArrangementDto,
+    @GetUser() user: User,
+  ) {
+    return this.wfhService.setEmployeeWorkArrangement(dto, user.id);
+  }
+
+  @Put('work-arrangement/:userId')
+  @ApiOperation({ summary: "Update an employee's work arrangement" })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async updateEmployeeWorkArrangement(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: UpdateEmployeeWorkArrangementDto,
+  ) {
+    return this.wfhService.updateEmployeeWorkArrangement(userId, dto);
+  }
+
+  @Delete('work-arrangement/:userId')
+  @ApiOperation({
+    summary: "Remove an employee's work arrangement (reverts to Office)",
+  })
+  @ApiParam({ name: 'userId', type: 'string', format: 'uuid' })
+  async deleteEmployeeWorkArrangement(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    await this.wfhService.deleteEmployeeWorkArrangement(userId);
+    return { message: 'Work arrangement removed successfully' };
   }
 }

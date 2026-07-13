@@ -18,6 +18,9 @@ import { LeaveRequest } from '../leave/entities';
 import { Holiday } from '../leave/entities';
 import { Employee } from '../employee/entities/employee.entity';
 import { StorageService } from './storage.service';
+import { OfficeTripRequest } from '../office-trip/entities/office-trip-request.entity';
+import { WfhRequest, EmployeeWorkArrangement } from '../wfh/entities';
+import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.entity';
 
 @Module({
   imports: [
@@ -32,10 +35,14 @@ import { StorageService } from './storage.service';
       LeaveRequest,
       Holiday,
       Employee,
+      OfficeTripRequest,
+      WfhRequest,
+      EmployeeWorkArrangement,
+      WfhActivityLog,
     ]),
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService, Common, StorageService],
-  exports: [TypeOrmModule],
+  exports: [TypeOrmModule, AttendanceService],
 })
 export class AttendanceModule {}

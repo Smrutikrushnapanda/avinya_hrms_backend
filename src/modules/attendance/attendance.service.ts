@@ -8,6 +8,7 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import {
   Between,
   DeepPartial,
+  In,
   LessThanOrEqual,
   MoreThanOrEqual,
   Repository,
@@ -46,6 +47,12 @@ import { startOfDay, endOfDay, format as formatLocal } from 'date-fns';
 import { toZonedTime, format as formatTZ } from 'date-fns-tz';
 import { Holiday, LeaveRequest } from '../leave/entities';
 import { DateTime } from 'luxon';
+import {
+  OfficeTripRequest,
+  OfficeTripStatus,
+} from '../office-trip/entities/office-trip-request.entity';
+import { WfhRequest, EmployeeWorkArrangement } from '../wfh/entities';
+import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.entity';
 
 type WorkingDayRuleSource = {
   workingDays?: number[] | null;
@@ -96,6 +103,14 @@ export class AttendanceService {
     private branchRepo: Repository<Branch>,
     @InjectRepository(AttendanceShift)
     private shiftRepo: Repository<AttendanceShift>,
+    @InjectRepository(OfficeTripRequest)
+    private officeTripRepo: Repository<OfficeTripRequest>,
+    @InjectRepository(WfhRequest)
+    private wfhRequestRepo: Repository<WfhRequest>,
+    @InjectRepository(EmployeeWorkArrangement)
+    private workArrangementRepo: Repository<EmployeeWorkArrangement>,
+    @InjectRepository(WfhActivityLog)
+    private wfhActivityLogRepo: Repository<WfhActivityLog>,
   ) {}
 
   private normalizeBranchName(name: string): string {
@@ -158,6 +173,73 @@ export class AttendanceService {
     return this.biometricDeviceRepo.save(device);
   }
 
+  /**
+   * An approved (or still-pending) Office Trip / Client Visit request
+   * covering this punch means the employee is intentionally away from
+   * their usual office/Wi-Fi — GPS/Wi-Fi/geofence checks should be skipped
+   * for the duration of the request instead of raising a false anomaly.
+   * When both a PENDING and an APPROVED request cover the same punch,
+   * the APPROVED one wins.
+   */
+  private async findActiveOfficeTrip(
+    organizationId: string,
+    userId: string,
+    attendanceDate: string,
+    punchTime: Date,
+    timezone: string,
+  ): Promise<OfficeTripRequest | null> {
+    const candidates = await this.officeTripRepo.find({
+      where: {
+        organizationId,
+        userId,
+        status: In([OfficeTripStatus.APPROVED, OfficeTripStatus.PENDING]),
+        fromDate: LessThanOrEqual(attendanceDate),
+        toDate: MoreThanOrEqual(attendanceDate),
+      },
+    });
+    if (candidates.length === 0) return null;
+
+    const covering = candidates.filter((trip) =>
+      this.tripCoversPunchTime(trip, attendanceDate, punchTime, timezone),
+    );
+    if (covering.length === 0) return null;
+
+    covering.sort((a, b) => {
+      if (a.status !== b.status) {
+        return a.status === OfficeTripStatus.APPROVED ? -1 : 1;
+      }
+      return +new Date(b.createdAt) - +new Date(a.createdAt);
+    });
+    return covering[0];
+  }
+
+  private tripCoversPunchTime(
+    trip: OfficeTripRequest,
+    attendanceDate: string,
+    punchTime: Date,
+    timezone: string,
+  ): boolean {
+    const punchLocal = DateTime.fromJSDate(punchTime).setZone(timezone);
+
+    if (trip.startTime && attendanceDate === trip.fromDate) {
+      const [h, m, s] = trip.startTime.split(':').map(Number);
+      const boundary = DateTime.fromFormat(trip.fromDate, 'yyyy-MM-dd', {
+        zone: timezone,
+      }).set({ hour: h, minute: m || 0, second: s || 0 });
+      if (punchLocal < boundary) return false;
+    }
+
+    if (trip.endTime && attendanceDate === trip.toDate) {
+      const [h, m, s] = trip.endTime.split(':').map(Number);
+      const boundary = DateTime.fromFormat(trip.toDate, 'yyyy-MM-dd', {
+        zone: timezone,
+      }).set({ hour: h, minute: m || 0, second: s || 0 });
+      if (punchLocal > boundary) return false;
+    }
+
+    return true;
+  }
+
   async logAttendance(
     dto: CreateAttendanceLogDto,
     photoFile?: Express.Multer.File,
@@ -218,6 +300,16 @@ export class AttendanceService {
     const logsWindowEnd = isOvernight ? windowEnd : dayBounds.end;
     const branchId = shiftConfig.branchId || null;
 
+    // An active Office Trip / Client Visit request (pending or approved)
+    // bypasses Wi-Fi/GPS/geofence anomaly checks below for this punch.
+    const activeTrip = await this.findActiveOfficeTrip(
+      organizationId,
+      userId,
+      attendanceDate,
+      punchTime,
+      shiftTz,
+    );
+
     // 1️⃣ Determine punch type (with pessimistic lock to prevent race conditions)
     let type: 'check-in' | 'check-out' | 'break-start' | 'break-end' =
       'check-in';
@@ -251,7 +343,7 @@ export class AttendanceService {
     const anomalyReasons: string[] = [];
 
     // 3a. Wi-Fi + GPS
-    if (enableWifiValidation) {
+    if (enableWifiValidation && !activeTrip) {
       if (!wifiBssid) {
         // Required but not supplied (e.g. a web client, which has no way
         // to read the connected network's BSSID) — fail closed rather
@@ -296,7 +388,7 @@ export class AttendanceService {
     }
 
     // 3c. GPS-only validation against office/branch geofence (primary + alternates)
-    if (enableGPSValidation) {
+    if (enableGPSValidation && !activeTrip) {
       if (latitude == null || longitude == null) {
         anomalyFlag = true;
         anomalyReasons.push('GPS location required but not provided');
@@ -368,6 +460,9 @@ export class AttendanceService {
       anomalyFlag,
       anomalyReason: anomalyFlag ? anomalyReasons.join(', ') : null,
       branch: branchId ? { id: branchId } : undefined,
+      officeTrip: activeTrip ? { id: activeTrip.id } : undefined,
+      officeTripId: activeTrip?.id ?? null,
+      tripType: activeTrip?.tripType ?? null,
     };
 
     const created = this.attendanceLogRepo.create(log);
@@ -407,6 +502,7 @@ export class AttendanceService {
           .map((l) => l.anomalyReason)
           .filter(Boolean)
           .join(', ') || undefined;
+      const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
       const status = this.determineAttendanceStatus(
         workingMinutes,
@@ -442,6 +538,11 @@ export class AttendanceService {
         anomalyFlag: anyAnomaly,
         anomalyReason,
         branch: branchId ? { id: branchId } : undefined,
+        officeTrip: tripLog?.officeTripId
+          ? { id: tripLog.officeTripId }
+          : undefined,
+        officeTripId: tripLog?.officeTripId ?? null,
+        tripType: tripLog?.tripType ?? null,
       };
 
       const existingAttendance = await this.attendanceRepo.findOne({
@@ -633,6 +734,9 @@ export class AttendanceService {
 
           anomalyFlag: att.anomalyFlag,
           anomalyReason: att.anomalyReason,
+
+          officeTripId: att.officeTripId ?? null,
+          tripType: att.tripType ?? null,
         };
       }),
     );
@@ -847,6 +951,7 @@ export class AttendanceService {
     workStartTime: string | null;
     graceMinutes: number | null;
     lateThresholdMinutes: number | null;
+    timezone: string;
   }> {
     const now = new Date();
     const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
@@ -898,6 +1003,7 @@ export class AttendanceService {
       workStartTime: shiftConfig.workStartTime ?? null,
       graceMinutes: shiftConfig.graceMinutes ?? null,
       lateThresholdMinutes: shiftConfig.lateThresholdMinutes ?? null,
+      timezone: shiftConfig.timezone ?? 'Asia/Kolkata',
     };
   }
 
@@ -1777,7 +1883,7 @@ export class AttendanceService {
     return inTime.getTime() > lateCutoff.getTime();
   }
 
-  private async resolveShiftConfig(organizationId: string, userId: string) {
+  async resolveShiftConfig(organizationId: string, userId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
       relations: ['branch', 'shift'],
@@ -1897,6 +2003,55 @@ export class AttendanceService {
       holidays.map((h) => formatLocal(new Date(h.date), 'yyyy-MM-dd')),
     );
 
+    // 0️⃣ Determine who is WFH-approved for this date: ad-hoc approved
+    // wfh_requests, plus PERMANENT_REMOTE employees on a working day (they
+    // never file a per-day request). Tracked separately from attendance
+    // logs/leave so these employees get a row generated even with zero
+    // office punches.
+    const wfhApprovedUserOrgKeys = new Set<string>();
+    const approvedWfhRequests = await this.wfhRequestRepo
+      .createQueryBuilder('req')
+      .leftJoinAndSelect('req.user', 'user')
+      .where('req.status = :status', { status: 'APPROVED' })
+      .andWhere('req.date <= :dateStr', { dateStr })
+      .andWhere('(req.endDate IS NULL OR req.endDate >= :dateStr)', {
+        dateStr,
+      })
+      .getMany();
+    for (const req of approvedWfhRequests) {
+      if (req.user?.id && req.user?.organizationId) {
+        wfhApprovedUserOrgKeys.add(`${req.user.id}|${req.user.organizationId}`);
+      }
+    }
+
+    const permanentRemoteArrangements = await this.workArrangementRepo.find({
+      where: { arrangementType: 'PERMANENT_REMOTE', isActive: true },
+      relations: ['user'],
+    });
+    for (const arrangement of permanentRemoteArrangements) {
+      const userId = arrangement.user?.id;
+      const orgId = arrangement.user?.organizationId;
+      if (!userId || !orgId) continue;
+      const shiftConfig = await getShiftConfig(orgId, userId);
+      if (this.isWorkingDayForDate(start, shiftConfig)) {
+        wfhApprovedUserOrgKeys.add(`${userId}|${orgId}`);
+      }
+    }
+
+    const wfhStartedUserIds = new Set<string>();
+    if (wfhApprovedUserOrgKeys.size > 0) {
+      const wfhApprovedUserIds = [...wfhApprovedUserOrgKeys].map(
+        (key) => key.split('|')[0],
+      );
+      const startedLogs = await this.wfhActivityLogRepo.find({
+        where: { date: dateStr, user: { id: In(wfhApprovedUserIds) } },
+        relations: ['user'],
+      });
+      for (const log of startedLogs) {
+        if (log.workStartedAt) wfhStartedUserIds.add(log.user.id);
+      }
+    }
+
     // 1️⃣ Fetch attendance logs for the day (non-anomalous)
     const logs = await this.attendanceLogRepo.find({
       where: {
@@ -1939,6 +2094,7 @@ export class AttendanceService {
         );
         return orgKey ?? `${userId}|UNKNOWN`;
       }),
+      ...wfhApprovedUserOrgKeys,
     ]);
 
     for (const key of allUserOrgKeys) {
@@ -1988,6 +2144,7 @@ export class AttendanceService {
           (+outLog.timestamp - +inLog.timestamp) / 60000,
         );
         const hasClockOut = sortedLogs.length > 1;
+        const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
         Object.assign(baseData, {
           inTime: inLog.timestamp,
@@ -2019,7 +2176,22 @@ export class AttendanceService {
           outWifiSsid: outLog.wifiSsid,
           outWifiBssid: outLog.wifiBssid,
           outDeviceInfo: outLog.deviceInfo,
+          officeTripId: tripLog?.officeTripId ?? null,
+          tripType: tripLog?.tripType ?? null,
         });
+      }
+
+      // 🏠 WFH-approved (ad-hoc request or PERMANENT_REMOTE) with no office
+      // punch: attendance depends on whether they actually started a WFH
+      // Monitor session today, not just the approval itself.
+      else if (wfhApprovedUserOrgKeys.has(key)) {
+        if (wfhStartedUserIds.has(userId)) {
+          baseData.status = 'work-from-home';
+        } else {
+          baseData.status = 'absent';
+          baseData.anomalyReason =
+            'WFH approved but monitoring session was not started';
+        }
       }
 
       // 🚫 No logs, no leave → mark as absent
@@ -2731,7 +2903,7 @@ export class AttendanceService {
     return Math.ceil(d.getDate() / 7);
   }
 
-  private isWorkingDayForDate(d: Date, source: WorkingDayRuleSource): boolean {
+  isWorkingDayForDate(d: Date, source: WorkingDayRuleSource): boolean {
     const workingDaySet = new Set(this.resolveWorkingDays(source));
     if (!workingDaySet.has(d.getDay())) return false;
     const week = this.weekOfMonth(d);
@@ -2739,6 +2911,63 @@ export class AttendanceService {
     const ruleWeeks = weekdayRules[String(d.getDay())] || [];
     if (ruleWeeks.includes(week)) return false;
     return true;
+  }
+
+  /**
+   * Number of working days (per the employee's own shift/branch/org
+   * calendar) in the given calendar month. Used to turn a Hybrid
+   * employee's "N mandatory office days" into a dynamic WFH quota
+   * (workingDaysInMonth - mandatoryOfficeDays) instead of a static cap.
+   */
+  async countWorkingDaysInMonth(
+    organizationId: string,
+    userId: string,
+    year: number,
+    month: number, // 0-indexed, matches Date#getMonth()
+  ): Promise<number> {
+    const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    let count = 0;
+    for (let day = 1; day <= lastDay; day++) {
+      if (this.isWorkingDayForDate(new Date(year, month, day), shiftConfig)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * True if `date` is either an approved ad-hoc WFH day (wfh_requests) or
+   * falls on a working day for a PERMANENT_REMOTE employee (who never
+   * files a per-day request — every working day is implicitly WFH).
+   */
+  async hasApprovedWfhForDate(
+    userId: string,
+    organizationId: string,
+    dateStr: string,
+  ): Promise<boolean> {
+    const arrangement = await this.workArrangementRepo.findOne({
+      where: { user: { id: userId }, isActive: true },
+    });
+
+    if (arrangement?.arrangementType === 'PERMANENT_REMOTE') {
+      const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+      return this.isWorkingDayForDate(
+        new Date(`${dateStr}T00:00:00`),
+        shiftConfig,
+      );
+    }
+
+    const req = await this.wfhRequestRepo
+      .createQueryBuilder('req')
+      .where('req.user_id = :userId', { userId })
+      .andWhere('req.status = :status', { status: 'APPROVED' })
+      .andWhere('req.date <= :date', { date: dateStr })
+      .andWhere('(req.endDate IS NULL OR req.endDate >= :date)', {
+        date: dateStr,
+      })
+      .getOne();
+    return !!req;
   }
 
   async updateAttendanceSettings(

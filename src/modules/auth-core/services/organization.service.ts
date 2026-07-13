@@ -334,6 +334,10 @@ export class OrganizationService {
       settings.sessionStartMonth = 4;
       settings.leaveCarryForwardEnabled = false;
       settings.wfhCarryForwardEnabled = false;
+      settings.hybridDefaultMandatoryOfficeDays = 15;
+      settings.wfhMonitorReminderEnabled = true;
+      settings.wfhMonitorReminderIntervalMinutes = 30;
+      settings.wfhMonitorReminderEmailCutoffMinutes = 120;
     }
     const previousSessionStartMonth = Number(settings.sessionStartMonth || 4);
 
@@ -389,6 +393,31 @@ export class OrganizationService {
     }
     if (data.wfhCarryForwardEnabled !== undefined) {
       settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
+    }
+    if (data.hybridDefaultMandatoryOfficeDays !== undefined) {
+      settings.hybridDefaultMandatoryOfficeDays = Number(
+        data.hybridDefaultMandatoryOfficeDays,
+      );
+    }
+    if (data.wfhMonitorReminderEnabled !== undefined) {
+      settings.wfhMonitorReminderEnabled = Boolean(
+        data.wfhMonitorReminderEnabled,
+      );
+    }
+    if (data.wfhMonitorReminderIntervalMinutes !== undefined) {
+      settings.wfhMonitorReminderIntervalMinutes = Number(
+        data.wfhMonitorReminderIntervalMinutes,
+      );
+    }
+    if (data.wfhMonitorReminderMaxPerDay !== undefined) {
+      settings.wfhMonitorReminderMaxPerDay = Number(
+        data.wfhMonitorReminderMaxPerDay,
+      );
+    }
+    if (data.wfhMonitorReminderEmailCutoffMinutes !== undefined) {
+      settings.wfhMonitorReminderEmailCutoffMinutes = Number(
+        data.wfhMonitorReminderEmailCutoffMinutes,
+      );
     }
 
     org.updatedBy = updatedBy;
@@ -541,6 +570,16 @@ export class OrganizationService {
       sessionStartMonth: Number(org.settings?.sessionStartMonth || 4),
       leaveCarryForwardEnabled: Boolean(org.settings?.leaveCarryForwardEnabled),
       wfhCarryForwardEnabled: Boolean(org.settings?.wfhCarryForwardEnabled),
+      hybridDefaultMandatoryOfficeDays:
+        org.settings?.hybridDefaultMandatoryOfficeDays ?? 15,
+      wfhMonitorReminderEnabled:
+        org.settings?.wfhMonitorReminderEnabled ?? true,
+      wfhMonitorReminderIntervalMinutes:
+        org.settings?.wfhMonitorReminderIntervalMinutes ?? 30,
+      wfhMonitorReminderMaxPerDay:
+        org.settings?.wfhMonitorReminderMaxPerDay ?? null,
+      wfhMonitorReminderEmailCutoffMinutes:
+        org.settings?.wfhMonitorReminderEmailCutoffMinutes ?? 120,
     };
   }
 }
