@@ -165,6 +165,14 @@ export class CreateAttendanceSettingsDto {
   @IsObject()
   @IsOptional()
   weekdayOffRules?: Record<string, number[]>;
+
+  @ApiPropertyOptional({
+    example: 'Asia/Kolkata',
+    description: 'Timezone for attendance calculations (IANA tz database)',
+  })
+  @IsString()
+  @IsOptional()
+  timezone?: string;
 }
 
 export class UpdateAttendanceSettingsDto extends CreateAttendanceSettingsDto {}

@@ -15,7 +15,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { AttendanceService } from './attendance.service';
 import {
   CreateAttendanceLogDto,
@@ -369,8 +368,6 @@ export class AttendanceController {
   }
 
   @Get('today-logs')
-  @UseInterceptors(CacheInterceptor)
-  @CacheTTL(120) // 2 minutes – invalidated on next punch from client
   @ApiOperation({ summary: "Get today's logs by user and organization" })
   @ApiQuery({
     name: 'organizationId',

@@ -52,18 +52,25 @@ export class TimeslipController {
     return this.timeslipService.createTimeslip(dto);
   }
 
-  /** ---- Get all timeslips ---- */
+  /** ---- Get all timeslips (paginated) ---- */
   @Get()
-  @ApiOperation({ summary: 'Get all timeslips' })
-  @ApiOkResponse({ description: 'List of timeslips returned.' })
-  findAll() {
-    return this.timeslipService.findAll();
+  @ApiOperation({ summary: 'Get all timeslips (paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 50 })
+  @ApiOkResponse({ description: 'Paginated list of timeslips returned.' })
+  findAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+  ) {
+    const maxLimit = 100;
+    if (limit > maxLimit) limit = maxLimit;
+    return this.timeslipService.findAll(page, limit);
   }
 
   /** ---- Get timeslips for an employee (paginated) ---- */
   @Get('employee/:id')
   @UseInterceptors(CacheInterceptor)
-  @CacheTTL(300) // 5 minutes
+  @CacheTTL(30) // 30 seconds
   @ApiOperation({
     summary: 'Get timeslips for a specific employee (paginated)',
   })

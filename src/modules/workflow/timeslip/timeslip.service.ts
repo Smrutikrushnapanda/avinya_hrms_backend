@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Timeslip } from './entities/timeslip.entity';
@@ -12,6 +16,7 @@ import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto'
 import { MessageGateway } from 'src/modules/message/message.gateway';
 import { MessageService } from 'src/modules/message/message.service';
 import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
+import { AttendanceSettings } from 'src/modules/attendance/entities/attendance-settings.entity';
 
 @Injectable()
 export class TimeslipService {
@@ -24,6 +29,8 @@ export class TimeslipService {
     private employeeRepo: Repository<Employee>,
     @InjectRepository(Attendance)
     private attendanceRepo: Repository<Attendance>,
+    @InjectRepository(AttendanceSettings)
+    private attendanceSettingsRepo: Repository<AttendanceSettings>,
     private readonly messageGateway: MessageGateway,
     private readonly messageService: MessageService,
   ) {}
@@ -56,15 +63,40 @@ export class TimeslipService {
 
     let workingMinutes = existing?.workingMinutes ?? 0;
     if (inTime && outTime) {
-      workingMinutes = Math.max(0, Math.floor((+outTime - +inTime) / 60000));
+      let diffMs = +outTime - +inTime;
+      if (diffMs < 0) {
+        diffMs += 24 * 60 * 60 * 1000;
+      }
+      workingMinutes = Math.max(0, Math.floor(diffMs / 60000));
     }
 
+    // Compute thresholds from org attendance settings
+    const settings = await this.attendanceSettingsRepo.findOne({
+      where: { organizationId: employee.organizationId },
+    });
+    const workStart = settings?.workStartTime || '09:00:00';
+    const workEnd = settings?.workEndTime || '18:00:00';
+    const [startH, startM] = workStart.split(':').map(Number);
+    const [endH, endM] = workEnd.split(':').map(Number);
+    let fullShiftMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+    if (fullShiftMinutes <= 0) fullShiftMinutes += 24 * 60;
+
+    const halfDayCutoff = settings?.halfDayCutoffTime || '14:00:00';
+    const [cutH, cutM] = halfDayCutoff.split(':').map(Number);
+    let halfDayThreshold = (cutH * 60 + cutM) - (startH * 60 + startM);
+    if (halfDayThreshold <= 0) halfDayThreshold += 24 * 60;
+    if (halfDayThreshold > fullShiftMinutes) halfDayThreshold = Math.floor(fullShiftMinutes / 2);
+
+    const absentThreshold = Math.max(1, Math.floor(fullShiftMinutes * 0.25));
+
     const status: Attendance['status'] =
-      workingMinutes < 160
+      workingMinutes < absentThreshold
         ? 'absent'
-        : workingMinutes >= 480
+        : workingMinutes >= fullShiftMinutes
           ? 'present'
-          : 'half-day';
+          : workingMinutes >= halfDayThreshold
+            ? 'half-day'
+            : 'absent';
 
     const updateData: Partial<Attendance> = {
       inTime: inTime ?? existing?.inTime,
@@ -204,6 +236,30 @@ export class TimeslipService {
 
   /** ---- CREATE ---- */
   async createTimeslip(dto: CreateTimeslipDto) {
+    // 0a) Cross-field validation: correctedIn must be before correctedOut
+    if (dto.correctedIn && dto.correctedOut) {
+      if (new Date(dto.correctedIn) >= new Date(dto.correctedOut)) {
+        throw new BadRequestException(
+          'correctedOut must be after correctedIn',
+        );
+      }
+    }
+
+    // 0b) Duplicate check: prevent re-submission for same employee + date + type
+    const existing = await this.timeslipRepo.findOne({
+      where: {
+        employee: { id: dto.employeeId },
+        date: dto.date,
+        missing_type: dto.missingType,
+        status: 'PENDING',
+      },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        'A pending timeslip already exists for this employee on this date',
+      );
+    }
+
     // 1) Save timeslip
     const timeslip = this.timeslipRepo.create({
       date: dto.date,
@@ -235,12 +291,28 @@ export class TimeslipService {
     return this.findOne(timeslip.id);
   }
 
-  /** ---- GET ALL ---- */
-  async findAll() {
-    return this.timeslipRepo.find({
+  /** ---- GET ALL (paginated) ---- */
+  async findAll(page = 1, limit = 50) {
+    const maxLimit = 100;
+    if (limit > maxLimit) limit = maxLimit;
+    const offset = (page - 1) * limit;
+    const [data, total] = await this.timeslipRepo.findAndCount({
       relations: ['employee', 'approvals', 'approvals.approver'],
       order: { created_at: 'DESC' as any },
+      skip: offset,
+      take: limit,
     });
+    return {
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1,
+      },
+    };
   }
 
   async findByEmployee(employeeId: string, page = 1, limit = 10) {
@@ -286,71 +358,7 @@ export class TimeslipService {
       };
     }
 
-    const data = items.map((t: any) => {
-      const approvals = t.approvals || [];
-      const totalSteps = approvals.length;
-      const approvedSteps = approvals.filter(
-        (a) => a.action === 'APPROVED',
-      ).length;
-      const rejectedSteps = approvals.filter(
-        (a) => a.action === 'REJECTED',
-      ).length;
-      const pendingSteps = approvals.filter(
-        (a) => a.action === 'PENDING',
-      ).length;
-
-      const isRejected = rejectedSteps > 0;
-      const isApproved = approvedSteps > 0 && pendingSteps === 0 && !isRejected;
-
-      const currentStep = 1;
-      const currentStepName = isRejected
-        ? 'Rejected'
-        : isApproved
-          ? 'Approved'
-          : 'Pending';
-
-      const formattedApprovals = approvals.map((a: any) => ({
-        id: a.id,
-        action: a.action,
-        remarks: a.remarks,
-        step_no: 1,
-        acted_at: a.acted_at,
-        approver: a.approver
-          ? {
-              id: a.approver.id,
-              firstName: a.approver.firstName,
-              lastName: a.approver.lastName,
-              employeeCode: a.approver.employeeCode,
-            }
-          : null,
-      }));
-
-      return {
-        id: t.id,
-        date: t.date,
-        missing_type: t.missing_type,
-        corrected_in: t.corrected_in,
-        corrected_out: t.corrected_out,
-        reason: t.reason,
-        status: t.status,
-        created_at: t.created_at,
-        updated_at: t.updated_at,
-        approvals: formattedApprovals,
-        isApproved,
-        isRejected,
-        currentStep,
-        currentStepName,
-        totalSteps,
-        approvalProgress: {
-          approved: approvedSteps,
-          pending: pendingSteps,
-          rejected: rejectedSteps,
-          total: totalSteps,
-          progressPercentage:
-            totalSteps > 0 ? Math.round((approvedSteps / totalSteps) * 100) : 0,
-        },
-      };
-    });
+    const data = items.map((t: any) => this.mapTimeslipItem(t));
 
     return {
       data,
@@ -456,6 +464,12 @@ export class TimeslipService {
     const { timeslipIds, status } = dto;
     const errors: string[] = [];
     let successCount = 0;
+
+    if (!approverId && status === 'PENDING') {
+      throw new BadRequestException(
+        'Admin override cannot set status to PENDING. Use APPROVED or REJECTED.',
+      );
+    }
 
     // ✅ FIX 1: Add initial existence check
     const existingTimeslips = await this.timeslipRepo
@@ -581,6 +595,61 @@ export class TimeslipService {
     };
   }
 
+  /** ---- Shared mapper for timeslip items ---- */
+  private mapTimeslipItem(t: any) {
+    const approvals = (t.approvals || []).map((a: any) => ({
+      id: a.id,
+      action: a.action,
+      remarks: a.remarks,
+      acted_at: a.acted_at,
+      approver: a.approver
+        ? {
+            id: a.approver.id,
+            firstName: a.approver.firstName,
+            lastName: a.approver.lastName,
+            employeeCode: a.approver.employeeCode,
+          }
+        : null,
+    }));
+
+    const totalSteps = approvals.length;
+    const approvedSteps = approvals.filter((a) => a.action === 'APPROVED').length;
+    const rejectedSteps = approvals.filter((a) => a.action === 'REJECTED').length;
+    const pendingSteps = approvals.filter((a) => a.action === 'PENDING').length;
+    const isRejected = rejectedSteps > 0;
+    const isApproved = approvedSteps > 0 && pendingSteps === 0 && !isRejected;
+
+    return {
+      id: t.id,
+      date: t.date,
+      missing_type: t.missing_type,
+      corrected_in: t.corrected_in,
+      corrected_out: t.corrected_out,
+      reason: t.reason,
+      status: t.status,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      approvals,
+      isApproved,
+      isRejected,
+      currentStep: 1,
+      currentStepName: isRejected
+        ? 'Rejected'
+        : isApproved
+          ? 'Approved'
+          : 'Pending',
+      totalSteps,
+      approvalProgress: {
+        approved: approvedSteps,
+        pending: pendingSteps,
+        rejected: rejectedSteps,
+        total: totalSteps,
+        progressPercentage:
+          totalSteps > 0 ? Math.round((approvedSteps / totalSteps) * 100) : 0,
+      },
+    };
+  }
+
   /** ---- GET ALL BY EMPLOYEE ---- */
   async findAllByEmployee(employeeId: string) {
     const timeslips = await this.timeslipRepo
@@ -613,36 +682,7 @@ export class TimeslipService {
       .orderBy('t.created_at', 'DESC')
       .getMany();
 
-    // Map to clean structure (same as your existing paginated method)
-    return timeslips.map((t: any) => {
-      const approvals = (t.approvals || []).map((a: any) => ({
-        id: a.id,
-        action: a.action,
-        remarks: a.remarks,
-        acted_at: a.acted_at,
-        approver: a.approver
-          ? {
-              id: a.approver.id,
-              firstName: a.approver.firstName,
-              lastName: a.approver.lastName,
-              employeeCode: a.approver.employeeCode,
-            }
-          : null,
-      }));
-
-      return {
-        id: t.id,
-        date: t.date,
-        missing_type: t.missing_type,
-        corrected_in: t.corrected_in,
-        corrected_out: t.corrected_out,
-        reason: t.reason,
-        status: t.status,
-        created_at: t.created_at,
-        updated_at: t.updated_at,
-        approvals,
-      };
-    });
+    return timeslips.map((t: any) => this.mapTimeslipItem(t));
   }
 
   /** ---- GET TIMESLIPS BY APPROVER ---- */
