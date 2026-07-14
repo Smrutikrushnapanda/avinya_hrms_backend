@@ -398,7 +398,7 @@ export class ChatService {
       new Set(allParticipants.map((p) => p.userId).filter(Boolean)),
     );
 
-    this.messageGateway.emitChatToUsers(participantIds, {
+    this.messageGateway.emitChatReadToUsers(participantIds, {
       conversationId,
       type: 'read',
       userId,

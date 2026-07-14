@@ -147,4 +147,10 @@ export class MessageGateway
       this.server.to(`user:${userId}`).emit('chat:message', payload);
     });
   }
+
+  emitChatReadToUsers(userIds: string[], payload: any) {
+    userIds.forEach((userId) => {
+      this.server.to(`user:${userId}`).emit('chat:read', payload);
+    });
+  }
 }
