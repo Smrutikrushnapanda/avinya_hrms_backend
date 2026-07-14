@@ -7,6 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
+import {
+  PushTokenPlatform,
+  UserPushToken,
+} from '../entities/user-push-token.entity';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserActivitiesService } from './user-activities.service';
@@ -32,6 +36,8 @@ export class UsersService {
     private readonly wfhRequestRepository: Repository<WfhRequest>,
     @InjectRepository(Attendance)
     private readonly attendanceRepository: Repository<Attendance>,
+    @InjectRepository(UserPushToken)
+    private readonly userPushTokenRepository: Repository<UserPushToken>,
     private readonly userActivitiesService: UserActivitiesService,
     private rolesService: RolesService,
   ) {}
@@ -196,6 +202,27 @@ export class UsersService {
     const user = await this.findOne(userId);
     Object.assign(user, updateUserDto);
     return this.userRepository.save(user);
+  }
+
+  async updateFcmToken(
+    userId: string,
+    token: string,
+    platform: PushTokenPlatform,
+  ): Promise<{ success: boolean }> {
+    // A token belongs to one physical device/browser install, so re-registering
+    // the same token (re-login, refreshed token) must update the owner rather
+    // than create a duplicate row.
+    const existing = await this.userPushTokenRepository.findOne({
+      where: { token },
+    });
+    if (existing) {
+      existing.userId = userId;
+      existing.platform = platform;
+      await this.userPushTokenRepository.save(existing);
+    } else {
+      await this.userPushTokenRepository.save({ userId, token, platform });
+    }
+    return { success: true };
   }
 
   async remove(userId: string): Promise<{ message: string }> {

@@ -1,6 +1,7 @@
 import {
   WebSocketGateway,
   WebSocketServer,
+  SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
@@ -100,6 +101,35 @@ export class MessageGateway
       }
     }
     this.socketIndex.delete(client.id);
+  }
+
+  @SubscribeMessage('chat:meeting-start')
+  handleMeetingStart(
+    client: Socket,
+    payload: {
+      conversationId: string;
+      url: string;
+      callerName?: string;
+      callerAvatar?: string;
+    },
+  ) {
+    const data = this.socketIndex.get(client.id);
+    if (!data?.userId || !data?.orgId) return;
+    client.to(`org:${data.orgId}`).emit('chat:meeting-start', {
+      conversationId: payload.conversationId,
+      url: payload.url,
+      callerName: payload.callerName || data.userId,
+      callerAvatar: payload.callerAvatar || '',
+    });
+  }
+
+  @SubscribeMessage('chat:meeting-end')
+  handleMeetingEnd(client: Socket, payload: { conversationId: string }) {
+    const data = this.socketIndex.get(client.id);
+    if (!data?.orgId) return;
+    client.to(`org:${data.orgId}`).emit('chat:meeting-end', {
+      conversationId: payload.conversationId,
+    });
   }
 
   emitToUsers(userIds: string[], payload: any) {

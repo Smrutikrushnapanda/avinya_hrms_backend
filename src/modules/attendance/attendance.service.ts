@@ -277,9 +277,9 @@ export class AttendanceService {
     // e.g. a browser with no WiFi SSID/BSSID API) could pass every flag
     // as false/true and bypass what the admin configured.
     const settings = await this.getOrCreateAttendanceSettings(organizationId);
-    const enableFaceValidation = settings.enableFaceValidation;
-    const enableWifiValidation = settings.enableWifiValidation;
-    const enableGPSValidation = settings.enableGpsValidation;
+    let enableFaceValidation = settings.enableFaceValidation;
+    let enableWifiValidation = settings.enableWifiValidation;
+    let enableGPSValidation = settings.enableGpsValidation;
 
     const punchTime = new Date(timestamp);
     const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
@@ -327,16 +327,35 @@ export class AttendanceService {
       });
 
       if (existingLogs.length > 0) {
-        const lastType = existingLogs[existingLogs.length - 1].type;
-        if (lastType === 'break-start') {
-          type = 'break-end';
-        } else if (lastType === 'break-end') {
-          type = 'break-start';
-        } else {
-          type = lastType === 'check-in' ? 'check-out' : 'check-in';
+        // Only check-in/check-out logs determine the alternation.
+        // Break-start/break-end logs are managed by the separate
+        // toggleBreakStatus endpoint — skip them here.
+        let lastNonBreak: string | undefined;
+        for (let i = existingLogs.length - 1; i >= 0; i--) {
+          const t = existingLogs[i].type;
+          if (t === 'check-in' || t === 'check-out') {
+            lastNonBreak = t;
+            break;
+          }
+        }
+        if (lastNonBreak) {
+          type = lastNonBreak === 'check-in' ? 'check-out' : 'check-in';
         }
       }
     });
+
+    // 2️⃣ Respect check-in / check-out specific validation toggles.
+    // When disabled, skip ALL validation for that punch type regardless
+    // of the individual wifi/gps/face settings.
+    const punchType: string = type;
+    if (
+      (punchType === 'check-in' && !settings.enableCheckinValidation) ||
+      (punchType === 'check-out' && !settings.enableCheckoutValidation)
+    ) {
+      enableFaceValidation = false;
+      enableWifiValidation = false;
+      enableGPSValidation = false;
+    }
 
     // 3️⃣ Anomaly Detection
     let anomalyFlag = false;
@@ -1294,9 +1313,9 @@ export class AttendanceService {
       { zone: 'Asia/Kolkata' },
     ).toJSDate();
     const toDate = DateTime.fromObject(
-      { year, month: month + 1, day: 0 },
+      { year, month, day: 1 },
       { zone: 'Asia/Kolkata' },
-    ).toJSDate();
+    ).endOf('month').toJSDate();
 
     const formatDateLocal = (date: Date): string => {
       return DateTime.fromJSDate(date)

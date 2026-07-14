@@ -9,6 +9,7 @@ import {
   ChatAttachment,
 } from './entities';
 import { User } from '../auth-core/entities/user.entity';
+import { UserPushToken } from '../auth-core/entities/user-push-token.entity';
 import { MessageModule } from '../message/message.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { MessageModule } from '../message/message.module';
       ChatMessage,
       ChatAttachment,
       User,
+      UserPushToken,
     ]),
     MessageModule,
   ],

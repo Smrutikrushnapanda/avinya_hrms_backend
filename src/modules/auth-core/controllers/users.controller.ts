@@ -13,8 +13,10 @@ import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { CreateRegisterDto } from '../dto/register.dto';
+import { UpdateFcmTokenDto } from '../dto/update-fcm-token.dto';
 import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { GetUser } from '../decorators/get-user.decorator';
 import {
   SwaggerFindUserIdByDOB,
   SwaggerRegisterUser,
@@ -82,6 +84,21 @@ export class UsersController {
   @SwaggerGetUserById()
   findOne(@Param('user_id') user_id: string) {
     return this.usersService.findOne(user_id);
+  }
+
+  // Registered before ':user_id' so 'fcm-token' isn't swallowed by that param route.
+  @Patch('fcm-token')
+  @UseGuards(JwtAuthGuard)
+  updateFcmToken(
+    @GetUser() user: { userId?: string; id?: string },
+    @Body() dto: UpdateFcmTokenDto,
+  ) {
+    const userId = user?.userId || user?.id;
+    return this.usersService.updateFcmToken(
+      userId as string,
+      dto.token,
+      dto.platform,
+    );
   }
 
   @Patch(':user_id')

@@ -166,7 +166,9 @@ export class OfficeTripService {
       });
       const userIds = employees.map((e) => e.userId);
       query.andWhere('t.user_id IN (:...deptUserIds)', {
-        deptUserIds: userIds.length ? userIds : ['00000000-0000-0000-0000-000000000000'],
+        deptUserIds: userIds.length
+          ? userIds
+          : ['00000000-0000-0000-0000-000000000000'],
       });
     }
 

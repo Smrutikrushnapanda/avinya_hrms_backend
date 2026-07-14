@@ -27,6 +27,7 @@ import { Organization } from './entities/organization.entity';
 import { OrganizationSettings } from './entities/organization-settings.entity';
 import { PricingType } from './entities/pricing-type.entity';
 import { User } from './entities/user.entity';
+import { UserPushToken } from './entities/user-push-token.entity';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
 import { UserRole } from './entities/user-role.entity';
@@ -53,6 +54,7 @@ import { Subscription } from '../pricing/entities/subscription.entity';
       PricingType,
       OrganizationRole,
       User,
+      UserPushToken,
       Role,
       Permission,
       UserRole,

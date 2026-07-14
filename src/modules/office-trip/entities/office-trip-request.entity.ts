@@ -57,7 +57,12 @@ export class OfficeTripRequest {
   @Column({ name: 'trip_type', length: 20 })
   tripType: string;
 
-  @Column({ name: 'trip_type_other', type: 'varchar', length: 200, nullable: true })
+  @Column({
+    name: 'trip_type_other',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
   tripTypeOther: string | null;
 
   @Column({ name: 'from_date', type: 'date' })

@@ -5,16 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ChatConversation } from './entities/chat-conversation.entity';
 import { ChatParticipant } from './entities/chat-participant.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatAttachment } from './entities/chat-attachment.entity';
 import { User } from '../auth-core/entities/user.entity';
+import { UserPushToken } from '../auth-core/entities/user-push-token.entity';
 import { CreateDirectConversationDto } from './dto/create-direct-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { MessageGateway } from '../message/message.gateway';
+import { FirebaseService } from '../firebase/firebase.service';
 import { Express } from 'express';
 
 @Injectable()
@@ -30,7 +32,10 @@ export class ChatService {
     private readonly attachmentRepo: Repository<ChatAttachment>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(UserPushToken)
+    private readonly pushTokenRepo: Repository<UserPushToken>,
     private readonly messageGateway: MessageGateway,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   async getConversations(userId: string) {
@@ -313,7 +318,64 @@ export class ChatService {
       message: payloadMessage,
     });
 
+    void this.sendChatPush(
+      conversationId,
+      senderId,
+      participantIds,
+      fullMessage,
+    );
+
     return payloadMessage;
+  }
+
+  /**
+   * Push runs after the socket emit and never throws into the caller — the
+   * in-app socket banner (foreground) already delivered the message, so a
+   * push failure must not fail the send. This is what puts the notification
+   * on the recipient's phone when their app is backgrounded/killed, since the
+   * socket disconnects in that state.
+   */
+  private async sendChatPush(
+    conversationId: string,
+    senderId: string,
+    participantIds: string[],
+    message: ChatMessage | null,
+  ) {
+    try {
+      const recipientIds = participantIds.filter((id) => id !== senderId);
+      if (!recipientIds.length) return;
+
+      // A recipient may have several active tokens at once (phone + browser,
+      // or more than one browser) — push to all of them.
+      const recipientTokens = await this.pushTokenRepo.find({
+        where: { userId: In(recipientIds) },
+        select: ['token'],
+      });
+      const tokens = recipientTokens.map((r) => r.token);
+      if (!tokens.length) return;
+
+      const senderName =
+        `${message?.sender?.firstName || ''} ${message?.sender?.lastName || ''}`.trim() ||
+        'New message';
+      const body = message?.text
+        ? message.text
+        : message?.attachments?.length
+          ? 'Sent an attachment'
+          : 'New message';
+
+      await this.firebaseService.sendToTokens(tokens, {
+        title: senderName,
+        body,
+        data: {
+          type: 'chat_message',
+          conversationId,
+          senderId,
+          senderName,
+        },
+      });
+    } catch {
+      // never let a push failure affect message delivery
+    }
   }
 
   async markConversationRead(
