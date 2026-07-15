@@ -46,17 +46,33 @@ export class FirebaseService {
   }
 
   /**
+   * Tokens whose failure means they'll never work again (app uninstalled,
+   * token rotated out from under us, malformed) — as opposed to a transient
+   * failure (network blip, quota) that's worth leaving in place to retry.
+   * The caller is expected to delete these from storage.
+   */
+  private static readonly PERMANENTLY_INVALID_ERROR_CODES = new Set([
+    'messaging/registration-token-not-registered',
+    'messaging/invalid-registration-token',
+    'messaging/invalid-argument',
+  ]);
+
+  /**
    * Sends the same notification to a batch of device tokens. Invalid/expired
-   * tokens are logged but never thrown — a bad token must not block message
-   * delivery or crash the caller (e.g. chat send).
+   * tokens are logged and returned (never thrown) — a bad token must not
+   * block message delivery or crash the caller (e.g. chat send); the caller
+   * decides what to do with `invalidTokens` (e.g. delete them).
    */
   async sendToTokens(
     tokens: string[],
     payload: PushNotificationPayload,
-  ): Promise<void> {
+  ): Promise<{ invalidTokens: string[] }> {
     const uniqueTokens = Array.from(new Set(tokens.filter(Boolean)));
-    if (!this.isEnabled || uniqueTokens.length === 0) return;
+    if (!this.isEnabled || uniqueTokens.length === 0) {
+      return { invalidTokens: [] };
+    }
 
+    const invalidTokens: string[] = [];
     try {
       const response = await getMessaging(this.app!).sendEachForMulticast({
         tokens: uniqueTokens,
@@ -80,6 +96,14 @@ export class FirebaseService {
             this.logger.warn(
               `Push failed for token ${uniqueTokens[idx]}: ${r.error?.message}`,
             );
+            if (
+              r.error?.code &&
+              FirebaseService.PERMANENTLY_INVALID_ERROR_CODES.has(
+                r.error.code,
+              )
+            ) {
+              invalidTokens.push(uniqueTokens[idx]);
+            }
           }
         });
       }
@@ -88,5 +112,6 @@ export class FirebaseService {
         `Push notification send failed: ${(err as Error).message}`,
       );
     }
+    return { invalidTokens };
   }
 }

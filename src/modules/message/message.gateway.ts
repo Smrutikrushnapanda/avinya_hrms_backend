@@ -153,4 +153,13 @@ export class MessageGateway
       this.server.to(`user:${userId}`).emit('chat:read', payload);
     });
   }
+
+  // Sent to every socket a single user has open (phone, browser tab, second
+  // browser, ...) so their unread badge stays in sync everywhere at once —
+  // unlike chat:read, which is about the *other* participant's read tick.
+  emitUnreadSyncToUser(userId: string, totalUnread: number) {
+    this.server.to(`user:${userId}`).emit('chat:unread-sync', {
+      totalUnread,
+    });
+  }
 }

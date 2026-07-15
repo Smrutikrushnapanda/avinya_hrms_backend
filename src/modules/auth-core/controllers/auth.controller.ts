@@ -213,12 +213,16 @@ export class AuthController {
   @ApiCookieAuth()
   async logout(
     @Res({ passthrough: true }) res: Response,
-    @Body() body: { userId?: string; clientInfo?: any },
+    @Body() body: { userId?: string; clientInfo?: any; fcmToken?: string },
   ) {
     res.clearCookie('token');
 
     if (body?.userId) {
-      await this.authService.logout(body.userId, body.clientInfo);
+      await this.authService.logout(
+        body.userId,
+        body.clientInfo,
+        body.fcmToken,
+      );
 
       const user = await this.usersService.findOne(body.userId);
       await this.logReportService.create({

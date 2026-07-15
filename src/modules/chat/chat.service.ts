@@ -262,14 +262,57 @@ export class ChatService {
       throw new BadRequestException('Message text or attachment is required');
     }
 
+    // Idempotent replay: a retried send (client didn't hear back the first
+    // time) carries the same clientMessageId — return the original message
+    // instead of creating a duplicate, and don't re-emit/re-push for it.
+    if (dto.clientMessageId) {
+      const existing = await this.messageRepo.findOne({
+        where: { clientMessageId: dto.clientMessageId },
+        relations: ['attachments', 'sender'],
+      });
+      if (existing) {
+        const participantsForExisting = await this.participantRepo.find({
+          where: { conversation: { id: conversationId } },
+        });
+        return {
+          ...existing,
+          readByAll: this.isReadByAll(existing, participantsForExisting),
+        };
+      }
+    }
+
     const messageEntity = this.messageRepo.create({
       conversation: { id: conversationId } as any,
       conversationId,
       sender: { id: senderId } as any,
       senderId: senderId,
       text: dto.text?.trim() || undefined,
+      clientMessageId: dto.clientMessageId || undefined,
     });
-    const message = await this.messageRepo.save(messageEntity);
+    let message: ChatMessage;
+    try {
+      message = await this.messageRepo.save(messageEntity);
+    } catch (err) {
+      // Race: two near-simultaneous requests with the same clientMessageId
+      // both passed the check above before either insert committed. The
+      // unique constraint on client_message_id rejects the second insert —
+      // treat that exactly like a normal idempotent replay.
+      const isUniqueViolation =
+        dto.clientMessageId && (err as { code?: string })?.code === '23505';
+      if (!isUniqueViolation) throw err;
+      const existing = await this.messageRepo.findOne({
+        where: { clientMessageId: dto.clientMessageId },
+        relations: ['attachments', 'sender'],
+      });
+      if (!existing) throw err;
+      const participantsForExisting = await this.participantRepo.find({
+        where: { conversation: { id: conversationId } },
+      });
+      return {
+        ...existing,
+        readByAll: this.isReadByAll(existing, participantsForExisting),
+      };
+    }
     await this.conversationRepo.update(conversationId, {
       updatedAt: new Date(),
     });
@@ -318,6 +361,8 @@ export class ChatService {
       message: payloadMessage,
     });
 
+    void this.notifyRecipientsUnreadSync(participantIds, senderId);
+
     void this.sendChatPush(
       conversationId,
       senderId,
@@ -326,6 +371,19 @@ export class ChatService {
     );
 
     return payloadMessage;
+  }
+
+  private async notifyRecipientsUnreadSync(
+    participantIds: string[],
+    senderId: string,
+  ) {
+    const recipientIds = participantIds.filter((id) => id !== senderId);
+    await Promise.all(
+      recipientIds.map(async (userId) => {
+        const totalUnread = await this.getTotalUnreadForUser(userId);
+        this.messageGateway.emitUnreadSyncToUser(userId, totalUnread);
+      }),
+    );
   }
 
   /**
@@ -363,16 +421,22 @@ export class ChatService {
           ? 'Sent an attachment'
           : 'New message';
 
-      await this.firebaseService.sendToTokens(tokens, {
-        title: senderName,
-        body,
-        data: {
-          type: 'chat_message',
-          conversationId,
-          senderId,
-          senderName,
+      const { invalidTokens } = await this.firebaseService.sendToTokens(
+        tokens,
+        {
+          title: senderName,
+          body,
+          data: {
+            type: 'chat_message',
+            conversationId,
+            senderId,
+            senderName,
+          },
         },
-      });
+      );
+      if (invalidTokens.length) {
+        await this.pushTokenRepo.delete({ token: In(invalidTokens) });
+      }
     } catch {
       // never let a push failure affect message delivery
     }
@@ -405,7 +469,33 @@ export class ChatService {
       readAt: participant.lastReadAt,
     });
 
+    // Reading on one device/tab must clear the badge on all of this user's
+    // *own* other devices/tabs too — chat:read above is only ever consumed
+    // for the other participant's read-tick, never for the reader's own
+    // badge (see message.gateway.ts).
+    const totalUnread = await this.getTotalUnreadForUser(userId);
+    this.messageGateway.emitUnreadSyncToUser(userId, totalUnread);
+
     return { success: true };
+  }
+
+  /**
+   * Total unread message count for a user across every conversation they're
+   * in — the single number every client badge (tab bar, sidebar, header)
+   * should sync to via the `chat:unread-sync` socket event.
+   */
+  async getTotalUnreadForUser(userId: string): Promise<number> {
+    return this.messageRepo
+      .createQueryBuilder('m')
+      .innerJoin(
+        ChatParticipant,
+        'p',
+        'p.conversation_id = m.conversation_id AND p.user_id = :userId',
+        { userId },
+      )
+      .where('m.sender_id != :userId', { userId })
+      .andWhere('(p.last_read_at IS NULL OR m.created_at > p.last_read_at)')
+      .getCount();
   }
 
   private isReadByAll(

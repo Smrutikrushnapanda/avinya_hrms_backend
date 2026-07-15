@@ -20,6 +20,7 @@ import { TimeslipApproval } from 'src/modules/workflow/timeslip/entities/timesli
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { LeaveApprovalAssignment } from 'src/modules/leave/entities/leave-approval-assignment.entity';
 import { WfhApprovalAssignment } from 'src/modules/wfh/entities/wfh-approval-assignment.entity';
+import { UserPushToken } from '../entities/user-push-token.entity';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import { StorageService } from 'src/modules/attendance/storage.service';
@@ -56,6 +57,8 @@ export class AuthService {
     private leaveApprovalAssignmentRepository: Repository<LeaveApprovalAssignment>,
     @InjectRepository(WfhApprovalAssignment)
     private wfhApprovalAssignmentRepository: Repository<WfhApprovalAssignment>,
+    @InjectRepository(UserPushToken)
+    private userPushTokenRepository: Repository<UserPushToken>,
     private storageService: StorageService,
     private mailService: MailService,
   ) {}
@@ -285,8 +288,21 @@ export class AuthService {
     return null;
   }
 
-  async logout(userId: string, clientInfo?: any): Promise<void> {
+  async logout(
+    userId: string,
+    clientInfo?: any,
+    fcmToken?: string,
+  ): Promise<void> {
     try {
+      // This device's push token is only good for as long as this device is
+      // logged in — a stale token left behind after logout would otherwise
+      // keep receiving pushes for whoever's still signed in on it, and count
+      // toward "multiple devices" for a user who's actually logged out of
+      // this one.
+      if (fcmToken) {
+        await this.userPushTokenRepository.delete({ token: fcmToken });
+      }
+
       const userExists = await this.userRepository.findOne({
         where: { id: userId },
       });

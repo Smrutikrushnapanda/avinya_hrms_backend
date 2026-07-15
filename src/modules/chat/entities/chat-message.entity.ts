@@ -33,6 +33,17 @@ export class ChatMessage {
   @Column({ name: 'text', type: 'text', nullable: true })
   text?: string;
 
+  // Client-generated UUID sent with the send request. Lets a retried send
+  // (e.g. after a dropped response) be recognized as the same message
+  // instead of creating a duplicate row — see ChatService.sendMessage.
+  @Column({
+    name: 'client_message_id',
+    type: 'varchar',
+    nullable: true,
+    unique: true,
+  })
+  clientMessageId?: string;
+
   @OneToMany(() => ChatAttachment, (a) => a.message, { cascade: true })
   attachments: ChatAttachment[];
 
