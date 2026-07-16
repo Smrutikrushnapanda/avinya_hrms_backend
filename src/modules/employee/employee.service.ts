@@ -236,6 +236,15 @@ export class EmployeeService {
         existingUser.password = await bcrypt.hash(loginPassword, 12);
         existingUser.mustChangePassword = true;
         existingUser.organizationId = dto.organizationId;
+        // The matched row can be a placeholder account (e.g. the org's admin
+        // user created before any employees existed) whose name has nothing to
+        // do with this employee — without this, /auth/profile keeps showing
+        // that stale name (e.g. "Admin") instead of the employee's real one.
+        existingUser.firstName = dto.firstName;
+        existingUser.middleName = dto.middleName ?? '';
+        existingUser.lastName = dto.lastName ?? '';
+        if (dto.dateOfBirth) existingUser.dob = new Date(dto.dateOfBirth);
+        if (dto.gender) existingUser.gender = dto.gender;
         await this.userRepository.save(existingUser);
 
         await this.setUserPrimaryRole(existingUser.id, selectedRole);
@@ -487,7 +496,14 @@ export class EmployeeService {
     let credentialsUpdated = false;
     let effectiveUserName = '';
 
-    if (loginUserName || loginPassword) {
+    // The header/profile screens (/auth/profile) read name fields straight off
+    // the `users` row, not `employees` — without syncing these, editing an
+    // employee's name here would never be reflected there.
+    const nameFieldsChanged = ['firstName', 'middleName', 'lastName', 'dateOfBirth', 'gender'].some(
+      (key) => Object.prototype.hasOwnProperty.call(employeeUpdate, key),
+    );
+
+    if (loginUserName || loginPassword || nameFieldsChanged) {
       const user = await this.userRepository.findOne({
         where: { id: employee.userId },
       });
@@ -514,6 +530,24 @@ export class EmployeeService {
         user.password = await bcrypt.hash(loginPassword, 12);
         user.mustChangePassword = true;
         credentialsUpdated = true;
+      }
+
+      if (nameFieldsChanged) {
+        if (employeeUpdate.firstName !== undefined) {
+          user.firstName = employeeUpdate.firstName;
+        }
+        if (employeeUpdate.middleName !== undefined) {
+          user.middleName = employeeUpdate.middleName ?? '';
+        }
+        if (employeeUpdate.lastName !== undefined) {
+          user.lastName = employeeUpdate.lastName ?? '';
+        }
+        if (employeeUpdate.dateOfBirth) {
+          user.dob = new Date(employeeUpdate.dateOfBirth);
+        }
+        if (employeeUpdate.gender) {
+          user.gender = employeeUpdate.gender;
+        }
       }
 
       await this.userRepository.save(user);
