@@ -329,12 +329,15 @@ export class AttendanceService {
       if (existingLogs.length > 0) {
         // Only check-in/check-out logs determine the alternation.
         // Break-start/break-end logs are managed by the separate
-        // toggleBreakStatus endpoint — skip them here.
+        // toggleBreakStatus endpoint — skip them here. Anomalous logs are
+        // rejected attempts, not real punches, so they don't count either —
+        // otherwise a rejected check-in would flip the next real attempt to
+        // check-out even though the employee never actually got checked in.
         let lastNonBreak: string | undefined;
         for (let i = existingLogs.length - 1; i >= 0; i--) {
-          const t = existingLogs[i].type;
-          if (t === 'check-in' || t === 'check-out') {
-            lastNonBreak = t;
+          const log = existingLogs[i];
+          if ((log.type === 'check-in' || log.type === 'check-out') && !log.anomalyFlag) {
+            lastNonBreak = log.type;
             break;
           }
         }
@@ -491,11 +494,16 @@ export class AttendanceService {
       : undefined;
 
     // 5️⃣ Update attendance summary for the day (ensure dashboard shows data)
+    // Only ever built from non-anomalous logs — a rejected/anomalous punch
+    // attempt (bad WiFi/GPS/face match) must never count as attendance, so
+    // it's excluded here even though the raw log itself was still saved
+    // above for audit purposes.
     const dayLogs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
         organization: { id: organizationId },
         timestamp: Between(logsWindowStart, logsWindowEnd),
+        anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
     });
@@ -515,12 +523,6 @@ export class AttendanceService {
         ? Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000)
         : 0;
 
-      const anyAnomaly = sortedLogs.some((l) => l.anomalyFlag);
-      const anomalyReason =
-        sortedLogs
-          .map((l) => l.anomalyReason)
-          .filter(Boolean)
-          .join(', ') || undefined;
       const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
       const status = this.determineAttendanceStatus(
@@ -554,8 +556,10 @@ export class AttendanceService {
         outWifiSsid: hasClockOut ? outLog.wifiSsid : undefined,
         outWifiBssid: hasClockOut ? outLog.wifiBssid : undefined,
         outDeviceInfo: hasClockOut ? outLog.deviceInfo : undefined,
-        anomalyFlag: anyAnomaly,
-        anomalyReason,
+        // Always false/undefined here — this summary is only ever built from
+        // the non-anomalous logs queried above.
+        anomalyFlag: false,
+        anomalyReason: undefined,
         branch: branchId ? { id: branchId } : undefined,
         officeTrip: tripLog?.officeTripId
           ? { id: tripLog.officeTripId }
@@ -990,11 +994,15 @@ export class AttendanceService {
     const to = isOvernight ? windowEnd : dayBounds.end;
     const dateStr = isOvernight ? attendanceDate : dayBounds.dateStr;
 
+    // Anomalous attempts (bad WiFi/GPS/face match) are rejected punches, not
+    // real attendance — excluded here so they never show up as the
+    // employee's punch-in/last-punch time or in their own log history.
     const logs = await this.attendanceLogRepo.find({
       where: {
         user: { id: userId },
         organization: { id: organizationId },
         timestamp: Between(from, to),
+        anomalyFlag: false,
       },
       order: { timestamp: 'ASC' },
     });
