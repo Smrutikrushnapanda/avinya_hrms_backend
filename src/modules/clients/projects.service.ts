@@ -1074,7 +1074,7 @@ export class ProjectsService implements OnModuleInit {
     if (!task) throw new NotFoundException('Task not found');
 
     // Only assigned user or project manager can update status
-    if (task.assignedToUserId !== userId) {
+    if (task.assignedToUserId !== userId && task.project) {
       const employee = await this.employeeRepo.findOne({
         where: { userId, organizationId: task.project.organizationId },
       });
@@ -1107,7 +1107,7 @@ export class ProjectsService implements OnModuleInit {
     if (
       task.assignedByUserId !== userId &&
       task.assignedToUserId !== userId &&
-      employee?.id !== task.project.managerId
+      employee?.id !== task.project?.managerId
     ) {
       throw new ForbiddenException('You cannot delete this task');
     }

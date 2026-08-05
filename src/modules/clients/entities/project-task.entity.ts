@@ -32,12 +32,24 @@ export class ProjectTask {
 
   @ManyToOne(() => ClientProject, (project) => project.tasks, {
     onDelete: 'CASCADE',
+    nullable: true,
   })
   @JoinColumn({ name: 'project_id' })
-  project: ClientProject;
+  project: ClientProject | null;
 
-  @Column({ name: 'project_id', type: 'uuid' })
-  projectId: string;
+  @Column({ name: 'project_id', type: 'uuid', nullable: true })
+  projectId: string | null;
+
+  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
+  organizationId: string | null;
+
+  @Column({
+    name: 'other_project_name',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  otherProjectName: string | null;
 
   @Column({ name: 'title', type: 'varchar', length: 500 })
   title: string;
@@ -77,6 +89,15 @@ export class ProjectTask {
 
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate: string | null;
+
+  @Column({ name: 'progress_percent', type: 'int', default: 0 })
+  progressPercent: number;
+
+  @Column({ name: 'work_report', type: 'text', nullable: true })
+  workReport: string | null;
+
+  @Column({ name: 'image_url', type: 'text', nullable: true })
+  imageUrl: string | null;
 
   @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
   completedAt: Date | null;

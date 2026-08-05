@@ -336,7 +336,10 @@ export class AttendanceService {
         let lastNonBreak: string | undefined;
         for (let i = existingLogs.length - 1; i >= 0; i--) {
           const log = existingLogs[i];
-          if ((log.type === 'check-in' || log.type === 'check-out') && !log.anomalyFlag) {
+          if (
+            (log.type === 'check-in' || log.type === 'check-out') &&
+            !log.anomalyFlag
+          ) {
             lastNonBreak = log.type;
             break;
           }
@@ -1323,7 +1326,9 @@ export class AttendanceService {
     const toDate = DateTime.fromObject(
       { year, month, day: 1 },
       { zone: 'Asia/Kolkata' },
-    ).endOf('month').toJSDate();
+    )
+      .endOf('month')
+      .toJSDate();
 
     const formatDateLocal = (date: Date): string => {
       return DateTime.fromJSDate(date)

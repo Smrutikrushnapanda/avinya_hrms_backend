@@ -499,9 +499,13 @@ export class EmployeeService {
     // The header/profile screens (/auth/profile) read name fields straight off
     // the `users` row, not `employees` — without syncing these, editing an
     // employee's name here would never be reflected there.
-    const nameFieldsChanged = ['firstName', 'middleName', 'lastName', 'dateOfBirth', 'gender'].some(
-      (key) => Object.prototype.hasOwnProperty.call(employeeUpdate, key),
-    );
+    const nameFieldsChanged = [
+      'firstName',
+      'middleName',
+      'lastName',
+      'dateOfBirth',
+      'gender',
+    ].some((key) => Object.prototype.hasOwnProperty.call(employeeUpdate, key));
 
     if (loginUserName || loginPassword || nameFieldsChanged) {
       const user = await this.userRepository.findOne({

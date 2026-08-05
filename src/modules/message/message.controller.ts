@@ -31,11 +31,17 @@ export class MessageController {
 
   @Get('inbox')
   async getInbox(@GetUser() user: User) {
-    return this.messageService.getUserMessages(user.id, user.organizationId);
+    return this.messageService.getUserMessages(
+      (user as any)?.userId || (user as any)?.id,
+      user.organizationId,
+    );
   }
 
   @Post('read')
   async markRead(@GetUser() user: User, @Body() dto: MarkMessageReadDto) {
-    return this.messageService.markAsRead(user.id, dto.messageId);
+    return this.messageService.markAsRead(
+      (user as any)?.userId || (user as any)?.id,
+      dto.messageId,
+    );
   }
 }

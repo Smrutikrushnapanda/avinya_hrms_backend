@@ -41,6 +41,12 @@ export class ProjectIssue {
   @Column({ name: 'status', type: 'varchar', length: 20, default: 'pending' })
   status: ProjectIssueStatus;
 
+  @Column({ name: 'progress_percent', type: 'int', default: 0 })
+  progressPercent: number;
+
+  @Column({ name: 'work_report', type: 'text', nullable: true })
+  workReport: string | null;
+
   @Column({ name: 'created_by_user_id', type: 'uuid' })
   createdByUserId: string;
 

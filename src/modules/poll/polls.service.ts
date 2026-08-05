@@ -50,7 +50,7 @@ export class PollsService {
     private readonly employeeRepo: Repository<Employee>, // ADDED
   ) {}
 
-  async createPoll(dto: CreatePollDto) {
+  async createPoll(dto: CreatePollDto, organizationId: string) {
     // Step 1: Save Poll
     const timeZone = 'Asia/Kolkata';
     const poll = this.pollRepo.create({
@@ -64,6 +64,7 @@ export class PollsService {
         .toUTC()
         .toJSDate(),
       created_by: dto.createdBy,
+      organizationId,
     });
 
     await this.pollRepo.save(poll);
@@ -100,15 +101,12 @@ export class PollsService {
     return { message: 'Poll created successfully', pollId: poll.id };
   }
 
-  async deletePoll(id: string) {
-    const poll = await this.pollRepo.findOne({ where: { id } });
-    if (!poll) throw new NotFoundException('Poll not found');
-    await this.pollRepo.remove(poll);
-    return { message: 'Poll deleted successfully' };
-  }
-
-  async updatePoll(id: string, updateData: Partial<CreatePollDto>) {
-    const poll = await this.pollRepo.findOne({ where: { id } });
+  async updatePoll(
+    id: string,
+    updateData: Partial<CreatePollDto>,
+    organizationId: string,
+  ) {
+    const poll = await this.pollRepo.findOne({ where: { id, organizationId } });
     if (!poll) throw new NotFoundException('Poll not found');
 
     if (updateData.title !== undefined) poll.title = updateData.title;
@@ -135,7 +133,10 @@ export class PollsService {
     return { message: 'Poll updated successfully', poll };
   }
 
-  async getActivePoll(userId?: string): Promise<{
+  async getActivePoll(
+    userId?: string,
+    organizationId?: string,
+  ): Promise<{
     poll: Poll;
     responses: PollResponse[];
   } | null> {
@@ -145,10 +146,12 @@ export class PollsService {
         {
           start_time: LessThanOrEqual(now),
           end_time: MoreThanOrEqual(now),
+          organizationId,
         },
         {
           start_time: LessThanOrEqual(now),
           end_time: IsNull(),
+          organizationId,
         },
       ],
       relations: ['questions', 'questions.options'],
@@ -175,9 +178,12 @@ export class PollsService {
   }
 
   // UPDATED: Get detailed poll analytics with employee names
-  async getPollAnalytics(pollId: string): Promise<PollAnalyticsDto> {
+  async getPollAnalytics(
+    pollId: string,
+    organizationId?: string,
+  ): Promise<PollAnalyticsDto> {
     const poll = await this.pollRepo.findOne({
-      where: { id: pollId },
+      where: { id: pollId, organizationId },
       relations: ['questions', 'questions.options'],
     });
 
@@ -188,7 +194,7 @@ export class PollsService {
     // Get all responses for this poll
     const responses = await this.pollResponseRepo.find({
       where: { poll_id: pollId },
-      relations: ['question'],
+      relations: ['question', 'poll'],
     });
 
     // Get unique user IDs who responded
@@ -282,8 +288,14 @@ export class PollsService {
   }
 
   // UPDATED: Get summary of all polls with response counts and creator names
-  async getPollsSummary(): Promise<PollSummaryDto[]> {
+  async getPollsSummary(organizationId?: string): Promise<PollSummaryDto[]> {
+    const pollsWhere: any = {};
+    if (organizationId) {
+      pollsWhere.organizationId = organizationId;
+    }
+
     const polls = await this.pollRepo.find({
+      where: pollsWhere,
       relations: ['questions'],
       order: { created_at: 'DESC' },
     });
@@ -344,17 +356,21 @@ export class PollsService {
   }
 
   // NEW: Get active polls with analytics
-  async getActivePollsWithAnalytics(): Promise<PollWithAnalyticsDto[]> {
+  async getActivePollsWithAnalytics(
+    organizationId?: string,
+  ): Promise<PollWithAnalyticsDto[]> {
     const now = new Date();
     const activePolls = await this.pollRepo.find({
       where: [
         {
           start_time: LessThanOrEqual(now),
           end_time: MoreThanOrEqual(now),
+          organizationId,
         },
         {
           start_time: LessThanOrEqual(now),
           end_time: IsNull(),
+          organizationId,
         },
       ],
       relations: ['questions', 'questions.options'],
@@ -363,7 +379,7 @@ export class PollsService {
 
     const pollsWithAnalytics = await Promise.all(
       activePolls.map(async (poll) => {
-        const analytics = await this.getPollAnalytics(poll.id);
+        const analytics = await this.getPollAnalytics(poll.id, organizationId);
         return {
           poll,
           analytics,
@@ -374,16 +390,27 @@ export class PollsService {
     return pollsWithAnalytics;
   }
 
-  async findAll(): Promise<Poll[]> {
+  async findAll(organizationId?: string): Promise<Poll[]> {
+    const where: any = {};
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
+
     return await this.pollRepo.find({
+      where,
       relations: ['questions', 'questions.options'],
       order: { created_at: 'DESC' },
     });
   }
 
-  async findOne(id: string): Promise<Poll> {
+  async findOne(id: string, organizationId?: string): Promise<Poll> {
+    const where: any = { id };
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
+
     const poll = await this.pollRepo.findOne({
-      where: { id },
+      where,
       relations: ['questions', 'questions.options'],
     });
 
@@ -391,8 +418,14 @@ export class PollsService {
     return poll;
   }
 
-  async addQuestion(pollId: string, dto: CreateQuestionDto) {
-    const poll = await this.pollRepo.findOne({ where: { id: pollId } });
+  async addQuestion(
+    pollId: string,
+    dto: CreateQuestionDto,
+    organizationId?: string,
+  ) {
+    const poll = await this.pollRepo.findOne({
+      where: { id: pollId, organizationId },
+    });
     if (!poll) {
       throw new NotFoundException('Poll not found');
     }
@@ -408,34 +441,22 @@ export class PollsService {
     return await this.questionRepo.save(question);
   }
 
-  async getQuestions(pollId: string): Promise<PollQuestion[]> {
+  async getQuestions(
+    pollId: string,
+    organizationId?: string,
+  ): Promise<PollQuestion[]> {
+    const where: any = { poll: { id: pollId } };
+    if (organizationId) {
+      where.poll.organizationId = organizationId;
+    }
+
     return await this.questionRepo.find({
-      where: { poll: { id: pollId } },
+      where,
       relations: ['options'],
       order: { question_order: 'ASC' },
     });
   }
 
-  async submitResponse(data: CreatePollResponseDto): Promise<PollResponse> {
-    // Validate that the poll and question exist
-    const poll = await this.pollRepo.findOne({ where: { id: data.poll_id } });
-    if (!poll) {
-      throw new NotFoundException('Poll not found');
-    }
-
-    const question = await this.questionRepo.findOne({
-      where: { id: data.question_id },
-    });
-    if (!question) {
-      throw new NotFoundException('Question not found');
-    }
-
-    const response = this.pollResponseRepo.create(data);
-    return this.pollResponseRepo.save(response);
-  }
-
-  //New api
-  // Simplified version - Get employees with basic response status
   async getEmployeeResponsesByQuestion(
     questionId: string,
     organizationId?: string,
@@ -450,7 +471,7 @@ export class PollsService {
       throw new NotFoundException('Question not found');
     }
 
-    // Get organization ID - either provided or derive from poll creator
+    // Get organization ID - either provided or derive from poll
     let orgId = organizationId;
     if (!orgId) {
       const pollCreator = await this.employeeRepo.findOne({
@@ -509,5 +530,41 @@ export class PollsService {
       responded_count: respondedCount,
       employees: employeeStatuses,
     };
+  }
+
+  async deletePoll(
+    id: string,
+    organizationId: string,
+  ): Promise<{ message: string }> {
+    const poll = await this.pollRepo.findOne({ where: { id, organizationId } });
+    if (!poll) throw new NotFoundException('Poll not found');
+    await this.pollRepo.remove(poll);
+    return { message: 'Poll deleted successfully' };
+  }
+
+  async submitResponse(
+    data: CreatePollResponseDto,
+    organizationId?: string,
+  ): Promise<PollResponse> {
+    // Validate that the poll and question exist
+    const pollWhere: any = { id: data.poll_id };
+    if (organizationId) {
+      pollWhere.organizationId = organizationId;
+    }
+
+    const poll = await this.pollRepo.findOne({ where: pollWhere });
+    if (!poll) {
+      throw new NotFoundException('Poll not found');
+    }
+
+    const question = await this.questionRepo.findOne({
+      where: { id: data.question_id },
+    });
+    if (!question) {
+      throw new NotFoundException('Question not found');
+    }
+
+    const response = this.pollResponseRepo.create(data);
+    return this.pollResponseRepo.save(response);
   }
 }

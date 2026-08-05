@@ -98,9 +98,7 @@ export class FirebaseService {
             );
             if (
               r.error?.code &&
-              FirebaseService.PERMANENTLY_INVALID_ERROR_CODES.has(
-                r.error.code,
-              )
+              FirebaseService.PERMANENTLY_INVALID_ERROR_CODES.has(r.error.code)
             ) {
               invalidTokens.push(uniqueTokens[idx]);
             }

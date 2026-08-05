@@ -137,13 +137,21 @@ const MENU_DATA: Array<{
     sortOrder: 11,
   },
   {
+    label: 'Assign Work',
+    iconName: 'ListTodo',
+    route: '/admin/assign-work',
+    roles: ['ADMIN', 'HR'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 12,
+  },
+  {
     label: 'Performance',
     iconName: 'TrendingUp',
     route: '/admin/performance',
     condition: 'performance_enabled',
     roles: ['ADMIN', 'HR'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 12,
+    sortOrder: 13,
   },
   {
     label: 'Policy',
@@ -151,7 +159,7 @@ const MENU_DATA: Array<{
     route: '/admin/policy',
     roles: ['ADMIN', 'HR'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 13,
+    sortOrder: 14,
   },
   {
     label: 'Expenses',
@@ -159,7 +167,7 @@ const MENU_DATA: Array<{
     route: '/admin/expenses',
     roles: ['ADMIN', 'HR'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 14,
+    sortOrder: 15,
   },
   {
     label: 'Office Trips',
@@ -167,7 +175,7 @@ const MENU_DATA: Array<{
     route: '/admin/office-trips',
     roles: ['ADMIN', 'HR'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 15,
+    sortOrder: 16,
   },
   {
     label: 'Messages',
@@ -175,7 +183,7 @@ const MENU_DATA: Array<{
     route: '/admin/messages',
     roles: ['ADMIN', 'HR'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 15,
+    sortOrder: 17,
   },
   {
     label: 'Settings',
@@ -183,7 +191,7 @@ const MENU_DATA: Array<{
     route: '/admin/settings',
     roles: ['ADMIN', 'HR'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 16,
+    sortOrder: 18,
   },
   {
     label: 'Reports',
@@ -191,7 +199,7 @@ const MENU_DATA: Array<{
     route: '/admin/reports',
     roles: ['ADMIN', 'HR'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 17,
+    sortOrder: 19,
   },
   {
     label: 'Log Report',
@@ -199,7 +207,7 @@ const MENU_DATA: Array<{
     route: '/admin/logreport',
     roles: ['ADMIN'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 18,
+    sortOrder: 20,
   },
   {
     label: 'Dashboard',
@@ -231,7 +239,7 @@ const MENU_DATA: Array<{
     route: '/user/leave',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 4,
+    sortOrder: 6,
   },
   {
     label: 'WFH',
@@ -239,7 +247,7 @@ const MENU_DATA: Array<{
     route: '/user/wfh',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 5,
+    sortOrder: 7,
   },
   {
     label: 'Time Slips',
@@ -247,7 +255,7 @@ const MENU_DATA: Array<{
     route: '/user/timeslips',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 6,
+    sortOrder: 8,
   },
   {
     label: 'Salary Slips',
@@ -255,7 +263,7 @@ const MENU_DATA: Array<{
     route: '/user/payroll',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 7,
+    sortOrder: 9,
   },
   {
     label: 'Expenses & Travels',
@@ -263,7 +271,7 @@ const MENU_DATA: Array<{
     route: '/user/expenses',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 8,
+    sortOrder: 10,
   },
   {
     label: 'Messages',
@@ -271,7 +279,7 @@ const MENU_DATA: Array<{
     route: '/user/messages',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 9,
+    sortOrder: 11,
   },
   {
     label: 'Polls',
@@ -279,7 +287,7 @@ const MENU_DATA: Array<{
     route: '/user/polls',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 10,
+    sortOrder: 12,
   },
   {
     label: 'Policy',
@@ -287,7 +295,7 @@ const MENU_DATA: Array<{
     route: '/user/policy',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 11,
+    sortOrder: 13,
   },
   {
     label: 'My Meetings',
@@ -295,7 +303,7 @@ const MENU_DATA: Array<{
     route: '/user/meetings',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 12,
+    sortOrder: 14,
   },
   {
     label: 'Employees',
@@ -303,7 +311,7 @@ const MENU_DATA: Array<{
     route: '/user/employees',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 13,
+    sortOrder: 15,
   },
   {
     label: 'Posts',
@@ -311,7 +319,7 @@ const MENU_DATA: Array<{
     route: '/user/posts',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 14,
+    sortOrder: 16,
   },
   {
     label: 'Notifications',
@@ -319,7 +327,7 @@ const MENU_DATA: Array<{
     route: '/user/notifications',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 15,
+    sortOrder: 17,
   },
   {
     label: 'My Profile',
@@ -327,7 +335,7 @@ const MENU_DATA: Array<{
     route: '/user/profile',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 16,
+    sortOrder: 18,
   },
   {
     label: 'My Projects',
@@ -335,7 +343,7 @@ const MENU_DATA: Array<{
     route: '/user/projects',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 17,
+    sortOrder: 4,
   },
   {
     label: 'Performance',
@@ -344,7 +352,7 @@ const MENU_DATA: Array<{
     condition: 'performance_enabled',
     roles: ['EMPLOYEE'],
     planTiers: ['PRO', 'ENTERPRISE'],
-    sortOrder: 18,
+    sortOrder: 19,
   },
   {
     label: 'WFH Monitor',
@@ -353,7 +361,15 @@ const MENU_DATA: Array<{
     condition: 'wfh_approved_today',
     roles: ['EMPLOYEE'],
     planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
-    sortOrder: 19,
+    sortOrder: 20,
+  },
+  {
+    label: 'Assign Work',
+    iconName: 'ListTodo',
+    route: '/user/assign-work',
+    roles: ['EMPLOYEE'],
+    planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+    sortOrder: 5,
   },
   {
     label: 'Dashboard',
@@ -418,6 +434,7 @@ export class MenuSeederService implements OnModuleInit {
 
   async onModuleInit() {
     await this.seed();
+    await this.ensureAssignWorkMenuItems();
   }
 
   // Seeds default menu items only on a fresh database (empty table). Once
@@ -492,5 +509,46 @@ export class MenuSeederService implements OnModuleInit {
       }),
     );
     this.logger.log('Added missing "Menu Items" super admin nav entry.');
+  }
+
+  // Adds the "Assign Work" menu entries (admin/HR + employee) to an already-
+  // seeded database without wiping admin menu customizations. Idempotent —
+  // skips rows that already exist so repeated deploys are safe.
+  private async ensureAssignWorkMenuItems() {
+    const adminEntry = await this.repo.findOne({
+      where: { route: '/admin/assign-work' },
+    });
+    if (!adminEntry) {
+      await this.repo.save(
+        this.repo.create({
+          label: 'Assign Work',
+          iconName: 'ListTodo',
+          route: '/admin/assign-work',
+          roles: ['ADMIN', 'HR'],
+          planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+          sortOrder: 12,
+          isActive: true,
+        }),
+      );
+      this.logger.log('Added "Assign Work" admin/HR menu entry.');
+    }
+
+    const employeeEntry = await this.repo.findOne({
+      where: { route: '/user/assign-work' },
+    });
+    if (!employeeEntry) {
+      await this.repo.save(
+        this.repo.create({
+          label: 'Assign Work',
+          iconName: 'ListTodo',
+          route: '/user/assign-work',
+          roles: ['EMPLOYEE'],
+          planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+          sortOrder: 5,
+          isActive: true,
+        }),
+      );
+      this.logger.log('Added "Assign Work" employee menu entry.');
+    }
   }
 }

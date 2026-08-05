@@ -6,10 +6,12 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Poll } from './poll.entity';
 import { PollOption } from './poll-option.entity';
 import { QuestionType } from '../dto/create-question.dto';
+import { Organization } from 'src/modules/auth-core/entities/organization.entity';
 
 @Entity('poll_questions')
 export class PollQuestion {
@@ -19,6 +21,18 @@ export class PollQuestion {
   @ManyToOne(() => Poll, (poll) => poll.questions, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'poll_id' })
   poll: Poll;
+
+  @Index()
+  @Column({ type: 'uuid' })
+  poll_id: string;
+
+  @ManyToOne(() => Organization)
+  @JoinColumn({ name: 'organization_id' })
+  organization: Organization;
+
+  @Index()
+  @Column({ type: 'uuid' })
+  organizationId: string;
 
   @Column()
   question_text: string;

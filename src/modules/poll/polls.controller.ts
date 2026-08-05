@@ -31,6 +31,8 @@ import {
 } from '@nestjs/swagger';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { JwtPayload } from '../auth-core/dto/auth.dto';
 
 @ApiTags('Polls')
 @RequireProPlan()
@@ -45,9 +47,9 @@ export class PollsController {
   @ApiResponse({ status: 201, description: 'Response submitted successfully' })
   @ApiResponse({ status: 409, description: 'User already submitted response' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
-  async submit(@Body() body: any): Promise<any> {
+  async submit(@GetUser() user: any, @Body() body: any): Promise<any> {
     try {
-      return await this.pollsService.submitResponse(body);
+      return await this.pollsService.submitResponse(body, user.organizationId);
     } catch (error) {
       if (error.code === '23505') {
         throw new HttpException(
@@ -66,24 +68,28 @@ export class PollsController {
   @ApiOperation({ summary: 'Create a new poll' })
   @ApiBody({ type: CreatePollDto })
   @ApiResponse({ status: 201, description: 'Poll created successfully' })
-  create(@Body() createPollDto: CreatePollDto) {
-    return this.pollsService.createPoll(createPollDto);
+  create(@GetUser() user: any, @Body() createPollDto: CreatePollDto) {
+    return this.pollsService.createPoll(createPollDto, user.organizationId);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a poll' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
   @ApiResponse({ status: 200, description: 'Poll deleted successfully' })
-  deletePoll(@Param('id') id: string) {
-    return this.pollsService.deletePoll(id);
+  deletePoll(@GetUser() user: any, @Param('id') id: string) {
+    return this.pollsService.deletePoll(id, user.organizationId);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update a poll partially' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
   @ApiResponse({ status: 200, description: 'Poll updated successfully' })
-  updatePoll(@Param('id') id: string, @Body() updateData: any) {
-    return this.pollsService.updatePoll(id, updateData);
+  updatePoll(
+    @GetUser() user: any,
+    @Param('id') id: string,
+    @Body() updateData: any,
+  ) {
+    return this.pollsService.updatePoll(id, updateData, user.organizationId);
   }
 
   @Get('active')
@@ -94,8 +100,11 @@ export class PollsController {
     description: 'Optional user ID',
   })
   @ApiResponse({ status: 200, description: 'Active poll or message' })
-  async getActivePoll(@Query('userId') userId?: string) {
-    const result = await this.pollsService.getActivePoll(userId);
+  async getActivePoll(@GetUser() user: any, @Query('userId') userId?: string) {
+    const result = await this.pollsService.getActivePoll(
+      userId,
+      user.organizationId,
+    );
     if (!result) {
       return { message: 'No active poll available' };
     }
@@ -110,8 +119,11 @@ export class PollsController {
     status: 200,
     description: 'Poll analytics with response breakdown',
   })
-  async getPollAnalytics(@Param('id') id: string): Promise<PollAnalyticsDto> {
-    return this.pollsService.getPollAnalytics(id);
+  async getPollAnalytics(
+    @GetUser() user: any,
+    @Param('id') id: string,
+  ): Promise<PollAnalyticsDto> {
+    return this.pollsService.getPollAnalytics(id, user.organizationId);
   }
 
   // NEW: Get summary of all polls with response counts
@@ -121,44 +133,50 @@ export class PollsController {
     status: 200,
     description: 'Polls summary with response statistics',
   })
-  async getPollsSummary(): Promise<PollSummaryDto[]> {
-    return this.pollsService.getPollsSummary();
+  async getPollsSummary(@GetUser() user: any): Promise<PollSummaryDto[]> {
+    return this.pollsService.getPollsSummary(user.organizationId);
   }
 
   // NEW: Get active polls with analytics
   @Get('active-with-analytics')
   @ApiOperation({ summary: 'Get active polls with response analytics' })
   @ApiResponse({ status: 200, description: 'Active polls with response data' })
-  async getActivePollsWithAnalytics(): Promise<PollWithAnalyticsDto[]> {
-    return this.pollsService.getActivePollsWithAnalytics();
+  async getActivePollsWithAnalytics(
+    @GetUser() user: any,
+  ): Promise<PollWithAnalyticsDto[]> {
+    return this.pollsService.getActivePollsWithAnalytics(user.organizationId);
   }
 
   @Get()
   @ApiOperation({ summary: 'List all polls' })
-  findAll() {
-    return this.pollsService.findAll();
+  findAll(@GetUser() user: any) {
+    return this.pollsService.findAll(user.organizationId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get poll by ID' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
-  findOne(@Param('id') id: string) {
-    return this.pollsService.findOne(id);
+  findOne(@GetUser() user: JwtPayload, @Param('id') id: string) {
+    return this.pollsService.findOne(id, user.organizationId);
   }
 
   @Post(':id/questions')
   @ApiOperation({ summary: 'Add question to a poll' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
   @ApiBody({ type: CreateQuestionDto })
-  addQuestion(@Param('id') pollId: string, @Body() dto: CreateQuestionDto) {
-    return this.pollsService.addQuestion(pollId, dto);
+  addQuestion(
+    @GetUser() user: any,
+    @Param('id') pollId: string,
+    @Body() dto: CreateQuestionDto,
+  ) {
+    return this.pollsService.addQuestion(pollId, dto, user.organizationId);
   }
 
   @Get(':id/questions')
   @ApiOperation({ summary: 'Get questions for a poll' })
   @ApiParam({ name: 'id', description: 'Poll ID' })
-  getQuestions(@Param('id') pollId: string) {
-    return this.pollsService.getQuestions(pollId);
+  getQuestions(@GetUser() user: any, @Param('id') pollId: string) {
+    return this.pollsService.getQuestions(pollId, user.organizationId);
   }
 
   //New API

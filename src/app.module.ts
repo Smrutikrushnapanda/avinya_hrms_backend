@@ -38,6 +38,7 @@ import { PostsModule } from './modules/posts/posts.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { FirebaseModule } from './modules/firebase/firebase.module';
+import { AssignWorkModule } from './modules/assign-work/assign-work.module';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
 import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
@@ -101,6 +102,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     UploadModule,
     PricingModule,
     FirebaseModule,
+    AssignWorkModule,
   ],
   controllers: [AppController],
   providers: [
