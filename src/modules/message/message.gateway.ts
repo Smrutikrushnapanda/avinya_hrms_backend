@@ -10,12 +10,26 @@ import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: [
-      'https://avinyahrms.duckdns.org',
-      'http://avinyahrms.duckdns.org',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-    ],
+    origin: (
+      origin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      if (
+        !origin ||
+        [
+          'https://avinyahrms.duckdns.org',
+          'http://avinyahrms.duckdns.org',
+          'https://avinya-hrms.vercel.app',
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+        ].includes(origin) ||
+        /^https:\/\/[\w-]+\.vercel\.app$/.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true,
   },
 })
