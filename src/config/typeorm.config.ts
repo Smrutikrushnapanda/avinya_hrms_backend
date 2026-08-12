@@ -43,7 +43,12 @@ const dataSource = new DataSource({
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
   migrations: [path.join(__dirname, '/../migrations/*{.ts,.js}')],
 
-  synchronize: true,
+  // Schema auto-sync is a dangerous, irreversible operation (drops columns).
+  // It stays on for local dev, but in production it must be explicitly
+  // enabled via DB_SYNCHRONIZE=true before it runs.
+  synchronize:
+    process.env.NODE_ENV !== 'production' ||
+    (process.env.DB_SYNCHRONIZE || '').toLowerCase() === 'true',
 
   // Hosted Postgres needs SSL and conservative pool sizing.
   ...(hostedConnection && {

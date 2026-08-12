@@ -27,9 +27,23 @@ async function bootstrap() {
   // Enable cookie parser
   app.use(cookieParser());
 
-  // Allow all origins (wildcard CORS)
+  // CORS: allow the production web origin, local dev origins, and
+  // requests without an Origin header (native mobile, desktop, curl).
+  const allowedOrigins = [
+    'https://avinyahrms.duckdns.org',
+    'http://avinyahrms.duckdns.org',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ];
+
   app.enableCors({
-    origin: '*',
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Authorization, x-user-cookie',
     credentials: false,

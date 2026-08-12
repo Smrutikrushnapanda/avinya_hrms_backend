@@ -135,6 +135,34 @@ export class ChatController {
         },
       }),
       limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        const unsafe =
+          file.mimetype === 'image/svg+xml' ||
+          file.mimetype.includes('html') ||
+          file.mimetype.includes('javascript') ||
+          file.mimetype.includes('xml');
+        if (unsafe) {
+          return cb(new BadRequestException('File type not allowed'), false);
+        }
+        const allowed =
+          file.mimetype.startsWith('image/') ||
+          file.mimetype.startsWith('video/') ||
+          file.mimetype.startsWith('audio/') ||
+          file.mimetype === 'application/pdf' ||
+          [
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'text/plain',
+          ].includes(file.mimetype);
+        if (!allowed) {
+          return cb(new BadRequestException('File type not allowed'), false);
+        }
+        cb(null, true);
+      },
     }),
   )
   async sendMessage(

@@ -8,6 +8,7 @@ import {
   JoinColumn,
   OneToMany,
 } from 'typeorm';
+import { Exclude } from 'class-transformer';
 import { Organization } from './organization.entity';
 import { UserRole } from './user-role.entity';
 
@@ -23,6 +24,7 @@ export class User {
   email: string;
 
   @Column()
+  @Exclude()
   password: string;
 
   @Column({ name: 'first_name' })
@@ -77,6 +79,7 @@ export class User {
   mustChangePassword: boolean;
 
   @Column({ name: 'password_reset_otp_hash', type: 'varchar', nullable: true })
+  @Exclude()
   passwordResetOtpHash?: string | null;
 
   @Column({
@@ -84,9 +87,11 @@ export class User {
     type: 'timestamptz',
     nullable: true,
   })
+  @Exclude()
   passwordResetOtpExpiresAt?: Date | null;
 
   @Column({ name: 'superadmin_otp_hash', type: 'varchar', nullable: true })
+  @Exclude()
   superadminOtpHash?: string | null;
 
   @Column({
@@ -94,9 +99,11 @@ export class User {
     type: 'timestamptz',
     nullable: true,
   })
+  @Exclude()
   superadminOtpExpiresAt?: Date | null;
 
   @Column({ name: 'superadmin_otp_attempts', type: 'int', default: 0 })
+  @Exclude()
   superadminOtpAttempts: number;
 
   @OneToMany(() => UserRole, (userRole) => userRole.user)

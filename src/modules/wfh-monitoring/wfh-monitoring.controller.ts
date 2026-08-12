@@ -11,6 +11,10 @@ import { WfhMonitoringService } from './wfh-monitoring.service';
 import { HeartbeatDto } from './dto/heartbeat.dto';
 import { LogAppActivityDto } from './dto/log-app-activity.dto';
 import { AcceptTermsDto } from './dto/accept-terms.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ForbiddenException } from '@nestjs/common';
+import { Employee } from '../employee/entities/employee.entity';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth-core/guards/roles.guard';
 import { Roles } from '../auth-core/decorators/roles.decorator';
@@ -21,7 +25,29 @@ import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorat
 @Controller('wfh-monitoring')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class WfhMonitoringController {
-  constructor(private readonly service: WfhMonitoringService) {}
+  constructor(
+    private readonly service: WfhMonitoringService,
+    @InjectRepository(Employee)
+    private readonly employeeRepo: Repository<Employee>,
+  ) {}
+
+  private async assertEmployeeInSameOrg(
+    viewer: JwtPayload,
+    targetUserId: string,
+  ) {
+    const employee = await this.employeeRepo.findOne({
+      where: { userId: targetUserId },
+    });
+    if (
+      !employee ||
+      (viewer.organizationId &&
+        employee.organizationId !== viewer.organizationId)
+    ) {
+      throw new ForbiddenException(
+        'You can only view activity of employees in your own organization.',
+      );
+    }
+  }
 
   @Post('heartbeat')
   heartbeat(@GetUser() user: JwtPayload, @Body() dto: HeartbeatDto) {
@@ -45,10 +71,14 @@ export class WfhMonitoringController {
 
   @Get('employee/:userId')
   @Roles('ADMIN', 'MANAGER')
-  getEmployeeActivity(
+  async getEmployeeActivity(
     @Param('userId') userId: string,
     @Query('date') date?: string,
+    @GetUser() viewer?: JwtPayload,
   ) {
+    if (viewer) {
+      await this.assertEmployeeInSameOrg(viewer, userId);
+    }
     return this.service.getEmployeeActivity(userId, date);
   }
 
@@ -93,10 +123,14 @@ export class WfhMonitoringController {
   @Get('employee/:userId/app-summary')
   @RequireProPlan()
   @Roles('ADMIN', 'MANAGER')
-  getEmployeeAppSummary(
+  async getEmployeeAppSummary(
     @Param('userId') userId: string,
     @Query('date') date?: string,
+    @GetUser() viewer?: JwtPayload,
   ) {
+    if (viewer) {
+      await this.assertEmployeeInSameOrg(viewer, userId);
+    }
     return this.service.getAppSummary(userId, date);
   }
 

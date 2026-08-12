@@ -82,15 +82,31 @@ export class OrganizationController {
     return this.orgService.changeCredentials(id, req.user.userId, body);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPERADMIN')
   @Delete(':id')
   @SwaggerDeleteOrganization()
   delete(@Param('id') id: string) {
     return this.orgService.delete(id);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @Get()
   @SwaggerFindAllOrganizations()
-  findAll() {
+  findAll(@Request() req: any) {
+    const isSuperadmin = (req.user?.roles as { roleName: string }[])?.some(
+      (r) => r.roleName === 'SUPERADMIN',
+    );
+    if (!isSuperadmin) {
+      return this.orgService
+        .findAll()
+        .then((orgs) =>
+          orgs.filter(
+            (org: { id?: string }) => org.id === req.user?.organizationId,
+          ),
+        );
+    }
     return this.orgService.findAll();
   }
 

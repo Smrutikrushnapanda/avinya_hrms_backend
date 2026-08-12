@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Module, ClassSerializerInterceptor } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import dataSource from './config/typeorm.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -73,6 +74,13 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     })(),
     GlobalCacheModule,
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60000,
+        limit: 120,
+      },
+    ]),
     AuthCoreModule,
     AttendanceModule,
     LeaveModule,
@@ -109,6 +117,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     AppService,
     { provide: APP_GUARD, useClass: PlanAccessGuard },
     { provide: APP_INTERCEPTOR, useClass: LogReportInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ClassSerializerInterceptor },
   ],
 })
 export class AppModule {}

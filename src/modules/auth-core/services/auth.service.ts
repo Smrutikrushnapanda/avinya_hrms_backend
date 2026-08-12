@@ -480,29 +480,30 @@ export class AuthService {
     const normalizedIdentifier = identifier.trim().toLowerCase();
     const target = await this.findAdminResetTarget(normalizedIdentifier);
 
-    if (!target) {
-      throw new NotFoundException(
-        'No admin account found for this email or user ID',
-      );
+    if (target) {
+      const { user, otpEmail } = target;
+      const otp = String(randomInt(100000, 1000000));
+      user.passwordResetOtpHash = await bcrypt.hash(otp, 12);
+      user.passwordResetOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      await this.userRepository.save(user);
+
+      await this.mailService.sendPasswordResetOtp({
+        organizationId: user.organizationId,
+        email: otpEmail,
+        name:
+          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+          user.userName,
+        otp,
+        expiresInMinutes: 10,
+      });
     }
 
-    const { user, otpEmail } = target;
-    const otp = String(randomInt(100000, 1000000));
-    user.passwordResetOtpHash = await bcrypt.hash(otp, 12);
-    user.passwordResetOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await this.userRepository.save(user);
-
-    await this.mailService.sendPasswordResetOtp({
-      organizationId: user.organizationId,
-      email: otpEmail,
-      name:
-        [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-        user.userName,
-      otp,
-      expiresInMinutes: 10,
-    });
-
-    return { message: 'OTP sent to registered admin email' };
+    // Always return the same message so the endpoint cannot be used to
+    // enumerate which identifiers map to admin accounts.
+    return {
+      message:
+        'If an admin account exists for this identifier, an OTP has been sent to the registered email.',
+    };
   }
 
   async resetAdminCredentials(dto: ResetPasswordDto) {

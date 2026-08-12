@@ -1,11 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { User } from '../entities/user.entity';
 import {
   PushTokenPlatform,
@@ -22,6 +26,10 @@ import { UserRole } from '../entities/user-role.entity';
 import { LeaveRequest } from 'src/modules/leave/entities/leave-request.entity';
 import { WfhRequest } from 'src/modules/wfh/entities/wfh-request.entity';
 import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
+import { MailService } from 'src/modules/mail/mail.service';
+
+const REGISTER_OTP_TTL_MS = 10 * 60 * 1000;
+const REGISTER_OTP_MAX_ATTEMPTS = 5;
 
 @Injectable()
 export class UsersService {
@@ -40,9 +48,16 @@ export class UsersService {
     private readonly userPushTokenRepository: Repository<UserPushToken>,
     private readonly userActivitiesService: UserActivitiesService,
     private rolesService: RolesService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly mailService: MailService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
+    if (createUserDto.password && createUserDto.password.length < 8) {
+      throw new BadRequestException(
+        'Password must be at least 8 characters long.',
+      );
+    }
     const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
 
     const user = this.userRepository.create({
@@ -51,6 +66,59 @@ export class UsersService {
     });
 
     return this.userRepository.save(user);
+  }
+
+  private registerOtpKey(channel: 'mobile' | 'email', value: string): string {
+    return `register-otp:${channel}:${value.trim().toLowerCase()}`;
+  }
+
+  async requestRegisterOtp(
+    channel: 'mobile' | 'email',
+    value: string,
+  ): Promise<{ success: boolean; expiryMinutes: number }> {
+    const otp = Math.floor(100000 + Math.random() * 900000);
+    await this.cacheManager.set(
+      this.registerOtpKey(channel, value),
+      { otp, attempts: 0 },
+      REGISTER_OTP_TTL_MS as any,
+    );
+    if (channel === 'email') {
+      await this.mailService.sendRegisterOtp(value, otp);
+    }
+    return { success: true, expiryMinutes: REGISTER_OTP_TTL_MS / 60000 };
+  }
+
+  private async verifyRegisterOtp(
+    channel: 'mobile' | 'email',
+    value: string,
+    providedOtp: number,
+  ): Promise<void> {
+    const key = this.registerOtpKey(channel, value);
+    const record = (await this.cacheManager.get(key)) as
+      | { otp: number; attempts: number }
+      | undefined;
+
+    if (!record) {
+      throw new BadRequestException(
+        'OTP has expired. Please request a new one.',
+      );
+    }
+    if (record.attempts >= REGISTER_OTP_MAX_ATTEMPTS) {
+      await this.cacheManager.del(key);
+      throw new BadRequestException(
+        'Too many incorrect OTP attempts. Please request a new OTP.',
+      );
+    }
+    if (record.otp !== providedOtp) {
+      await this.cacheManager.set(
+        key,
+        { otp: record.otp, attempts: record.attempts + 1 },
+        REGISTER_OTP_TTL_MS as any,
+      );
+      throw new BadRequestException('OTP is not valid');
+    }
+
+    await this.cacheManager.del(key);
   }
 
   async register(createRegisterDto: CreateRegisterDto): Promise<User> {
@@ -63,16 +131,12 @@ export class UsersService {
       dob,
       gender,
       organizationId,
-      mobileOtpId,
       mobileOTP,
-      emailOtpId,
       emailOTP,
     } = createRegisterDto;
 
-    const expectedOTP = 123456;
-    if (mobileOTP !== expectedOTP || emailOTP !== expectedOTP) {
-      throw new BadRequestException('OTP is not valid');
-    }
+    await this.verifyRegisterOtp('mobile', mobileNumber, mobileOTP);
+    await this.verifyRegisterOtp('email', email, emailOTP);
 
     const randomPassword = randomBytes(12)
       .toString('base64')
@@ -136,6 +200,8 @@ export class UsersService {
     search?: string,
     sortField: string = 'userName',
     sortOrder: 'ASC' | 'DESC' = 'ASC',
+    organizationId?: string,
+    isSuperadmin: boolean = false,
   ): Promise<{ data: User[]; total: number }> {
     const qb = this.userRepository.createQueryBuilder('user');
 
@@ -149,6 +215,10 @@ export class UsersService {
       `,
         { search: `%${search}%` },
       );
+    }
+
+    if (organizationId && !isSuperadmin) {
+      qb.andWhere('user.organizationId = :organizationId', { organizationId });
     }
 
     const sortFieldMap: Record<string, string> = {
@@ -172,11 +242,18 @@ export class UsersService {
     return { data, total };
   }
 
-  async findOne(userId: string): Promise<User> {
+  async findOne(
+    userId: string,
+    organizationId?: string,
+    isSuperadmin: boolean = false,
+  ): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
     });
     if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    if (!isSuperadmin && user.organizationId !== organizationId) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
     return user;
   }
 
@@ -198,9 +275,60 @@ export class UsersService {
     return user;
   }
 
-  async update(userId: string, updateUserDto: UpdateUserDto): Promise<User> {
+  async update(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+    actor?: {
+      userId?: string;
+      id?: string;
+      organizationId?: string;
+      roles?: { roleName: string }[];
+    },
+  ): Promise<User> {
     const user = await this.findOne(userId);
-    Object.assign(user, updateUserDto);
+
+    const callerId = actor?.userId || actor?.id;
+    const isSuperadmin = actor?.roles?.some((r) => r.roleName === 'SUPERADMIN');
+    const isAdmin = actor?.roles?.some(
+      (r) => r.roleName === 'ADMIN' || r.roleName === 'HR',
+    );
+    const isSelf = callerId === userId;
+
+    if (!isSuperadmin && !isSelf && !isAdmin) {
+      throw new ForbiddenException(
+        'You do not have permission to update this user.',
+      );
+    }
+    if (
+      !isSuperadmin &&
+      !isSelf &&
+      user.organizationId !== actor?.organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only update users in your own organization.',
+      );
+    }
+
+    if (updateUserDto.password) {
+      if (updateUserDto.password.length < 8) {
+        throw new BadRequestException(
+          'Password must be at least 8 characters long.',
+        );
+      }
+      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 12);
+    }
+
+    if (isSelf && !isSuperadmin && !isAdmin) {
+      const allowed = { ...updateUserDto };
+      delete (allowed as any).organizationId;
+      delete (allowed as any).isActive;
+      delete (allowed as any).isEmailVerified;
+      delete (allowed as any).isMobileVerified;
+      Object.assign(user, allowed);
+    } else {
+      Object.assign(user, updateUserDto);
+    }
+
     return this.userRepository.save(user);
   }
 
@@ -225,10 +353,43 @@ export class UsersService {
     return { success: true };
   }
 
-  async remove(userId: string): Promise<{ message: string }> {
+  async remove(
+    userId: string,
+    actor?: {
+      userId?: string;
+      id?: string;
+      organizationId?: string;
+      roles?: { roleName: string }[];
+    },
+  ): Promise<{ message: string }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    const callerId = actor?.userId || actor?.id;
+    const isSuperadmin = actor?.roles?.some((r) => r.roleName === 'SUPERADMIN');
+    const isAdmin = actor?.roles?.some(
+      (r) => r.roleName === 'ADMIN' || r.roleName === 'HR',
+    );
+    const isSelf = callerId === userId;
+
+    if (!isSuperadmin && !isSelf && !isAdmin) {
+      throw new ForbiddenException(
+        'You do not have permission to delete this user.',
+      );
+    }
+    if (
+      !isSuperadmin &&
+      !isSelf &&
+      user.organizationId !== actor?.organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only delete users in your own organization.',
+      );
+    }
+    if (isSelf && isAdmin && !isSuperadmin) {
+      throw new ForbiddenException('Administrators cannot delete themselves.');
     }
 
     try {

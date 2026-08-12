@@ -578,9 +578,25 @@ export class LeaveService {
           : Number(request.numberOfDays ?? 0);
         const daysToDeduct = Math.max(0, payableDays);
         if (daysToDeduct > 0) {
-          balance.consumed += daysToDeduct;
-          balance.closingBalance -= daysToDeduct;
-          await this.balanceRepo.save(balance);
+          // Atomic deduction with an over-draw guard: concurrent approvals
+          // cannot consume the same balance twice or push it negative.
+          const deducted = await this.balanceRepo
+            .createQueryBuilder()
+            .update()
+            .set({
+              consumed: () => `consumed + ${daysToDeduct}`,
+              closingBalance: () => `closingBalance - ${daysToDeduct}`,
+            })
+            .where('id = :id AND closingBalance >= :daysToDeduct', {
+              id: balance.id,
+              daysToDeduct,
+            })
+            .execute();
+          if (deducted.affected === 0) {
+            throw new BadRequestException(
+              'Insufficient leave balance to approve this request.',
+            );
+          }
         }
       }
 

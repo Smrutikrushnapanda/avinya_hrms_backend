@@ -10,7 +10,12 @@ import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: true,
+    origin: [
+      'https://avinyahrms.duckdns.org',
+      'http://avinyahrms.duckdns.org',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+    ],
     credentials: true,
   },
 })
@@ -115,6 +120,12 @@ export class MessageGateway
   ) {
     const data = this.socketIndex.get(client.id);
     if (!data?.userId || !data?.orgId) return;
+    if (
+      typeof payload?.url !== 'string' ||
+      !/^https?:\/\//i.test(payload.url)
+    ) {
+      return;
+    }
     client.to(`org:${data.orgId}`).emit('chat:meeting-start', {
       conversationId: payload.conversationId,
       url: payload.url,

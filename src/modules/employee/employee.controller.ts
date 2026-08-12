@@ -7,8 +7,9 @@ import {
   Put,
   Delete,
   Query,
-  UseGuards, // <-- 1. Import UseGuards
-  UseInterceptors, // Import UseInterceptors from @nestjs/common
+  UseGuards,
+  UseInterceptors,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
@@ -22,19 +23,35 @@ import {
   ApiQuery,
   ApiResponse,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard'; // <-- 2. Import JwtAuthGuard
-import { GetUser } from '../auth-core/decorators/get-user.decorator'; // <-- 3. Import GetUser decorator
-import { User } from '../auth-core/entities/user.entity'; // <-- 4. Import User entity
+import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth-core/guards/roles.guard';
+import { Roles } from '../auth-core/decorators/roles.decorator';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
 
 @ApiTags('Employees')
 @Controller('employees')
-@UseInterceptors(CacheInterceptor) // Apply caching to all routes in this controller
+@UseGuards(JwtAuthGuard)
+@UseInterceptors(CacheInterceptor)
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
 
+  private assertSameOrg(actor: User, organizationId: string) {
+    if (
+      !(actor as any)?.roles?.some(
+        (r: { roleName: string }) => r.roleName === 'SUPERADMIN',
+      ) &&
+      actor?.organizationId &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only access employees in your own organization.',
+      );
+    }
+  }
+
   // --- NEW DASHBOARD ENDPOINT ---
   @Get('dashboard-stats')
-  @UseGuards(JwtAuthGuard)
   @CacheTTL(120) // 2 minutes cache for dashboard stats
   @ApiOperation({ summary: 'Get dashboard stats for the organization' })
   @ApiResponse({ status: 200, description: 'Return dashboard stats.' })
@@ -98,7 +115,9 @@ export class EmployeeController {
   async getUpcomingBirthdays(
     @Query('organizationId') organizationId: string,
     @Query('days') days: number = 30,
+    @GetUser() actor: User,
   ) {
+    this.assertSameOrg(actor, organizationId);
     const birthdays = await this.employeeService.getUpcomingBirthdays(
       organizationId,
       days,
@@ -118,7 +137,11 @@ export class EmployeeController {
   async getHierarchy(
     @Query('organizationId') organizationId: string,
     @Query('employeeId') employeeId?: string,
+    @GetUser() actor?: User,
   ) {
+    if (actor) {
+      this.assertSameOrg(actor, organizationId);
+    }
     return this.employeeService.getEmployeeHierarchy(
       organizationId,
       employeeId,
@@ -126,6 +149,8 @@ export class EmployeeController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create a new employee' })
   create(@Body() dto: CreateEmployeeDto) {
     return this.employeeService.create(dto);
@@ -135,7 +160,11 @@ export class EmployeeController {
   @CacheTTL(300) // 5 minutes cache for employee list
   @ApiOperation({ summary: 'Get all employees by organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
-  findAll(@Query('organizationId') organizationId: string) {
+  findAll(
+    @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
+  ) {
+    this.assertSameOrg(actor, organizationId);
     return this.employeeService.findAll(organizationId);
   }
 
@@ -143,23 +172,41 @@ export class EmployeeController {
   @CacheTTL(600) // 10 minutes cache for single employee
   @ApiOperation({ summary: 'Get employee by employee ID' })
   @ApiParam({ name: 'id', type: 'string' })
-  findOne(@Param('id') id: string) {
-    return this.employeeService.findOne(id);
+  async findOne(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return employee;
   }
 
   @Get('by-user/:userId')
   @CacheTTL(600) // 10 minutes cache for user lookup
   @ApiOperation({ summary: 'Get employee by user ID' })
   @ApiParam({ name: 'userId', type: 'string' })
-  async findByUserId(@Param('userId') userId: string) {
-    return this.employeeService.findByUserId(userId);
+  async findByUserId(@Param('userId') userId: string, @GetUser() actor: User) {
+    const actorUserId = (actor as any)?.userId || actor?.id;
+    const isPrivileged = (actor as any)?.roles?.some(
+      (r: { roleName: string }) =>
+        ['ADMIN', 'HR', 'SUPERADMIN', 'MANAGER'].includes(r.roleName),
+    );
+    if (!isPrivileged && actorUserId !== userId) {
+      throw new ForbiddenException(
+        'You can only access your own employee profile.',
+      );
+    }
+    const employee = await this.employeeService.findByUserId(userId);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return employee;
   }
 
   @Get('managers')
   @CacheTTL(300)
   @ApiOperation({ summary: 'Get all potential managers for organization' })
   @ApiQuery({ name: 'organizationId', required: true })
-  async getManagers(@Query('organizationId') organizationId: string) {
+  async getManagers(
+    @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
+  ) {
+    this.assertSameOrg(actor, organizationId);
     return this.employeeService.findManagers(organizationId);
   }
 
@@ -169,10 +216,14 @@ export class EmployeeController {
       'Validate employee data before create/update (manager assignment, duplicates, etc)',
   })
   @ApiResponse({ status: 200, description: 'Validation result' })
-  async validateEmployee(@Body() dto: ValidateEmployeeDto) {
+  async validateEmployee(
+    @Body() dto: ValidateEmployeeDto,
+    @GetUser() actor: User,
+  ) {
     if (!dto.organizationId) {
       return { isValid: false, errors: ['organizationId is required'] };
     }
+    this.assertSameOrg(actor, dto.organizationId);
     const result = await this.employeeService.validateManagerAssignment(
       dto as {
         organizationId: string;
@@ -184,6 +235,8 @@ export class EmployeeController {
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update employee by ID' })
   @ApiParam({ name: 'id', type: 'string' })
   update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
@@ -191,6 +244,8 @@ export class EmployeeController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Delete employee by ID' })
   @ApiParam({ name: 'id', type: 'string' })
   remove(@Param('id') id: string) {

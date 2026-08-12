@@ -29,6 +29,7 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -40,6 +41,7 @@ export class AuthController {
   ) {}
 
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'User login and get JWT token' })
   @ApiBody({
     type: LoginDto,
@@ -70,8 +72,7 @@ export class AuthController {
           id: '08936291-d8f4-4429-ac51-2879ea34df43',
           userName: 'smruti@gmail.com',
           email: 'smruti@gmail.com',
-          password:
-            '$2b$12$Uzo/gUA/0kBehY0YNWYfreGrPvkj7dCnp9SDQum8h3rOHcrXyqPme',
+          password: '[REDACTED]',
           firstName: 'Alok',
           middleName: '',
           lastName: 'Sahoo',
@@ -122,7 +123,7 @@ export class AuthController {
     res.cookie('token', access_token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: 'lax',
       maxAge: 1000 * 60 * 60, // 1 hour
     });
 
@@ -142,6 +143,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @ApiOperation({
     summary: 'Send admin password reset OTP to registered email',
   })
@@ -152,12 +154,14 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Reset admin user ID and password with email OTP' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetAdminCredentials(resetPasswordDto);
   }
 
   @Post('superadmin/login/request-otp')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @ApiOperation({
     summary: 'Request a login OTP for the configured super admin email',
   })
@@ -166,6 +170,7 @@ export class AuthController {
   }
 
   @Post('superadmin/login/verify-otp')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Verify super admin OTP and get a JWT token' })
   async verifySuperadminOtp(
     @Body() dto: SuperadminOtpVerifyDto,
@@ -185,7 +190,7 @@ export class AuthController {
     res.cookie('token', access_token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: 'lax',
       maxAge: 1000 * 60 * 60,
     });
 
@@ -224,16 +229,20 @@ export class AuthController {
         body.fcmToken,
       );
 
-      const user = await this.usersService.findOne(body.userId);
-      await this.logReportService.create({
-        organizationId:
-          user.organizationId || '00000000-0000-0000-0000-000000000000',
-        userId: user.id,
-        userName: user.userName,
-        actionType: 'LOGOUT',
-        module: 'auth',
-        description: 'User logout',
-      });
+      try {
+        const user = await this.usersService.findOne(body.userId);
+        await this.logReportService.create({
+          organizationId:
+            user.organizationId || '00000000-0000-0000-0000-000000000000',
+          userId: user.id,
+          userName: user.userName,
+          actionType: 'LOGOUT',
+          module: 'auth',
+          description: 'User logout',
+        });
+      } catch {
+        // The user may already be deleted; logout must still succeed.
+      }
     }
 
     return { message: 'Logged out successfully' };
