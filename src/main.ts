@@ -32,16 +32,23 @@ async function bootstrap() {
   const allowedOrigins = [
     'https://avinyahrms.duckdns.org',
     'http://avinyahrms.duckdns.org',
+    'https://avinya-hrms.vercel.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
   ];
 
+  const vercelPreviewRegex = /^https:\/\/[\w-]+\.vercel\.app$/;
+
   app.enableCors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        vercelPreviewRegex.test(origin)
+      ) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        callback(null, false);
       }
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
