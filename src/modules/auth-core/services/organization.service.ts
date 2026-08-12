@@ -547,7 +547,7 @@ export class OrganizationService {
   async findOne(id: string) {
     const org = await this.orgRepo.findOne({
       where: { id },
-      relations: ['settings', 'features'],
+      relations: ['settings'],
     });
     if (!org) throw new NotFoundException('Organization not found');
     return this.mapOrganizationResponse(org);
