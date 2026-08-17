@@ -679,4 +679,21 @@ export class MailService {
       html: this.buildEmailWrapper('Avinya HRMS', null, content),
     });
   }
+
+  // ─── Public helpers for superadmin service ──────────────────────────────────
+
+  buildEmailWrapperForSuperadmin(
+    orgName: string,
+    orgLogoUrl: string | null,
+    content: string,
+  ): string {
+    return this.buildEmailWrapper(orgName, orgLogoUrl, content);
+  }
+
+  async sendMail(options: nodemailer.SendMailOptions): Promise<void> {
+    await this.transporter.sendMail(options);
+    this.logger.log(
+      `Email sent to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}`,
+    );
+  }
 }

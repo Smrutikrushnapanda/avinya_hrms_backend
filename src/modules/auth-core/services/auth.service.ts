@@ -323,12 +323,25 @@ export class AuthService {
     }
   }
 
-  private getSuperadminEmail(): string {
-    const configured = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
-    if (!configured) {
+  private getSuperadminEmails(): string[] {
+    const primary = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
+    const fallback = process.env.SUPERADMIN_FALLBACK_EMAIL?.trim().toLowerCase();
+    const emails: string[] = [];
+    if (primary) emails.push(primary);
+    if (fallback) emails.push(fallback);
+    if (!emails.length) {
       throw new ForbiddenException('Super admin login is not configured.');
     }
-    return configured;
+    return emails;
+  }
+
+  private getSuperadminEmail(): string {
+    const emails = this.getSuperadminEmails();
+    return emails[0];
+  }
+
+  private isAuthorizedSuperadminEmail(email: string): boolean {
+    return this.getSuperadminEmails().includes(email);
   }
 
   private async loadSuperadminByEmail(
@@ -372,10 +385,9 @@ export class AuthService {
   }
 
   async requestSuperadminOtp(rawEmail: string) {
-    const configuredEmail = this.getSuperadminEmail();
     const email = rawEmail.trim().toLowerCase();
 
-    if (email !== configuredEmail) {
+    if (!this.isAuthorizedSuperadminEmail(email)) {
       throw new ForbiddenException(
         'This email is not authorized for super admin access.',
       );
@@ -414,10 +426,9 @@ export class AuthService {
   }
 
   async verifySuperadminOtp(rawEmail: string, otp: string, clientInfo?: any) {
-    const configuredEmail = this.getSuperadminEmail();
     const email = rawEmail.trim().toLowerCase();
 
-    if (email !== configuredEmail) {
+    if (!this.isAuthorizedSuperadminEmail(email)) {
       throw new ForbiddenException(
         'This email is not authorized for super admin access.',
       );

@@ -435,6 +435,7 @@ export class MenuSeederService implements OnModuleInit {
   async onModuleInit() {
     await this.seed();
     await this.ensureAssignWorkMenuItems();
+    await this.ensureSuperadminRevenueMenuItems();
   }
 
   // Seeds default menu items only on a fresh database (empty table). Once
@@ -549,6 +550,44 @@ export class MenuSeederService implements OnModuleInit {
         }),
       );
       this.logger.log('Added "Assign Work" employee menu entry.');
+    }
+  }
+
+  private async ensureSuperadminRevenueMenuItems() {
+    const revenueEntry = await this.repo.findOne({
+      where: { route: '/superadmin/revenue' },
+    });
+    if (!revenueEntry) {
+      await this.repo.save(
+        this.repo.create({
+          label: 'Revenue',
+          iconName: 'TrendingUp',
+          route: '/superadmin/revenue',
+          roles: ['SUPERADMIN'],
+          planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+          sortOrder: 3,
+          isActive: true,
+        }),
+      );
+      this.logger.log('Added "Revenue" super admin menu entry.');
+    }
+
+    const renewalsEntry = await this.repo.findOne({
+      where: { route: '/superadmin/renewals' },
+    });
+    if (!renewalsEntry) {
+      await this.repo.save(
+        this.repo.create({
+          label: 'Renewals',
+          iconName: 'Bell',
+          route: '/superadmin/renewals',
+          roles: ['SUPERADMIN'],
+          planTiers: ['BASIC', 'PRO', 'ENTERPRISE'],
+          sortOrder: 5,
+          isActive: true,
+        }),
+      );
+      this.logger.log('Added "Renewals" super admin menu entry.');
     }
   }
 }

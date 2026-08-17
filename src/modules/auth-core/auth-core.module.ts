@@ -45,6 +45,8 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { PricingPlan } from '../pricing/entities/pricing-plan.entity';
 import { Subscription } from '../pricing/entities/subscription.entity';
+import { RenewalEmailLog } from './entities/renewal-email-log.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -66,7 +68,9 @@ import { Subscription } from '../pricing/entities/subscription.entity';
       WfhApprovalAssignment,
       PricingPlan,
       Subscription,
+      RenewalEmailLog,
     ]),
+    MailModule,
     LogReportModule,
     PassportModule,
     JwtModule.register({
