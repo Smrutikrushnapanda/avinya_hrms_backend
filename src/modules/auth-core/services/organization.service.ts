@@ -504,6 +504,9 @@ export class OrganizationService {
         );
 
         // Delete all rows from organization-scoped tables first to avoid FK violations.
+        // Exclude 'users' from the main loop — it must be deleted last because many
+        // tables (employees, attendance, leave, chat, etc.) have FK constraints
+        // pointing to users.id with RESTRICT.
         const orgScopedTables: Array<{
           table_schema: string;
           table_name: string;
@@ -513,7 +516,7 @@ export class OrganizationService {
               FROM information_schema.columns
               WHERE column_name = 'organization_id'
                 AND table_schema = $1
-                AND table_name <> 'organizations'
+                AND table_name NOT IN ('organizations', 'users')
             `,
           [schema],
         );
@@ -524,6 +527,12 @@ export class OrganizationService {
             [id],
           );
         }
+
+        // Delete users last — dependent rows are already gone.
+        await manager.query(
+          `DELETE FROM "${schema}"."users" WHERE organization_id = $1`,
+          [id],
+        );
 
         await manager.query(
           `DELETE FROM "${schema}"."organizations" WHERE organization_id = $1`,
