@@ -503,16 +503,14 @@ export class OrganizationService {
           'SELECT current_schema() AS schema',
         );
 
-        // Delete all rows from organization-scoped tables first to avoid FK violations.
-        // Exclude 'users' from the main loop — it must be deleted last because many
-        // tables (employees, attendance, leave, chat, etc.) have FK constraints
-        // pointing to users.id with RESTRICT.
+        // Step 1: Delete all rows from every org-scoped table first.
+        // This clears tables like payroll_records, timesheets, etc. that may
+        // have FKs to employees/users and would block later deletes.
         const orgScopedTables: Array<{
-          table_schema: string;
           table_name: string;
         }> = await manager.query(
           `
-              SELECT table_schema, table_name
+              SELECT table_name
               FROM information_schema.columns
               WHERE column_name = 'organization_id'
                 AND table_schema = $1
@@ -521,19 +519,62 @@ export class OrganizationService {
           [schema],
         );
 
-        for (const { table_schema, table_name } of orgScopedTables) {
+        for (const { table_name } of orgScopedTables) {
           await manager.query(
-            `DELETE FROM "${table_schema}"."${table_name}" WHERE organization_id = $1`,
+            `DELETE FROM "${schema}"."${table_name}" WHERE organization_id = $1`,
             [id],
           );
         }
 
-        // Delete users last — dependent rows are already gone.
+        // Step 2: Collect all user IDs belonging to this org.
+        const userRows: Array<{ user_id: string }> = await manager.query(
+          `SELECT user_id FROM "${schema}"."users" WHERE organization_id = $1`,
+          [id],
+        );
+        const userIds = userRows.map((r) => r.user_id);
+
+        if (userIds.length) {
+          // Step 3: Find every table that has a FK pointing to users.user_id
+          // but was NOT caught by the org-scoped query (tables without organization_id).
+          const userFkTables: Array<{
+            table_name: string;
+            del_column: string;
+          }> = await manager.query(
+            `
+              SELECT DISTINCT
+                kcu.table_name,
+                kcu.column_name AS del_column
+              FROM information_schema.table_constraints tc
+              JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+              JOIN information_schema.constraint_column_usage ccu
+                ON ccu.constraint_name = tc.constraint_name
+                AND ccu.table_schema = tc.table_schema
+              WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_schema = $1
+                AND ccu.table_name = 'users'
+                AND ccu.column_name = 'user_id'
+                AND kcu.table_name NOT IN ('organizations')
+            `,
+            [schema],
+          );
+
+          for (const { table_name, del_column } of userFkTables) {
+            await manager.query(
+              `DELETE FROM "${schema}"."${table_name}" WHERE "${del_column}" = ANY($1::uuid[])`,
+              [userIds],
+            );
+          }
+        }
+
+        // Step 4: Delete users — all dependent rows are already gone.
         await manager.query(
           `DELETE FROM "${schema}"."users" WHERE organization_id = $1`,
           [id],
         );
 
+        // Step 5: Delete the organization itself.
         await manager.query(
           `DELETE FROM "${schema}"."organizations" WHERE organization_id = $1`,
           [id],
