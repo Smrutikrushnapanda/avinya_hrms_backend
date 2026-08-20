@@ -78,9 +78,6 @@ export class User {
   @Column({ name: 'must_change_password', type: 'boolean', default: true })
   mustChangePassword: boolean;
 
-  @Column({ name: 'skip_otp', type: 'boolean', default: false })
-  skipOtp: boolean;
-
   @Column({ name: 'password_reset_otp_hash', type: 'varchar', nullable: true })
   @Exclude()
   passwordResetOtpHash?: string | null;

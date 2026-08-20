@@ -63,8 +63,4 @@ export class CreateUserDto {
   @IsArray()
   @IsUUID('4', { each: true, message: 'Each roleId must be a valid UUID' })
   roleIds?: string[];
-
-  @IsOptional()
-  @IsBoolean()
-  skipOtp?: boolean;
 }

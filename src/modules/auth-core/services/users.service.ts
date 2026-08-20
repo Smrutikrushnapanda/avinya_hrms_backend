@@ -481,7 +481,6 @@ export class UsersService {
       delete (allowed as any).isActive;
       delete (allowed as any).isEmailVerified;
       delete (allowed as any).isMobileVerified;
-      delete (allowed as any).skipOtp;
       Object.assign(user, allowed);
     } else {
       Object.assign(user, rest);
