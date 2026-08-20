@@ -30,7 +30,10 @@ export class SuperadminController {
   }
 
   @ApiOperation({ summary: 'Get enhanced platform stats with revenue data' })
-  @ApiResponse({ status: 200, description: 'Return enhanced platform statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Return enhanced platform statistics',
+  })
   @Get('stats/enhanced')
   async getEnhancedStats() {
     return this.superadminService.getEnhancedStats();
@@ -46,7 +49,9 @@ export class SuperadminController {
     return this.superadminService.getOrganizations();
   }
 
-  @ApiOperation({ summary: 'Get detailed organization view with subscription history' })
+  @ApiOperation({
+    summary: 'Get detailed organization view with subscription history',
+  })
   @ApiResponse({ status: 200, description: 'Return org details' })
   @Get('organizations/:id/details')
   async getOrganizationDetails(@Param('id') id: string) {

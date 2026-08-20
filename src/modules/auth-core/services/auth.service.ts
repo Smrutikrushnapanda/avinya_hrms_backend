@@ -325,7 +325,8 @@ export class AuthService {
 
   private getSuperadminEmails(): string[] {
     const primary = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
-    const fallback = process.env.SUPERADMIN_FALLBACK_EMAIL?.trim().toLowerCase();
+    const fallback =
+      process.env.SUPERADMIN_FALLBACK_EMAIL?.trim().toLowerCase();
     const emails: string[] = [];
     if (primary) emails.push(primary);
     if (fallback) emails.push(fallback);

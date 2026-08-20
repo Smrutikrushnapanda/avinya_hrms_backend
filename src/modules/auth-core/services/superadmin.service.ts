@@ -272,7 +272,9 @@ export class SuperadminService {
       totalRevenue,
       monthlyRecurringRevenue,
       annualRecurringRevenue,
-      orgRevenue: orgRevenue.sort((a, b) => b.monthlyRevenue - a.monthlyRevenue),
+      orgRevenue: orgRevenue.sort(
+        (a, b) => b.monthlyRevenue - a.monthlyRevenue,
+      ),
     };
   }
 
@@ -300,7 +302,9 @@ export class SuperadminService {
 
     return subs.map((sub) => {
       const org = orgs.find((o) => o.id === sub.organizationId);
-      const endDateStr = sub.endDate ? new Date(sub.endDate).getTime() : now.getTime();
+      const endDateStr = sub.endDate
+        ? new Date(sub.endDate).getTime()
+        : now.getTime();
       const daysUntilExpiry = Math.ceil(
         (endDateStr - now.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -317,7 +321,12 @@ export class SuperadminService {
         endDate: sub.endDate,
         renewalDate: sub.renewalDate,
         daysUntilExpiry,
-        urgency: daysUntilExpiry <= 7 ? 'CRITICAL' : daysUntilExpiry <= 14 ? 'HIGH' : 'MEDIUM',
+        urgency:
+          daysUntilExpiry <= 7
+            ? 'CRITICAL'
+            : daysUntilExpiry <= 14
+              ? 'HIGH'
+              : 'MEDIUM',
       };
     });
   }
@@ -346,15 +355,21 @@ export class SuperadminService {
     });
 
     if (!activeSub) {
-      throw new BadRequestException('No active subscription found for this organization');
+      throw new BadRequestException(
+        'No active subscription found for this organization',
+      );
     }
 
     const recipientEmail = org.hrMail || org.email;
     if (!recipientEmail) {
-      throw new BadRequestException('No contact email configured for this organization');
+      throw new BadRequestException(
+        'No contact email configured for this organization',
+      );
     }
 
-    const endDate = activeSub.endDate ? new Date(activeSub.endDate) : new Date();
+    const endDate = activeSub.endDate
+      ? new Date(activeSub.endDate)
+      : new Date();
     const daysUntilExpiry = Math.ceil(
       (endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
     );
@@ -412,7 +427,11 @@ export class SuperadminService {
       from: '"Avinya HRMS" <smrutikrushnapanda@gmail.com>',
       to: recipientEmail,
       subject,
-      html: this.mailService.buildEmailWrapperForSuperadmin(org.organizationName, org.logoUrl ?? null, content),
+      html: this.mailService.buildEmailWrapperForSuperadmin(
+        org.organizationName,
+        org.logoUrl ?? null,
+        content,
+      ),
     });
 
     const logEntity = new RenewalEmailLog();
@@ -444,7 +463,12 @@ export class SuperadminService {
     sentBy: string;
   }) {
     const expiringOrgs = await this.getExpiringSoon(data.daysThreshold || 30);
-    const results: Array<{ organizationId: string; success: boolean; message?: string; error?: string }> = [];
+    const results: Array<{
+      organizationId: string;
+      success: boolean;
+      message?: string;
+      error?: string;
+    }> = [];
 
     for (const org of expiringOrgs) {
       try {
@@ -453,9 +477,17 @@ export class SuperadminService {
           customMessage: data.customMessage,
           sentBy: data.sentBy,
         });
-        results.push({ organizationId: org.organizationId, success: true, message: result.message });
+        results.push({
+          organizationId: org.organizationId,
+          success: true,
+          message: result.message,
+        });
       } catch (error) {
-        results.push({ organizationId: org.organizationId, success: false, error: error.message });
+        results.push({
+          organizationId: org.organizationId,
+          success: false,
+          error: error.message,
+        });
       }
     }
 
@@ -487,7 +519,9 @@ export class SuperadminService {
     const baseStats = await this.getStats();
 
     const now = new Date();
-    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysFromNow = new Date(
+      now.getTime() + 30 * 24 * 60 * 60 * 1000,
+    );
 
     const [expiringCount, expiredCount, blockedOrgs] = await Promise.all([
       this.subscriptionRepo.count({

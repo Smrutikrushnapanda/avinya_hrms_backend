@@ -94,9 +94,7 @@ export class UsersService {
     providedOtp: number,
   ): Promise<void> {
     const key = this.registerOtpKey(channel, value);
-    const record = (await this.cacheManager.get(key)) as
-      | { otp: number; attempts: number }
-      | undefined;
+    const record = await this.cacheManager.get(key);
 
     if (!record) {
       throw new BadRequestException(

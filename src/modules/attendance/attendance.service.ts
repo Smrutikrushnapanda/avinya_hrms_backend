@@ -404,7 +404,10 @@ export class AttendanceService {
             matchedWifi.latitude,
             matchedWifi.longitude,
           );
-          if (distance > (matchedWifi.allowedRadiusMeters ?? 50)) {
+          if (
+            distance >
+            this.resolveGeofenceRadius(matchedWifi.allowedRadiusMeters, 50)
+          ) {
             anomalyFlag = true;
             anomalyReasons.push('GPS location mismatch for Wi-Fi');
           }
@@ -1681,6 +1684,37 @@ export class AttendanceService {
     return R * c;
   }
 
+  /**
+   * Normalize a geofence radius before comparing against a device GPS fix.
+   *
+   * Real-world phone GPS in urban/office environments routinely drifts
+   * 30–80m from the true position (worse indoors), so a raw admin-configured
+   * radius — e.g. the 100m default — produces false "GPS outside allowed
+   * office radius" anomalies even when the employee is standing at their
+   * desk. Two guards are applied:
+   *
+   * 1. A fixed GPS-accuracy buffer is added on top of the configured radius.
+   * 2. Non-positive / NaN / unset radii (e.g. an admin cleared the field and
+   *    a `0` was saved) are treated as the default 100m instead of turning
+   *    every punch into an impossible-to-pass geofence.
+   */
+  private resolveGeofenceRadius(
+    radius?: number | null,
+    fallback: number | null = null,
+  ): number {
+    const GPS_ACCURACY_BUFFER_METERS = 50;
+    for (const candidate of [radius, fallback, 100]) {
+      if (
+        typeof candidate === 'number' &&
+        Number.isFinite(candidate) &&
+        candidate > 0
+      ) {
+        return candidate + GPS_ACCURACY_BUFFER_METERS;
+      }
+    }
+    return 100 + GPS_ACCURACY_BUFFER_METERS;
+  }
+
   private isWithinAllowedLocations(
     latitude: number,
     longitude: number,
@@ -1699,7 +1733,7 @@ export class AttendanceService {
       locations.push({
         lat: Number(primaryLat),
         lon: Number(primaryLon),
-        radius: defaultRadius ?? 100,
+        radius: this.resolveGeofenceRadius(defaultRadius),
       });
     }
 
@@ -1708,7 +1742,7 @@ export class AttendanceService {
         locations.push({
           lat: Number(loc.latitude),
           lon: Number(loc.longitude),
-          radius: loc.radiusMeters ?? defaultRadius ?? 100,
+          radius: this.resolveGeofenceRadius(loc.radiusMeters, defaultRadius),
         });
       }
     }

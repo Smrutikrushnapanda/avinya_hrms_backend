@@ -157,9 +157,7 @@ export class AssignWorkService {
       ),
     ];
     if (!assigneeIds.length) {
-      throw new BadRequestException(
-        'Assign the work to at least one employee',
-      );
+      throw new BadRequestException('Assign the work to at least one employee');
     }
 
     const employees = await this.employeeRepo.find({
