@@ -316,8 +316,11 @@ export class UsersService {
     }
 
     if (excludeEmployees) {
-      qb.leftJoin(Employee, 'employee', 'employee.userId = user.id');
-      qb.andWhere('employee.id IS NULL');
+      const employeeUserIdsSubQuery = this.employeeRepository
+        .createQueryBuilder('employee')
+        .select('employee.userId')
+        .getQuery();
+      qb.andWhere(`user.id NOT IN (${employeeUserIdsSubQuery})`);
     }
 
     qb.leftJoinAndSelect('user.userRoles', 'userRoles');
@@ -341,7 +344,26 @@ export class UsersService {
       .take(limit)
       .getManyAndCount();
 
-    return { data, total };
+    // Attach an isEmployee flag (derived from the employees table) so clients
+    // can hard-filter organization login accounts without relying on the
+    // query parameter alone. The flag is computed only for the current page.
+    const employeeRows = data.length
+      ? await this.employeeRepository.find({
+          where: { userId: In(data.map((u) => u.id)) },
+          select: ['userId'],
+        })
+      : [];
+    const employeeUserIds = new Set(employeeRows.map((r) => r.userId));
+
+    return {
+      data: data.map((user) => {
+        // Never leak password hashes through list responses.
+        const safeUser = { ...user };
+        delete (safeUser as any).password;
+        return { ...safeUser, isEmployee: employeeUserIds.has(user.id) };
+      }),
+      total,
+    };
   }
 
   async findOne(

@@ -98,6 +98,13 @@ export class UsersController {
     @Query('excludeEmployees') excludeEmployees?: string,
   ) {
     const isSuperadmin = actor?.roles?.some((r) => r.roleName === 'SUPERADMIN');
+    // Organization admins see ONLY non-employee login accounts by default —
+    // employees are managed from the Employees module and must never surface
+    // in organization user management.
+    const shouldExcludeEmployees =
+      excludeEmployees === undefined
+        ? !isSuperadmin && Boolean(actor?.organizationId)
+        : excludeEmployees === 'true' || excludeEmployees === '1';
     return this.usersService.findAll(
       Number(limit),
       Number(offset),
@@ -106,7 +113,7 @@ export class UsersController {
       sortOrder,
       actor?.organizationId,
       isSuperadmin,
-      excludeEmployees === 'true' || excludeEmployees === '1',
+      shouldExcludeEmployees,
     );
   }
 

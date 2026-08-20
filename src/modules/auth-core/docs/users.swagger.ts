@@ -120,7 +120,7 @@ export function SwaggerGetAllUsers() {
       type: Boolean,
       example: true,
       description:
-        'When true, only non-employee users are returned (used by the organization Users tab)',
+        'Excludes employee-linked user accounts. Defaults to true for organization-scoped (non-superadmin) callers, so employees never appear in organization user management',
     }),
     ApiResponse({ status: 200, description: 'List of users' }),
   );
