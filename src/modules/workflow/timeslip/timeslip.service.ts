@@ -47,8 +47,14 @@ export class TimeslipService {
     const { date, missing_type, corrected_in, corrected_out, employee } =
       timeslip;
 
+    // `date` can arrive as a full ISO string (e.g. '2026-08-20T00:00:00.000Z'
+    // from the web app) while attendance.attendance_date is stored as
+    // 'YYYY-MM-DD'. Normalizing here prevents the lookup from missing the
+    // existing record and silently creating a duplicate attendance row.
+    const normalizedDate = String(date).slice(0, 10);
+
     const existing = await this.attendanceRepo.findOne({
-      where: { user: { id: employee.userId }, attendanceDate: date },
+      where: { user: { id: employee.userId }, attendanceDate: normalizedDate },
     });
 
     let inTime: Date | null = existing?.inTime ?? null;
@@ -113,7 +119,7 @@ export class TimeslipService {
       const newRecord = this.attendanceRepo.create({
         user: { id: employee.userId },
         organization: { id: employee.organizationId },
-        attendanceDate: date,
+        attendanceDate: normalizedDate,
         ...updateData,
       });
       await this.attendanceRepo.save(newRecord);

@@ -178,8 +178,8 @@ export class AttendanceService {
    * covering this punch means the employee is intentionally away from
    * their usual office/Wi-Fi — GPS/Wi-Fi/geofence checks should be skipped
    * for the duration of the request instead of raising a false anomaly.
-   * When both a PENDING and an APPROVED request cover the same punch,
-   * the APPROVED one wins.
+   * Only APPROVED requests bypass validation — a PENDING request does not
+   * allow punching from outside the office.
    */
   private async findActiveOfficeTrip(
     organizationId: string,
@@ -192,10 +192,11 @@ export class AttendanceService {
       where: {
         organizationId,
         userId,
-        status: In([OfficeTripStatus.APPROVED, OfficeTripStatus.PENDING]),
+        status: OfficeTripStatus.APPROVED,
         fromDate: LessThanOrEqual(attendanceDate),
         toDate: MoreThanOrEqual(attendanceDate),
       },
+      order: { createdAt: 'DESC' },
     });
     if (candidates.length === 0) return null;
 
@@ -204,12 +205,6 @@ export class AttendanceService {
     );
     if (covering.length === 0) return null;
 
-    covering.sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === OfficeTripStatus.APPROVED ? -1 : 1;
-      }
-      return +new Date(b.createdAt) - +new Date(a.createdAt);
-    });
     return covering[0];
   }
 
@@ -834,11 +829,43 @@ export class AttendanceService {
     dateStr: string,
   ) {
     const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    const tz = settings.timezone || 'Asia/Kolkata';
     const [wh, wm] = (settings.workStartTime || '09:00').split(':').map(Number);
     const totalLateMinutes =
       (settings.graceMinutes || 15) + (settings.lateThresholdMinutes || 30);
-    const lateCutoffH = wh + Math.floor((wm + totalLateMinutes) / 60);
-    const lateCutoffM = (wm + totalLateMinutes) % 60;
+    // Late cutoff (shift start + grace + late threshold) computed in the
+    // company's OWN timezone — not the server's — so it stays correct no
+    // matter where the backend runs.
+    const cutoffMinutes = wh * 60 + (wm || 0) + totalLateMinutes;
+    const cutoffFor = (date: string) =>
+      DateTime.fromISO(`${date}T00:00:00`, { zone: tz })
+        .startOf('day')
+        .plus({ minutes: cutoffMinutes })
+        .toUTC()
+        .toJSDate();
+
+    // Office-present statuses drive Total Present; WFH workers are tracked
+    // separately as "Present (WFH)" so they are visible without inflating
+    // the office-attendance number.
+    const officePresentStatuses = new Set(['present', 'late', 'half-day']);
+    // Presence set used for ABSENCE resolution: WFH counts as a working day,
+    // so WFH users are never flagged absent — they just aren't in the office
+    // headcount.
+    const presentStatuses = new Set([
+      'present',
+      'late',
+      'half-day',
+      'work-from-home',
+    ]);
+    // These statuses are never expected to punch office in/out — approved
+    // leave, holiday, weekend, WFH — so they must not be counted in the
+    // "No clock-in / No clock-out" buckets.
+    const noPunchStatuses = new Set([
+      'on-leave',
+      'holiday',
+      'weekend',
+      'work-from-home',
+    ]);
 
     const getStats = async (date: string) => {
       const attendance = await this.attendanceRepo.find({
@@ -846,60 +873,49 @@ export class AttendanceService {
           organization: { id: organizationId },
           attendanceDate: date,
         },
+        relations: ['user'],
       });
 
-      const total_present = attendance.filter(
-        (a) =>
-          a.status === 'present' ||
-          a.status === 'late' ||
-          a.status === 'half-day',
+      const total_present = attendance.filter((a) =>
+        officePresentStatuses.has(a.status),
+      ).length;
+      const wfhPresent = attendance.filter(
+        (a) => a.status === 'work-from-home',
       ).length;
 
-      const earlyClockIn = attendance.filter((a) => {
-        if (!a.inTime) return false;
-        const inTime = new Date(a.inTime);
-        const clockLimit = new Date(a.attendanceDate);
-        clockLimit.setHours(lateCutoffH, lateCutoffM, 0, 0);
-        return inTime <= clockLimit;
-      }).length;
+      const clockLimit = cutoffFor(date);
+      const earlyClockIn = attendance.filter(
+        (a) => !!a.inTime && new Date(a.inTime) <= clockLimit,
+      ).length;
+      const lateClockIn = attendance.filter(
+        (a) => !!a.inTime && new Date(a.inTime) > clockLimit,
+      ).length;
 
-      const lateClockIn = attendance.filter((a) => {
-        if (!a.inTime) return false;
-        const inTime = new Date(a.inTime);
-        const clockLimit = new Date(a.attendanceDate);
-        clockLimit.setHours(lateCutoffH, lateCutoffM, 0, 0);
-        return inTime > clockLimit;
-      }).length;
-
-      const notPresentSummary = {
-        incompleteHours: attendance.filter(
-          (a) =>
-            a.status === 'absent' &&
-            Boolean(a.inTime) &&
-            Boolean(a.outTime) &&
-            Number(a.workingMinutes ?? 0) > 0,
-        ).length,
-        absent: attendance.filter(
-          (a) =>
-            a.status === 'absent' &&
-            !(
-              Boolean(a.inTime) &&
-              Boolean(a.outTime) &&
-              Number(a.workingMinutes ?? 0) > 0
-            ),
-        ).length,
-        noClockIn: attendance.filter((a) => !a.inTime).length,
-        noClockOut: attendance.filter((a) => !a.outTime).length,
-        invalid: attendance.filter((a) => a.anomalyFlag).length,
-      };
+      const incompleteHours = attendance.filter(
+        (a) =>
+          a.status === 'absent' &&
+          Boolean(a.inTime) &&
+          Boolean(a.outTime) &&
+          Number(a.workingMinutes ?? 0) > 0,
+      ).length;
 
       return {
+        attendance,
         presentSummary: {
           total_present,
+          wfhPresent,
           earlyClockIn,
           lateClockIn,
         },
-        notPresentSummary,
+        incompleteHours,
+        noClockIn: attendance.filter(
+          (a) => !a.inTime && !noPunchStatuses.has(a.status),
+        ).length,
+        noClockOut: attendance.filter(
+          (a) =>
+            Boolean(a.inTime) && !a.outTime && !noPunchStatuses.has(a.status),
+        ).length,
+        invalid: attendance.filter((a) => a.anomalyFlag).length,
       };
     };
 
@@ -910,6 +926,29 @@ export class AttendanceService {
     const yesterdayStr = yesterday.toISOString().split('T')[0];
     const yesterdayStats = await getStats(yesterdayStr);
 
+    // "Absent" is computed against the employee roster: everyone expected to
+    // work that day who has no earned presence (no punch, no WFH, no leave)
+    // — even if they never got an attendance row at all. Same definition for
+    // yesterday so the diff stays consistent.
+    const [absent, absentYesterday] = await Promise.all([
+      this.countAbsentEmployees(
+        organizationId,
+        dateStr,
+        tz,
+        todayStats.attendance,
+        presentStatuses,
+        settings,
+      ),
+      this.countAbsentEmployees(
+        organizationId,
+        yesterdayStr,
+        tz,
+        yesterdayStats.attendance,
+        presentStatuses,
+        settings,
+      ),
+    ]);
+
     const diff = (today: number, yest: number) => today - yest;
 
     return {
@@ -919,6 +958,12 @@ export class AttendanceService {
         total_presentDiff: diff(
           todayStats.presentSummary.total_present,
           yesterdayStats.presentSummary.total_present,
+        ),
+
+        wfhPresent: todayStats.presentSummary.wfhPresent,
+        wfhPresentDiff: diff(
+          todayStats.presentSummary.wfhPresent,
+          yesterdayStats.presentSummary.wfhPresent,
         ),
 
         earlyClockIn: todayStats.presentSummary.earlyClockIn,
@@ -934,37 +979,116 @@ export class AttendanceService {
         ),
       },
       notPresentSummary: {
-        incompleteHours: todayStats.notPresentSummary.incompleteHours,
+        incompleteHours: todayStats.incompleteHours,
         incompleteHoursDiff: diff(
-          todayStats.notPresentSummary.incompleteHours,
-          yesterdayStats.notPresentSummary.incompleteHours,
+          todayStats.incompleteHours,
+          yesterdayStats.incompleteHours,
         ),
 
-        absent: todayStats.notPresentSummary.absent,
-        absentDiff: diff(
-          todayStats.notPresentSummary.absent,
-          yesterdayStats.notPresentSummary.absent,
-        ),
+        absent,
+        absentDiff: diff(absent, absentYesterday),
 
-        noClockIn: todayStats.notPresentSummary.noClockIn,
-        noClockInDiff: diff(
-          todayStats.notPresentSummary.noClockIn,
-          yesterdayStats.notPresentSummary.noClockIn,
-        ),
+        noClockIn: todayStats.noClockIn,
+        noClockInDiff: diff(todayStats.noClockIn, yesterdayStats.noClockIn),
 
-        noClockOut: todayStats.notPresentSummary.noClockOut,
-        noClockOutDiff: diff(
-          todayStats.notPresentSummary.noClockOut,
-          yesterdayStats.notPresentSummary.noClockOut,
-        ),
+        noClockOut: todayStats.noClockOut,
+        noClockOutDiff: diff(todayStats.noClockOut, yesterdayStats.noClockOut),
 
-        invalid: todayStats.notPresentSummary.invalid,
-        invalidDiff: diff(
-          todayStats.notPresentSummary.invalid,
-          yesterdayStats.notPresentSummary.invalid,
-        ),
+        invalid: todayStats.invalid,
+        invalidDiff: diff(todayStats.invalid, yesterdayStats.invalid),
       },
     };
+  }
+
+  /**
+   * Counts true absentees for a date, computed against the ACTIVE employee
+   * roster instead of only the attendance rows that happen to exist. An
+   * employee counts as absent only when they were expected to work that day
+   * (own shift/branch/org calendar, non-holiday) and have no earned presence:
+   * no office punch, no WFH, no approved leave, no incomplete-hours row.
+   */
+  private async countAbsentEmployees(
+    organizationId: string,
+    date: string,
+    tz: string,
+    attendance: Attendance[],
+    presentStatuses: Set<string>,
+    fallbackSettings: AttendanceSettings,
+  ): Promise<number> {
+    const employees = await this.employeeRepo.find({
+      where: { organizationId, status: 'active' },
+      relations: ['branch', 'shift'],
+    });
+    if (employees.length === 0) return 0;
+
+    // Users who already "resolved" their day and must NOT be counted absent.
+    const resolvedUserIds = new Set<string>();
+    for (const a of attendance) {
+      const uid = a.user?.id;
+      if (!uid) continue;
+      if (presentStatuses.has(a.status) || a.status === 'on-leave') {
+        resolvedUserIds.add(uid);
+      } else if (
+        a.status === 'absent' &&
+        Boolean(a.inTime) &&
+        Boolean(a.outTime) &&
+        Number(a.workingMinutes ?? 0) > 0
+      ) {
+        resolvedUserIds.add(uid);
+      }
+    }
+
+    // Approved leaves covering this date.
+    const leaves = await this.leaveRequestRepo.find({
+      where: {
+        status: 'APPROVED',
+        startDate: LessThanOrEqual(date),
+        endDate: MoreThanOrEqual(date),
+      },
+      relations: ['user'],
+    });
+    for (const leave of leaves) {
+      if (leave.user?.id) resolvedUserIds.add(leave.user.id);
+    }
+
+    // Org-wide holidays on this date.
+    const holidays = await this.holidayRepo.find({
+      where: { organizationId },
+    });
+    const isHoliday = holidays.some(
+      (h) => formatLocal(new Date(h.date), 'yyyy-MM-dd') === date,
+    );
+    if (isHoliday) return 0;
+
+    const dayInZone = DateTime.fromISO(`${date}T00:00:00`, {
+      zone: tz,
+    }).toJSDate();
+
+    let absent = 0;
+    for (const emp of employees) {
+      const userId = emp.userId;
+      if (!userId || resolvedUserIds.has(userId)) continue;
+
+      const source =
+        emp.shift?.isActive && emp.shiftId
+          ? emp.shift
+          : emp.branch?.isActive && emp.branchId
+            ? emp.branch
+            : null;
+      const workingSource: WorkingDayRuleSource = source
+        ? {
+            workingDays: source.workingDays,
+            weekdayOffRules: source.weekdayOffRules,
+          }
+        : {
+            workingDays: fallbackSettings.workingDays,
+            weekdayOffRules: fallbackSettings.weekdayOffRules,
+          };
+
+      if (!this.isWorkingDayForDate(dayInZone, workingSource, tz)) continue;
+      absent++;
+    }
+    return absent;
   }
 
   async getTodayLogsByUserOrg(
@@ -1354,7 +1478,12 @@ export class AttendanceService {
     yesterday.setDate(today.getDate() - 1);
 
     const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
-    const isWorkingDay = (d: Date) => this.isWorkingDayForDate(d, shiftConfig);
+    const isWorkingDay = (d: Date) =>
+      this.isWorkingDayForDate(
+        d,
+        shiftConfig,
+        shiftConfig?.timezone || 'Asia/Kolkata',
+      );
 
     // 1. Attendance full record map
     const attendanceRecords = await this.attendanceRepo.find({
@@ -2099,7 +2228,7 @@ export class AttendanceService {
       const orgId = arrangement.user?.organizationId;
       if (!userId || !orgId) continue;
       const shiftConfig = await getShiftConfig(orgId, userId);
-      if (this.isWorkingDayForDate(start, shiftConfig)) {
+      if (this.isWorkingDayForDate(start, shiftConfig, shiftConfig.timezone)) {
         wfhApprovedUserOrgKeys.add(`${userId}|${orgId}`);
       }
     }
@@ -2183,7 +2312,11 @@ export class AttendanceService {
       const orgId = organizationId !== 'UNKNOWN' ? organizationId : undefined;
       const shiftConfig = orgId ? await getShiftConfig(orgId, userId) : null;
       const isWorking = shiftConfig
-        ? this.isWorkingDayForDate(start, shiftConfig)
+        ? this.isWorkingDayForDate(
+            start,
+            shiftConfig,
+            shiftConfig.timezone || 'Asia/Kolkata',
+          )
         : true;
       const isHoliday = holidaySet.has(attendanceDate);
 
@@ -2380,7 +2513,11 @@ export class AttendanceService {
       return settings;
     };
     const isWorkingDayForBranch = (date: Date, branchId?: string | null) =>
-      this.isWorkingDayForDate(date, resolveWorkingDaySource(branchId));
+      this.isWorkingDayForDate(
+        date,
+        resolveWorkingDaySource(branchId),
+        settings.timezone || 'Asia/Kolkata',
+      );
 
     // Generate all dates for the month
     const allDates: string[] = [];
@@ -2965,16 +3102,28 @@ export class AttendanceService {
     return normalized;
   }
 
-  private weekOfMonth(d: Date): number {
-    return Math.ceil(d.getDate() / 7);
+  private weekOfMonth(d: Date, timezone = 'Asia/Kolkata'): number {
+    return Math.ceil(DateTime.fromJSDate(d).setZone(timezone).day / 7);
   }
 
-  isWorkingDayForDate(d: Date, source: WorkingDayRuleSource): boolean {
+  /**
+   * Working-day check that computes the weekday in the SHIFT/ORG timezone
+   * (default `Asia/Kolkata`), NOT the server's local timezone. Using
+   * `d.getDay()` here would mislabel every weekday on servers that run in
+   * UTC (e.g. Docker hosts): a Monday in India is Sunday in UTC, so a real
+   * Monday was being rendered as a "Sunday" weekend row.
+   */
+  isWorkingDayForDate(
+    d: Date,
+    source: WorkingDayRuleSource,
+    timezone = 'Asia/Kolkata',
+  ): boolean {
+    const dayOfWeek = DateTime.fromJSDate(d).setZone(timezone).weekday % 7;
     const workingDaySet = new Set(this.resolveWorkingDays(source));
-    if (!workingDaySet.has(d.getDay())) return false;
-    const week = this.weekOfMonth(d);
+    if (!workingDaySet.has(dayOfWeek)) return false;
+    const week = this.weekOfMonth(d, timezone);
     const weekdayRules = this.resolveWeekdayOffRules(source);
-    const ruleWeeks = weekdayRules[String(d.getDay())] || [];
+    const ruleWeeks = weekdayRules[String(dayOfWeek)] || [];
     if (ruleWeeks.includes(week)) return false;
     return true;
   }
@@ -2995,7 +3144,13 @@ export class AttendanceService {
     const lastDay = new Date(year, month + 1, 0).getDate();
     let count = 0;
     for (let day = 1; day <= lastDay; day++) {
-      if (this.isWorkingDayForDate(new Date(year, month, day), shiftConfig)) {
+      if (
+        this.isWorkingDayForDate(
+          new Date(year, month, day),
+          shiftConfig,
+          shiftConfig.timezone,
+        )
+      ) {
         count++;
       }
     }
@@ -3021,6 +3176,7 @@ export class AttendanceService {
       return this.isWorkingDayForDate(
         new Date(`${dateStr}T00:00:00`),
         shiftConfig,
+        shiftConfig.timezone || 'Asia/Kolkata',
       );
     }
 

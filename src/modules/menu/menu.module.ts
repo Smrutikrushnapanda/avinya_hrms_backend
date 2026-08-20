@@ -4,7 +4,6 @@ import { JwtModule } from '@nestjs/jwt';
 import { MenuItem } from './entities/menu-item.entity';
 import { MenuItemService } from './services/menu-item.service';
 import { MenuItemController } from './controllers/menu-item.controller';
-import { MenuSeederService } from './services/menu-seeder.service';
 import { PerformanceSettings } from '../performance/entities/performance-settings.entity';
 import { WfhRequest } from '../wfh/entities/wfh-request.entity';
 
@@ -16,7 +15,7 @@ import { WfhRequest } from '../wfh/entities/wfh-request.entity';
       signOptions: { expiresIn: '7d' },
     }),
   ],
-  providers: [MenuItemService, MenuSeederService],
+  providers: [MenuItemService],
   controllers: [MenuItemController],
 })
 export class MenuModule {}
