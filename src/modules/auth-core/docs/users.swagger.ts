@@ -114,6 +114,14 @@ export function SwaggerGetAllUsers() {
       enum: ['ASC', 'DESC'],
       example: 'ASC',
     }),
+    ApiQuery({
+      name: 'excludeEmployees',
+      required: false,
+      type: Boolean,
+      example: true,
+      description:
+        'When true, only non-employee users are returned (used by the organization Users tab)',
+    }),
     ApiResponse({ status: 200, description: 'List of users' }),
   );
 }

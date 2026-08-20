@@ -7,10 +7,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { In, QueryFailedError, Repository } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { User } from '../entities/user.entity';
+import { Role } from '../entities/role.entity';
+import { Employee } from 'src/modules/employee/entities/employee.entity';
 import {
   PushTokenPlatform,
   UserPushToken,
@@ -36,6 +38,10 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Role)
+    private readonly roleRepository: Repository<Role>,
+    @InjectRepository(Employee)
+    private readonly employeeRepository: Repository<Employee>,
     @InjectRepository(UserRole)
     private readonly userRoleRepository: Repository<UserRole>,
     @InjectRepository(LeaveRequest)
@@ -58,14 +64,100 @@ export class UsersService {
         'Password must be at least 8 characters long.',
       );
     }
+
+    const { roleIds, ...userData } = createUserDto;
     const hashedPassword = await bcrypt.hash(createUserDto.password, 12);
 
     const user = this.userRepository.create({
-      ...createUserDto,
+      ...userData,
       password: hashedPassword,
     });
 
-    return this.userRepository.save(user);
+    try {
+      const savedUser = await this.userRepository.save(user);
+
+      if (roleIds && roleIds.length > 0) {
+        await this.assignRolesToUser(
+          savedUser.id,
+          roleIds,
+          savedUser.organizationId,
+        );
+      }
+
+      const created = await this.userRepository.findOne({
+        where: { id: savedUser.id },
+        relations: ['userRoles', 'userRoles.role'],
+      });
+      if (!created) throw new NotFoundException('User not found');
+      return created;
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error as any).code === '23505'
+      ) {
+        // Get constraint info if you want
+        let field = 'unique field';
+        if ((error as any).detail) {
+          if ((error as any).detail.includes('email')) field = 'email';
+          else if ((error as any).detail.includes('mobile'))
+            field = 'mobile number';
+          else if ((error as any).detail.includes('userName'))
+            field = 'username';
+        }
+        throw new ConflictException(
+          `A user with this ${field} already exists.`,
+        );
+      }
+      throw error; // rethrow for other errors
+    }
+  }
+
+  /**
+   * Assigns organization-scoped roles to a user, used by organization-level
+   * user management. Rejects SUPERADMIN (platform-level) and EMPLOYEE
+   * (managed via the Employees module) roles plus any role that belongs to
+   * another organization.
+   */
+  private async assignRolesToUser(
+    userId: string,
+    roleIds: string[],
+    organizationId?: string,
+    assignedBy?: string,
+  ): Promise<void> {
+    const roles = await this.roleRepository.findBy({ id: In(roleIds) });
+
+    if (!roles.length || roles.length !== roleIds.length) {
+      throw new BadRequestException('One or more roles are invalid.');
+    }
+
+    for (const role of roles) {
+      if (role.roleName === 'SUPERADMIN') {
+        throw new ForbiddenException(
+          'The SUPERADMIN role cannot be assigned from organization settings.',
+        );
+      }
+      if (role.roleName === 'EMPLOYEE') {
+        throw new BadRequestException(
+          'The EMPLOYEE role is managed from the Employees module.',
+        );
+      }
+      if (organizationId && role.organizationId !== organizationId) {
+        throw new BadRequestException(
+          `Role "${role.roleName}" does not belong to this organization.`,
+        );
+      }
+    }
+
+    const userRoles = roles.map((role) =>
+      this.userRoleRepository.create({
+        user: { id: userId } as User,
+        role,
+        assignedBy: assignedBy || userId,
+        isActive: true,
+      }),
+    );
+
+    await this.userRoleRepository.save(userRoles);
   }
 
   private registerOtpKey(channel: 'mobile' | 'email', value: string): string {
@@ -94,7 +186,10 @@ export class UsersService {
     providedOtp: number,
   ): Promise<void> {
     const key = this.registerOtpKey(channel, value);
-    const record = await this.cacheManager.get(key);
+    const record = await this.cacheManager.get<{
+      otp: number;
+      attempts: number;
+    }>(key);
 
     if (!record) {
       throw new BadRequestException(
@@ -200,6 +295,7 @@ export class UsersService {
     sortOrder: 'ASC' | 'DESC' = 'ASC',
     organizationId?: string,
     isSuperadmin: boolean = false,
+    excludeEmployees: boolean = false,
   ): Promise<{ data: User[]; total: number }> {
     const qb = this.userRepository.createQueryBuilder('user');
 
@@ -218,6 +314,14 @@ export class UsersService {
     if (organizationId && !isSuperadmin) {
       qb.andWhere('user.organizationId = :organizationId', { organizationId });
     }
+
+    if (excludeEmployees) {
+      qb.leftJoin(Employee, 'employee', 'employee.userId = user.id');
+      qb.andWhere('employee.id IS NULL');
+    }
+
+    qb.leftJoinAndSelect('user.userRoles', 'userRoles');
+    qb.leftJoinAndSelect('userRoles.role', 'role');
 
     const sortFieldMap: Record<string, string> = {
       userId: 'user.id',
@@ -307,8 +411,10 @@ export class UsersService {
       );
     }
 
-    if (updateUserDto.password) {
-      if (updateUserDto.password.length < 8) {
+    const { roleIds, ...rest } = updateUserDto;
+
+    if (rest.password) {
+      if (rest.password.length < 8) {
         throw new BadRequestException(
           'Password must be at least 8 characters long.',
         );
@@ -318,31 +424,45 @@ export class UsersService {
       // account.
       if (isSelf) {
         const currentMatches =
-          updateUserDto.currentPassword &&
-          (await bcrypt.compare(
-            updateUserDto.currentPassword,
-            user.password,
-          ));
+          rest.currentPassword &&
+          (await bcrypt.compare(rest.currentPassword, user.password));
         if (!currentMatches) {
-          throw new BadRequestException(
-            'Current password is incorrect.',
-          );
+          throw new BadRequestException('Current password is incorrect.');
         }
       }
-      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 12);
+      rest.password = await bcrypt.hash(rest.password, 12);
     }
     // currentPassword is auth metadata only — never persist it.
-    delete (updateUserDto as any).currentPassword;
+    delete (rest as any).currentPassword;
+
+    if (roleIds !== undefined) {
+      if (isSelf) {
+        throw new ForbiddenException('You cannot change your own role.');
+      }
+      if (await this.employeeRepository.exists({ where: { userId } })) {
+        throw new BadRequestException(
+          'This user is an employee. Their role is managed from the Employees module.',
+        );
+      }
+      await this.userRoleRepository.delete({ user: { id: userId } });
+      await this.assignRolesToUser(
+        userId,
+        roleIds,
+        user.organizationId,
+        callerId,
+      );
+    }
 
     if (isSelf && !isSuperadmin && !isAdmin) {
-      const allowed = { ...updateUserDto };
+      const allowed = { ...rest };
       delete (allowed as any).organizationId;
       delete (allowed as any).isActive;
       delete (allowed as any).isEmailVerified;
       delete (allowed as any).isMobileVerified;
+      delete (allowed as any).skipOtp;
       Object.assign(user, allowed);
     } else {
-      Object.assign(user, updateUserDto);
+      Object.assign(user, rest);
     }
 
     // A user setting their OWN password counts as completing the forced
@@ -350,7 +470,7 @@ export class UsersService {
     // never clears this flag) would keep blocking that account forever even
     // after a successful PATCH. Admins resetting someone else's password
     // intentionally leave the flag on so the employee still must change it.
-    if (isSelf && updateUserDto.password) {
+    if (isSelf && rest.password) {
       user.mustChangePassword = false;
     }
 
@@ -415,6 +535,11 @@ export class UsersService {
     }
     if (isSelf && isAdmin && !isSuperadmin) {
       throw new ForbiddenException('Administrators cannot delete themselves.');
+    }
+    if (await this.employeeRepository.exists({ where: { userId } })) {
+      throw new BadRequestException(
+        'This user is an employee. Remove the employee record from the Employees module instead.',
+      );
     }
 
     try {

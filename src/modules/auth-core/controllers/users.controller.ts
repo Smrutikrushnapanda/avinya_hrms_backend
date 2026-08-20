@@ -95,6 +95,7 @@ export class UsersController {
     @Query('search') search?: string,
     @Query('sortField') sortField = 'user_name',
     @Query('sortOrder') sortOrder: 'ASC' | 'DESC' = 'ASC',
+    @Query('excludeEmployees') excludeEmployees?: string,
   ) {
     const isSuperadmin = actor?.roles?.some((r) => r.roleName === 'SUPERADMIN');
     return this.usersService.findAll(
@@ -105,6 +106,7 @@ export class UsersController {
       sortOrder,
       actor?.organizationId,
       isSuperadmin,
+      excludeEmployees === 'true' || excludeEmployees === '1',
     );
   }
 

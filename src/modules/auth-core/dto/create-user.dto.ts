@@ -7,6 +7,8 @@ import {
   IsDateString,
   IsUUID,
   IsIn,
+  IsArray,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateUserDto {
@@ -56,4 +58,13 @@ export class CreateUserDto {
 
   @IsUUID('4', { message: 'organizationId must be a valid UUID' })
   organizationId: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true, message: 'Each roleId must be a valid UUID' })
+  roleIds?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  skipOtp?: boolean;
 }
