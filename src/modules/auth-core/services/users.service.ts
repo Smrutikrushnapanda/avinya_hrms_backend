@@ -313,8 +313,26 @@ export class UsersService {
           'Password must be at least 8 characters long.',
         );
       }
+      // A user can only set their own password after proving they know the
+      // current one — otherwise any session theft could silently hijack the
+      // account.
+      if (isSelf) {
+        const currentMatches =
+          updateUserDto.currentPassword &&
+          (await bcrypt.compare(
+            updateUserDto.currentPassword,
+            user.password,
+          ));
+        if (!currentMatches) {
+          throw new BadRequestException(
+            'Current password is incorrect.',
+          );
+        }
+      }
       updateUserDto.password = await bcrypt.hash(updateUserDto.password, 12);
     }
+    // currentPassword is auth metadata only — never persist it.
+    delete (updateUserDto as any).currentPassword;
 
     if (isSelf && !isSuperadmin && !isAdmin) {
       const allowed = { ...updateUserDto };
@@ -325,6 +343,15 @@ export class UsersService {
       Object.assign(user, allowed);
     } else {
       Object.assign(user, updateUserDto);
+    }
+
+    // A user setting their OWN password counts as completing the forced
+    // password-change step — otherwise the mobile app (and any request that
+    // never clears this flag) would keep blocking that account forever even
+    // after a successful PATCH. Admins resetting someone else's password
+    // intentionally leave the flag on so the employee still must change it.
+    if (isSelf && updateUserDto.password) {
+      user.mustChangePassword = false;
     }
 
     return this.userRepository.save(user);

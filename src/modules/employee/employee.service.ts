@@ -532,7 +532,11 @@ export class EmployeeService {
 
       if (loginPassword) {
         user.password = await bcrypt.hash(loginPassword, 12);
-        user.mustChangePassword = true;
+        // NOTE: deliberately NOT setting mustChangePassword here — when an
+        // admin edits an existing employee and sets a new password, the
+        // employee must be able to log straight in with it. The forced
+        // password-change flag is only meaningful for freshly created
+        // accounts (see the create flow), not for admin-initiated resets.
         credentialsUpdated = true;
       }
 
