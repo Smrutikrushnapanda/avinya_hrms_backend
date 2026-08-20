@@ -31,7 +31,7 @@ export interface UserWithRoles extends User {
   permissions: { id: string; permissionName: string }[];
 }
 
-interface AdminResetTarget {
+interface PasswordResetTarget {
   user: User;
   otpEmail: string;
 }
@@ -488,9 +488,9 @@ export class AuthService {
     return { access_token, user };
   }
 
-  async sendAdminPasswordResetOtp(identifier: string) {
+  async sendPasswordResetOtp(identifier: string) {
     const normalizedIdentifier = identifier.trim().toLowerCase();
-    const target = await this.findAdminResetTarget(normalizedIdentifier);
+    const target = await this.findPasswordResetTarget(normalizedIdentifier);
 
     if (target) {
       const { user, otpEmail } = target;
@@ -511,21 +511,21 @@ export class AuthService {
     }
 
     // Always return the same message so the endpoint cannot be used to
-    // enumerate which identifiers map to admin accounts.
+    // enumerate accounts.
     return {
       message:
-        'If an admin account exists for this identifier, an OTP has been sent to the registered email.',
+        'If an account exists for this identifier, an OTP has been sent to the registered email.',
     };
   }
 
-  async resetAdminCredentials(dto: ResetPasswordDto) {
+  async resetCredentials(dto: ResetPasswordDto) {
     const normalizedIdentifier = dto.identifier.trim().toLowerCase();
     const newUserName = dto.newUserName.trim();
-    const target = await this.findAdminResetTarget(normalizedIdentifier);
+    const target = await this.findPasswordResetTarget(normalizedIdentifier);
 
     if (!target) {
       throw new NotFoundException(
-        'No admin account found for this email or user ID',
+        'No account found for this email or user ID',
       );
     }
 
@@ -564,12 +564,32 @@ export class AuthService {
     user.passwordResetOtpExpiresAt = null;
     await this.userRepository.save(user);
 
-    return { message: 'Admin user ID and password updated successfully' };
+    return { message: 'User ID and password updated successfully' };
   }
 
-  private async findAdminResetTarget(
+  private async findPasswordResetTarget(
     identifier: string,
-  ): Promise<AdminResetTarget | null> {
+  ): Promise<PasswordResetTarget | null> {
+    const activeUser = await this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.organization', 'organization')
+      .where(
+        `(
+          LOWER(user.email) = :identifier
+          OR LOWER(user.userName) = :identifier
+        )`,
+        { identifier },
+      )
+      .andWhere('user.isActive = :userActive', { userActive: true })
+      .getOne();
+
+    if (activeUser) {
+      return {
+        user: activeUser,
+        otpEmail: this.getResetOtpEmail(activeUser, identifier),
+      };
+    }
+
     const organization = await this.organizationRepository
       .createQueryBuilder('organization')
       .where(
@@ -593,50 +613,22 @@ export class AuthService {
       };
     }
 
-    const activeAdmin = await this.userRepository
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.organization', 'organization')
-      .leftJoin('user.userRoles', 'userRole', 'userRole.isActive = :isActive', {
-        isActive: true,
-      })
-      .leftJoin('userRole.role', 'role')
-      .where(
-        `(
-          LOWER(user.email) = :identifier
-          OR LOWER(user.userName) = :identifier
-        )`,
-        { identifier },
-      )
-      .andWhere('user.isActive = :userActive', { userActive: true })
-      .andWhere('role.roleName IN (:...roleNames)', {
-        roleNames: ['ADMIN', 'SUPERADMIN'],
-      })
-      .getOne();
-
-    if (activeAdmin) {
-      return {
-        user: activeAdmin,
-        otpEmail: this.getResetOtpEmail(activeAdmin, identifier),
-      };
-    }
-
     return null;
   }
 
   private getResetOtpEmail(user: User, identifier: string): string {
-    const organization = user.organization;
-    const orgEmail = organization?.email?.trim().toLowerCase();
-    const orgHrMail = organization?.hrMail?.trim().toLowerCase();
+    const userEmail = user.email?.trim();
+    if (userEmail) return userEmail;
 
-    if (orgEmail && orgEmail === identifier) {
-      return organization.email?.trim() || user.email;
-    }
-
-    if (orgHrMail && orgHrMail === identifier) {
-      return organization.hrMail?.trim() || user.email;
-    }
-
-    return user.email;
+    // Fallbacks for accounts without a registered email: prefer the
+    // identifier itself when it is an email address, otherwise the
+    // organization's contact email.
+    if (identifier.includes('@')) return identifier;
+    return (
+      user.organization?.email?.trim() ||
+      user.organization?.hrMail?.trim() ||
+      ''
+    );
   }
 
   private getOrganizationResetEmail(

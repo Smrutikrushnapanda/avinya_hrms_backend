@@ -574,8 +574,8 @@ export class MailService {
     const orgEmail = org?.email;
 
     const content = `
-      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Admin Password Reset OTP</h2>
-      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">Hi ${details.name}, use this OTP to reset your admin user ID and password.</p>
+      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Password Reset OTP</h2>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">Hi ${details.name}, use this OTP to reset your user ID and password.</p>
 
       <div style="background:#f8f9fb;border-radius:8px;padding:20px 24px;margin-bottom:24px;text-align:center;">
         <div style="font-size:32px;letter-spacing:8px;font-weight:800;color:#111827;">${details.otp}</div>
@@ -591,7 +591,7 @@ export class MailService {
       from: this.fromAddress,
       to: details.email,
       replyTo: orgEmail,
-      subject: `[${orgName}] Admin password reset OTP`,
+      subject: `[${orgName}] Password reset OTP`,
       html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
     });
   }

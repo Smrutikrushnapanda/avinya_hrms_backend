@@ -145,19 +145,19 @@ export class AuthController {
   @Post('forgot-password')
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @ApiOperation({
-    summary: 'Send admin password reset OTP to registered email',
+    summary: 'Send password reset OTP to registered email',
   })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    return this.authService.sendAdminPasswordResetOtp(
+    return this.authService.sendPasswordResetOtp(
       forgotPasswordDto.identifier,
     );
   }
 
   @Post('reset-password')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @ApiOperation({ summary: 'Reset admin user ID and password with email OTP' })
+  @ApiOperation({ summary: 'Reset user ID and password with email OTP' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
-    return this.authService.resetAdminCredentials(resetPasswordDto);
+    return this.authService.resetCredentials(resetPasswordDto);
   }
 
   @Post('superadmin/login/request-otp')
