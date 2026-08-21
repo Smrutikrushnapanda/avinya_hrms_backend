@@ -90,6 +90,10 @@ export class User {
   @Exclude()
   passwordResetOtpExpiresAt?: Date | null;
 
+  @Column({ name: 'password_reset_otp_attempts', type: 'int', default: 0 })
+  @Exclude()
+  passwordResetOtpAttempts: number;
+
   @Column({ name: 'superadmin_otp_hash', type: 'varchar', nullable: true })
   @Exclude()
   superadminOtpHash?: string | null;

@@ -35,9 +35,10 @@ export class ResetPasswordDto {
   @Length(6, 6, { message: 'OTP must be 6 digits' })
   otp: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(3, { message: 'User ID must be at least 3 characters' })
-  newUserName: string;
+  newUserName?: string;
 
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters' })

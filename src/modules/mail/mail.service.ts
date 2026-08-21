@@ -214,12 +214,16 @@ export class MailService {
     try {
       await this.transporter.sendMail(options);
       this.logger.log(
-        `Email sent to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}`,
+        `Email sent to ${
+          Array.isArray(options.to) ? options.to.join(', ') : options.to
+        }`,
       );
     } catch (error) {
       this.logger.error(
         `Failed to send email to ${options.to}: ${error.message}`,
+        error.stack,
       );
+      throw error; // re-throw so callers can handle/log the failure
     }
   }
 

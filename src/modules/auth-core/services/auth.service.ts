@@ -494,20 +494,44 @@ export class AuthService {
 
     if (target) {
       const { user, otpEmail } = target;
+
+      // 60-second resend cooldown
+      if (user.passwordResetOtpExpiresAt) {
+        const otpIssuedAt =
+          user.passwordResetOtpExpiresAt.getTime() - 10 * 60 * 1000;
+        if (Date.now() - otpIssuedAt < 60 * 1000) {
+          // Still return generic message — don't reveal account existence
+          return {
+            message:
+              'If an account exists for this identifier, an OTP has been sent to the registered email.',
+          };
+        }
+      }
+
       const otp = String(randomInt(100000, 1000000));
       user.passwordResetOtpHash = await bcrypt.hash(otp, 12);
       user.passwordResetOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      user.passwordResetOtpAttempts = 0;
       await this.userRepository.save(user);
 
-      await this.mailService.sendPasswordResetOtp({
-        organizationId: user.organizationId,
-        email: otpEmail,
-        name:
-          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-          user.userName,
-        otp,
-        expiresInMinutes: 10,
-      });
+      try {
+        await this.mailService.sendPasswordResetOtp({
+          organizationId: user.organizationId,
+          email: otpEmail,
+          name:
+            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+            user.userName,
+          otp,
+          expiresInMinutes: 10,
+        });
+      } catch (emailError) {
+        // Log the real error so it appears in production logs
+        console.error(
+          `[sendPasswordResetOtp] Email delivery failed for ${otpEmail}:`,
+          emailError?.message ?? emailError,
+        );
+        // OTP is already persisted — the user can retry; don't expose internals
+      }
     }
 
     // Always return the same message so the endpoint cannot be used to
@@ -520,7 +544,6 @@ export class AuthService {
 
   async resetCredentials(dto: ResetPasswordDto) {
     const normalizedIdentifier = dto.identifier.trim().toLowerCase();
-    const newUserName = dto.newUserName.trim();
     const target = await this.findPasswordResetTarget(normalizedIdentifier);
 
     if (!target) {
@@ -540,31 +563,43 @@ export class AuthService {
       throw new BadRequestException('OTP expired. Request a new OTP');
     }
 
+    if ((user.passwordResetOtpAttempts ?? 0) >= 5) {
+      throw new BadRequestException(
+        'Too many incorrect attempts. Request a new OTP.',
+      );
+    }
+
     const isValidOtp = await bcrypt.compare(
       dto.otp.trim(),
       user.passwordResetOtpHash,
     );
     if (!isValidOtp) {
+      user.passwordResetOtpAttempts = (user.passwordResetOtpAttempts ?? 0) + 1;
+      await this.userRepository.save(user);
       throw new BadRequestException('Invalid OTP');
     }
 
-    const existingUserName = await this.userRepository.findOne({
-      where: { userName: newUserName },
-      select: ['id'],
-    });
-
-    if (existingUserName && existingUserName.id !== user.id) {
-      throw new ConflictException('User ID already exists');
+    // Only update userName if a new one was explicitly provided and it differs
+    if (dto.newUserName) {
+      const newUserName = dto.newUserName.trim();
+      const existingUserName = await this.userRepository.findOne({
+        where: { userName: newUserName },
+        select: ['id'],
+      });
+      if (existingUserName && existingUserName.id !== user.id) {
+        throw new ConflictException('User ID already exists');
+      }
+      user.userName = newUserName;
     }
 
-    user.userName = newUserName;
     user.password = await bcrypt.hash(dto.newPassword, 12);
     user.mustChangePassword = false;
     user.passwordResetOtpHash = null;
     user.passwordResetOtpExpiresAt = null;
+    user.passwordResetOtpAttempts = 0;
     await this.userRepository.save(user);
 
-    return { message: 'User ID and password updated successfully' };
+    return { message: 'Password updated successfully' };
   }
 
   private async findPasswordResetTarget(
