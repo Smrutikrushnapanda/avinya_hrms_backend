@@ -547,9 +547,7 @@ export class AuthService {
     const target = await this.findPasswordResetTarget(normalizedIdentifier);
 
     if (!target) {
-      throw new NotFoundException(
-        'No account found for this email or user ID',
-      );
+      throw new NotFoundException('No account found for this email or user ID');
     }
 
     const { user } = target;

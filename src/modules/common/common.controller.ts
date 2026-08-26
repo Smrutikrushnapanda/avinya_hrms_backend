@@ -8,9 +8,11 @@ import {
   BadRequestException,
   InternalServerErrorException,
   UseGuards,
+  Res,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import * as multer from 'multer';
 import { memoryStorage } from 'multer';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -23,6 +25,8 @@ import { Common } from './common.service';
 import { Express } from 'express';
 import { DateTime } from 'luxon';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
 
 @ApiTags('Common')
 @Controller('common')
@@ -70,16 +74,17 @@ export class CommonController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
+      limits: { fileSize: MAX_UPLOAD_SIZE },
     }),
   )
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Query('path') path: string,
     @Query('public') isPublic: string,
+    @Res() res: any,
   ) {
     if (!file) {
-      throw new BadRequestException('File is required');
+      return res.status(400).json({ message: 'File is required' });
     }
 
     try {
@@ -90,8 +95,15 @@ export class CommonController {
         file.mimetype,
         isPublic !== 'false',
       );
-      return { url };
-    } catch (err) {
+      return res.status(201).json({ url });
+    } catch (err: any) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({
+            message: `File size exceeds the maximum limit of ${(MAX_UPLOAD_SIZE / (1024 * 1024)).toFixed(2)}MB. Please compress the file and try again.`,
+          });
+        }
+      }
       throw new InternalServerErrorException('File upload failed');
     }
   }

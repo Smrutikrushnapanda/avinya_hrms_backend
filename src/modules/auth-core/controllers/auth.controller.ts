@@ -148,9 +148,7 @@ export class AuthController {
     summary: 'Send password reset OTP to registered email',
   })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    return this.authService.sendPasswordResetOtp(
-      forgotPasswordDto.identifier,
-    );
+    return this.authService.sendPasswordResetOtp(forgotPasswordDto.identifier);
   }
 
   @Post('reset-password')
