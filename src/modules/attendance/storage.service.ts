@@ -19,7 +19,7 @@ interface StoredObject {
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
   private readonly cloudinaryBaseFolder = 'hrms/attendance';
-  private readonly hardFileSizeBytes = 5 * 1024 * 1024; // 5 MB
+  private readonly hardFileSizeBytes = 2 * 1024 * 1024; // 2 MB
   private readonly targetMaxBytes = 400 * 1024; // 400 KB cap after compression
 
   constructor(private readonly configService: ConfigService) {

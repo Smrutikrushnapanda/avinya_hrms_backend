@@ -78,7 +78,7 @@ export class AttendanceController {
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description:
-      'Upload a check-in / check-out photo. File must be JPEG/PNG/WebP under 5MB; stored key is saved to DB.',
+      'Upload a check-in / check-out photo. File must be JPEG/PNG/WebP under 2MB; stored key is saved to DB.',
     schema: {
       type: 'object',
       properties: {
@@ -97,7 +97,7 @@ export class AttendanceController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: 2 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/webp'];
         if (!allowed.includes(file.mimetype)) {

@@ -26,7 +26,7 @@ import { Express } from 'express';
 import { DateTime } from 'luxon';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 
-const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+const MAX_UPLOAD_SIZE = 2 * 1024 * 1024;
 
 @ApiTags('Common')
 @Controller('common')

@@ -22,9 +22,9 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 /**
- * Maximum file size in bytes (5MB)
+ * Maximum file size in bytes (2MB)
  */
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_FILE_SIZE = 2 * 1024 * 1024;
 
 /**
  * Folder name in Cloudinary
@@ -90,7 +90,7 @@ export class UploadService {
 
     if (file.size > MAX_FILE_SIZE) {
       throw new BadRequestException(
-        `File size exceeds the maximum limit of 5MB`,
+        `File size exceeds the maximum limit of 2MB`,
       );
     }
   }
