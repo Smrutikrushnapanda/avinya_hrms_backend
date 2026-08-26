@@ -98,9 +98,7 @@ export class RolesService {
       );
     }
 
-    // Optional: check org match or if default roles are allowed for that user
-
-    //await this.userRoleRepo.delete({ user: { id: dto.userId } });
+    await this.userRoleRepo.delete({ user: { id: dto.userId } });
 
     const userRoles = roles.map((role) =>
       this.userRoleRepo.create({
