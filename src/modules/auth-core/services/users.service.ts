@@ -160,6 +160,26 @@ export class UsersService {
     await this.userRoleRepository.save(userRoles);
   }
 
+  private async isUserAdmin(userId: string): Promise<boolean> {
+    const count = await this.userRoleRepository
+      .createQueryBuilder('userRole')
+      .innerJoin('userRole.role', 'role')
+      .where('userRole.user_id = :userId', { userId })
+      .andWhere('role.role_name = :roleName', { roleName: 'ADMIN' })
+      .getCount();
+    return count > 0;
+  }
+
+  private async countOrganizationAdmins(organizationId: string): Promise<number> {
+    return this.userRoleRepository
+      .createQueryBuilder('userRole')
+      .innerJoin('userRole.role', 'role')
+      .innerJoin('userRole.user', 'user')
+      .where('user.organization_id = :organizationId', { organizationId })
+      .andWhere('role.role_name = :roleName', { roleName: 'ADMIN' })
+      .getCount();
+  }
+
   private registerOtpKey(channel: 'mobile' | 'email', value: string): string {
     return `register-otp:${channel}:${value.trim().toLowerCase()}`;
   }
@@ -466,6 +486,19 @@ export class UsersService {
           'This user is an employee. Their role is managed from the Employees module.',
         );
       }
+      const isTargetAdmin = await this.isUserAdmin(userId);
+      const keepsAdminRole = roleIds.length
+        ? await this.roleRepository.exists({
+            where: { id: In(roleIds), roleName: 'ADMIN' },
+          })
+        : false;
+      if (
+        isTargetAdmin &&
+        !keepsAdminRole &&
+        (await this.countOrganizationAdmins(user.organizationId)) <= 1
+      ) {
+        throw new BadRequestException('At least one admin account is required.');
+      }
       await this.userRoleRepository.delete({ user: { id: userId } });
       await this.assignRolesToUser(
         userId,
@@ -561,6 +594,12 @@ export class UsersService {
       throw new BadRequestException(
         'This user is an employee. Remove the employee record from the Employees module instead.',
       );
+    }
+    if (
+      (await this.isUserAdmin(userId)) &&
+      (await this.countOrganizationAdmins(user.organizationId)) <= 1
+    ) {
+      throw new BadRequestException('At least one admin account is required.');
     }
 
     try {
