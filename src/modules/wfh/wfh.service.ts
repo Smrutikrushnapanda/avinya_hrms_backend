@@ -4,8 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { WfhRequest } from './entities/wfh-request.entity';
 import { WfhApproval } from './entities/wfh-approval.entity';
 import { WfhApprovalAssignment } from './entities/wfh-approval-assignment.entity';
@@ -63,6 +63,8 @@ export class WfhService {
     private messageGateway: MessageGateway,
     private messageService: MessageService,
     private mailService: MailService,
+    @InjectDataSource()
+    private dataSource: DataSource,
   ) {}
 
   async applyForWfh(userId: string, dto: ApplyWfhDto) {
@@ -147,13 +149,26 @@ export class WfhService {
       // Best-effort balance tracking for combined reporting — hybrid/
       // permanent-remote employees are governed by the quota above, not
       // the balance, so a missing balance row must not block them.
+      // Deduction is atomic so simultaneous approvals cannot overwrite each
+      // other's delta; it stays NON-blocking (no error thrown) to preserve the
+      // "quota governs, balance tracks" business rule, and it never pushes a
+      // balance negative.
       const balance = await this.wfhBalanceRepo.findOne({
         where: { user: { id: userId } },
       });
       if (balance) {
-        balance.consumed += numberOfDays;
-        balance.closingBalance -= numberOfDays;
-        await this.wfhBalanceRepo.save(balance);
+        await this.wfhBalanceRepo
+          .createQueryBuilder()
+          .update()
+          .set({
+            consumed: () => `consumed + ${numberOfDays}`,
+            closingBalance: () => `closingBalance - ${numberOfDays}`,
+          })
+          .where('id = :id AND closingBalance >= :numberOfDays', {
+            id: balance.id,
+            numberOfDays,
+          })
+          .execute();
       }
 
       this.messageGateway.emitToUser(userId, {
@@ -333,21 +348,58 @@ export class WfhService {
         return { message: 'WFH request rejected' };
       }
 
-      request.status = 'APPROVED';
-      request.approvedBy = { id: approverId } as any;
-      request.approvedAt = now;
-      await this.requestRepo.save(request);
+      // Mark the request APPROVED and deduct the WFH balance as ONE atomic,
+      // pessimistically-locked step so that:
+      //  - a repeated/concurrent submission of the SAME approval cannot
+      //    double-deduct (only still-pending requests are approved), and
+      //  - approvals of DIFFERENT requests touching the SAME employee cannot
+      //    overwrite each other's balance delta, and
+      //  - an insufficient balance rolls the whole step back so the request is
+      //    never left marked approved without a deduction.
+      await this.dataSource.transaction(async (manager) => {
+        const lockedReq = await manager.findOne(WfhRequest, {
+          where: { id: request.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedReq) throw new NotFoundException('WFH request not found');
 
-      // Deduct WFH balance
-      const balance = await this.wfhBalanceRepo.findOne({
-        where: { user: { id: request.user.id } },
+        // Idempotency guard: if another actor already approved it, do nothing.
+        if (lockedReq.status !== 'PENDING') {
+          return;
+        }
+
+        const wfhBalance = await manager.findOne(WfhBalance, {
+          where: { user: { id: request.user.id } },
+        });
+        if (wfhBalance) {
+          const daysToDeduct = Math.max(1, request.numberOfDays || 0);
+          const deducted = await manager
+            .createQueryBuilder()
+            .update(WfhBalance)
+            .set({
+              consumed: () => `consumed + ${daysToDeduct}`,
+              closingBalance: () => `closingBalance - ${daysToDeduct}`,
+            })
+            .where('id = :id AND closingBalance >= :daysToDeduct', {
+              id: wfhBalance.id,
+              daysToDeduct,
+            })
+            .execute();
+          if (deducted.affected === 0) {
+            throw new BadRequestException('Insufficient WFH balance');
+          }
+        }
+
+        await manager.update(
+          WfhRequest,
+          { id: lockedReq.id },
+          {
+            status: 'APPROVED',
+            approvedBy: { id: approverId } as any,
+            approvedAt: now,
+          },
+        );
       });
-      if (balance) {
-        const daysToDeduct = Math.max(1, request.numberOfDays || 0);
-        balance.consumed += daysToDeduct;
-        balance.closingBalance -= daysToDeduct;
-        await this.wfhBalanceRepo.save(balance);
-      }
 
       this.messageGateway.emitToUser(request.user.id, {
         type: 'wfh:approved',

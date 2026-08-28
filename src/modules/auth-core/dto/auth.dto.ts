@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  Matches,
   MinLength,
 } from 'class-validator';
 
@@ -33,6 +34,7 @@ export class ResetPasswordDto {
 
   @IsString()
   @Length(6, 6, { message: 'OTP must be 6 digits' })
+  @Matches(/^\d{6}$/, { message: 'OTP must be 6 digits' })
   otp: string;
 
   @IsOptional()

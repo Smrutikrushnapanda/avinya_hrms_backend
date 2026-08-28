@@ -50,13 +50,16 @@ const dataSource = new DataSource({
     process.env.NODE_ENV !== 'production' ||
     (process.env.DB_SYNCHRONIZE || '').toLowerCase() === 'true',
 
-  // Hosted Postgres needs SSL and conservative pool sizing.
+  // Hosted Postgres needs SSL and conservative pool sizing. Raised from the
+  // previous single connection (max: 1) so multiple concurrent admins do not
+  // serialize every read/write through one connection. Kept conservative (10)
+  // to stay within typical free-tier PG limits.
   ...(hostedConnection && {
-    poolSize: 1,
+    poolSize: 10,
     ...(useSsl && { ssl: { rejectUnauthorized: false } }),
     extra: {
       ...(useSsl && { ssl: { rejectUnauthorized: false } }),
-      max: 1,
+      max: 10,
       idleTimeoutMillis: 600000,
       connectionTimeoutMillis: 30000,
     },

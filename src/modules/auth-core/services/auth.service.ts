@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -525,12 +526,18 @@ export class AuthService {
           expiresInMinutes: 10,
         });
       } catch (emailError) {
-        // Log the real error so it appears in production logs
+        // Log the detailed error server-side only — never expose provider
+        // details, host, credentials, or stack traces to clients.
         console.error(
           `[sendPasswordResetOtp] Email delivery failed for ${otpEmail}:`,
           emailError?.message ?? emailError,
         );
-        // OTP is already persisted — the user can retry; don't expose internals
+        // The OTP is already persisted, so a retry after the delivery problem
+        // is fixed will work. Surface a controlled, safe failure to the caller
+        // instead of returning a misleading "OTP sent" success.
+        throw new ServiceUnavailableException(
+          'Unable to send OTP right now. Please try again later.',
+        );
       }
     }
 

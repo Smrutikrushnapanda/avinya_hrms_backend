@@ -112,10 +112,20 @@ export class MailService {
       'MAIL_FROM_NAME',
       'HRMS Notifications',
     );
-    const email = this.configService.get<string>(
-      'MAIL_FROM_EMAIL',
-      'a3a15c001@smtp-brevo.com',
-    );
+    // Prefer the explicitly configured sender. Fall back to the Brevo SMTP
+    // login address (BREVO_SMTP_USER), which Brevo always authorizes as a
+    // sender. Fail clearly if neither is configured rather than sending from
+    // a hard-coded, potentially invalid address.
+    const email =
+      this.configService.get<string>('MAIL_FROM_EMAIL') ||
+      this.configService.get<string>('BREVO_SMTP_USER');
+
+    if (!email) {
+      throw new Error(
+        'Email sender is not configured. Set MAIL_FROM_EMAIL (or BREVO_SMTP_USER) to send emails.',
+      );
+    }
+
     return `"${name}" <${email}>`;
   }
 
@@ -212,6 +222,16 @@ export class MailService {
 
   private async send(options: nodemailer.SendMailOptions): Promise<void> {
     try {
+      const recipient = options.to;
+      const isEmpty =
+        !recipient ||
+        (Array.isArray(recipient) && recipient.length === 0) ||
+        (typeof recipient === 'string' && recipient.trim() === '');
+
+      if (isEmpty) {
+        throw new Error('No valid recipient defined for this email');
+      }
+
       await this.transporter.sendMail(options);
       this.logger.log(
         `Email sent to ${

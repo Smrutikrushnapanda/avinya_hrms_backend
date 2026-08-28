@@ -4,8 +4,8 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, Between, DataSource } from 'typeorm';
 import {
   LeaveType,
   LeavePolicy,
@@ -57,6 +57,8 @@ export class LeaveService {
     private messageGateway: MessageGateway,
     private messageService: MessageService,
     private mailService: MailService,
+    @InjectDataSource()
+    private dataSource: DataSource,
   ) {}
 
   // ─── Leave Types ───
@@ -126,26 +128,40 @@ export class LeaveService {
   async initializeLeaveBalance(
     dto: InitializeBalanceDto,
   ): Promise<LeaveBalance> {
-    const existing = await this.balanceRepo.findOne({
-      where: { user: { id: dto.userId }, leaveType: { id: dto.leaveTypeId } },
-    });
+    // Manual balance edit: serialize with a pessimistic row lock inside a
+    // transaction so two admins editing the same balance at once cannot
+    // silently overwrite each other's change. The row becomes the single
+    // authority for the read-modify-write; the second editor waits, then
+    // recomputes against the committed values.
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager.findOne(LeaveBalance, {
+        where: { user: { id: dto.userId }, leaveType: { id: dto.leaveTypeId } },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    if (existing) {
-      existing.openingBalance = dto.openingBalance;
-      existing.closingBalance =
-        dto.openingBalance +
-        existing.accrued -
-        existing.consumed +
-        existing.carriedForward -
-        existing.encashed;
-      return this.balanceRepo.save(existing);
-    }
+      if (existing) {
+        existing.openingBalance = dto.openingBalance;
+        existing.closingBalance =
+          dto.openingBalance +
+          existing.accrued -
+          existing.consumed +
+          existing.carriedForward -
+          existing.encashed;
+        return manager.save(existing);
+      }
 
-    return this.balanceRepo.save({
-      user: { id: dto.userId },
-      leaveType: { id: dto.leaveTypeId },
-      openingBalance: dto.openingBalance,
-      closingBalance: dto.openingBalance,
+      // Still inside the transaction: the (user, leaveType) unique index
+      // backstops the create race — only one concurrent delete-then-create
+      // wins; the loser surfaces a unique conflict instead of a silent
+      // lost update.
+      return manager.save(
+        manager.create(LeaveBalance, {
+          user: { id: dto.userId } as any,
+          leaveType: { id: dto.leaveTypeId } as any,
+          openingBalance: dto.openingBalance,
+          closingBalance: dto.openingBalance,
+        }),
+      );
     });
   }
 
@@ -170,26 +186,34 @@ export class LeaveService {
       );
     }
 
-    let balance = await this.balanceRepo.findOne({
-      where: { user: { id: userId }, leaveType: { id: earnedType.id } },
-    });
-
-    if (!balance) {
-      balance = this.balanceRepo.create({
-        user: { id: userId },
-        leaveType: earnedType,
-        openingBalance: 0,
-        accrued: 0,
-        consumed: 0,
-        carriedForward: 0,
-        encashed: 0,
-        closingBalance: 0,
+    // The earned-leave credit is a source-of-truth balance operation, so it must
+    // not lose an update if two credits for the same user arrive concurrently.
+    // Serialize with a pessimistic row lock inside a transaction (matches the
+    // pattern used in the approval flows); the unique (user, leaveType) index
+    // backstops the create race. NotFoundException above left untouched.
+    return this.dataSource.transaction(async (manager) => {
+      let balance = await manager.findOne(LeaveBalance, {
+        where: { user: { id: userId }, leaveType: { id: earnedType.id } },
+        lock: { mode: 'pessimistic_write' },
       });
-    }
 
-    balance.accrued += days;
-    balance.closingBalance += days;
-    return this.balanceRepo.save(balance);
+      if (!balance) {
+        balance = manager.create(LeaveBalance, {
+          user: { id: userId },
+          leaveType: earnedType,
+          openingBalance: 0,
+          accrued: 0,
+          consumed: 0,
+          carriedForward: 0,
+          encashed: 0,
+          closingBalance: 0,
+        });
+      }
+
+      balance.accrued += days;
+      balance.closingBalance += days;
+      return manager.save(balance);
+    });
   }
 
   // ─── Leave Balance Templates ───
@@ -296,40 +320,46 @@ export class LeaveService {
       const empType = emp.employmentType || '';
       const empTemplates = templatesByEmploymentType[empType] || [];
       for (const template of empTemplates) {
-        const existing = await this.balanceRepo.findOne({
-          where: {
-            user: { id: emp.userId },
-            leaveType: { id: template.leaveType.id },
-          },
+        // Per-row transaction + pessimistic lock: two admins running a
+        // rollover at once cannot clobber each other's carry-forward recompute
+        // or silently overwrite one another's balance values.
+        await this.dataSource.transaction(async (manager) => {
+          const existing = await manager.findOne(LeaveBalance, {
+            where: {
+              user: { id: emp.userId },
+              leaveType: { id: template.leaveType.id },
+            },
+            lock: { mode: 'pessimistic_write' },
+          });
+
+          const carry = carryForwardEnabled
+            ? Math.max(0, Number(existing?.closingBalance ?? 0))
+            : 0;
+          const opening = Number(template.openingBalance || 0) + carry;
+
+          if (existing) {
+            existing.openingBalance = opening;
+            existing.carriedForward = carry;
+            existing.accrued = 0;
+            existing.consumed = 0;
+            existing.encashed = 0;
+            existing.closingBalance = opening;
+            await manager.save(existing);
+          } else {
+            await manager.save(
+              manager.create(LeaveBalance, {
+                user: { id: emp.userId } as any,
+                leaveType: { id: template.leaveType.id } as any,
+                openingBalance: opening,
+                carriedForward: carry,
+                accrued: 0,
+                consumed: 0,
+                encashed: 0,
+                closingBalance: opening,
+              }),
+            );
+          }
         });
-
-        const carry = carryForwardEnabled
-          ? Math.max(0, Number(existing?.closingBalance ?? 0))
-          : 0;
-        const opening = Number(template.openingBalance || 0) + carry;
-
-        if (existing) {
-          existing.openingBalance = opening;
-          existing.carriedForward = carry;
-          existing.accrued = 0;
-          existing.consumed = 0;
-          existing.encashed = 0;
-          existing.closingBalance = opening;
-          await this.balanceRepo.save(existing);
-        } else {
-          await this.balanceRepo.save(
-            this.balanceRepo.create({
-              user: { id: emp.userId } as any,
-              leaveType: { id: template.leaveType.id } as any,
-              openingBalance: opening,
-              carriedForward: carry,
-              accrued: 0,
-              consumed: 0,
-              encashed: 0,
-              closingBalance: opening,
-            }),
-          );
-        }
         updated += 1;
       }
     }
@@ -555,78 +585,106 @@ export class LeaveService {
         return { message: 'Leave rejected' };
       }
 
-      // Approve the request
-      request.status = 'APPROVED';
-      request.approvedBy = { id: approverId } as any;
-      request.approvedAt = now;
-      await this.requestRepo.save(request);
+      // Deduct the leave balance AND mark the request as approved in ONE atomic,
+      // pessimistically-locked step so that:
+      //  - two concurrent submissions of the SAME approval cannot double-deduct
+      //    (only a still-PENDING request is processed), and
+      //  - approvals of DIFFERENT requests touching the SAME employee cannot
+      //    overwrite each other's balance delta, and
+      //  - an insufficient balance rolls the whole step back so the request is
+      //    never left marked approved without a deduction.
+      let acted = false;
 
-      // Deduct leave balance
-      const balance = await this.balanceRepo.findOne({
-        where: {
-          user: { id: request.user.id },
-          leaveType: { id: request.leaveType.id },
-        },
-      });
+      await this.dataSource.transaction(async (manager) => {
+        const lockedReq = await manager.findOne(LeaveRequest, {
+          where: { id: request.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedReq) throw new NotFoundException('Leave request not found');
 
-      if (balance) {
-        const hasExplicitPaidSplit =
-          Number(request.paidDays ?? 0) > 0 ||
-          Number(request.unpaidDays ?? 0) > 0;
-        const payableDays = hasExplicitPaidSplit
-          ? Number(request.paidDays ?? 0)
-          : Number(request.numberOfDays ?? 0);
-        const daysToDeduct = Math.max(0, payableDays);
-        if (daysToDeduct > 0) {
-          // Atomic deduction with an over-draw guard: concurrent approvals
-          // cannot consume the same balance twice or push it negative.
-          const deducted = await this.balanceRepo
-            .createQueryBuilder()
-            .update()
-            .set({
-              consumed: () => `consumed + ${daysToDeduct}`,
-              closingBalance: () => `closingBalance - ${daysToDeduct}`,
-            })
-            .where('id = :id AND closingBalance >= :daysToDeduct', {
-              id: balance.id,
-              daysToDeduct,
-            })
-            .execute();
-          if (deducted.affected === 0) {
-            throw new BadRequestException(
-              'Insufficient leave balance to approve this request.',
-            );
+        // Idempotency guard: if another actor already acted, do nothing.
+        if (lockedReq.status !== 'PENDING') {
+          return;
+        }
+        acted = true;
+
+        // Best-effort deduction: if no balance row exists, skip (preserves the
+        // existing "no balance → no deduction" business rule).
+        const txnBalance = await manager.findOne(LeaveBalance, {
+          where: {
+            user: { id: request.user.id },
+            leaveType: { id: request.leaveType.id },
+          },
+        });
+        if (txnBalance) {
+          const hasExplicitPaidSplit =
+            Number(request.paidDays ?? 0) > 0 ||
+            Number(request.unpaidDays ?? 0) > 0;
+          const payableDays = hasExplicitPaidSplit
+            ? Number(request.paidDays ?? 0)
+            : Number(request.numberOfDays ?? 0);
+          const daysToDeduct = Math.max(0, payableDays);
+          if (daysToDeduct > 0) {
+            const deducted = await manager
+              .createQueryBuilder()
+              .update(LeaveBalance)
+              .set({
+                consumed: () => `consumed + ${daysToDeduct}`,
+                closingBalance: () => `closingBalance - ${daysToDeduct}`,
+              })
+              .where('id = :id AND closingBalance >= :daysToDeduct', {
+                id: txnBalance.id,
+                daysToDeduct,
+              })
+              .execute();
+            if (deducted.affected === 0) {
+              throw new BadRequestException(
+                'Insufficient leave balance to approve this request.',
+              );
+            }
           }
         }
-      }
 
-      this.messageGateway.emitToUser(request.user.id, {
-        type: 'leave:approved',
-        message: 'Your leave request has been approved',
-        requestId: request.id,
+        await manager.update(
+          LeaveRequest,
+          { id: lockedReq.id },
+          {
+            status: 'APPROVED',
+            approvedBy: { id: approverId } as any,
+            approvedAt: now,
+          },
+        );
       });
-      await this.messageService.createMessage(approverId, {
-        organizationId: request.user.organizationId,
-        recipientUserIds: [request.user.id],
-        title: 'Leave Approved',
-        body: 'Your leave request has been approved.',
-        type: 'leave',
-      });
-      if (request.user.email) {
-        this.mailService
-          .sendLeaveStatus(
-            { email: request.user.email, firstName: request.user.firstName },
-            'APPROVED',
-            {
-              leaveType: request.leaveType?.name ?? 'Leave',
-              startDate: request.startDate,
-              endDate: request.endDate,
-              numberOfDays: request.numberOfDays,
-              remarks,
-            },
-            request.user.organizationId,
-          )
-          .catch(() => undefined);
+
+      if (acted) {
+        this.messageGateway.emitToUser(request.user.id, {
+          type: 'leave:approved',
+          message: 'Your leave request has been approved',
+          requestId: request.id,
+        });
+        await this.messageService.createMessage(approverId, {
+          organizationId: request.user.organizationId,
+          recipientUserIds: [request.user.id],
+          title: 'Leave Approved',
+          body: 'Your leave request has been approved.',
+          type: 'leave',
+        });
+        if (request.user.email) {
+          this.mailService
+            .sendLeaveStatus(
+              { email: request.user.email, firstName: request.user.firstName },
+              'APPROVED',
+              {
+                leaveType: request.leaveType?.name ?? 'Leave',
+                startDate: request.startDate,
+                endDate: request.endDate,
+                numberOfDays: request.numberOfDays,
+                remarks,
+              },
+              request.user.organizationId,
+            )
+            .catch(() => undefined);
+        }
       }
 
       return { message: 'Leave approved' };
@@ -639,14 +697,15 @@ export class LeaveService {
       throw new ForbiddenException('Not authorized or already acted');
     }
 
-    currentApproval.status = approve ? 'APPROVED' : 'REJECTED';
-    currentApproval.remarks = remarks;
-    currentApproval.actionAt = new Date();
-    await this.approvalRepo.save(currentApproval);
-
     const userId = request.user.id;
 
     if (!approve) {
+      // ── Rejection (unchanged behavior) ──
+      currentApproval.status = 'REJECTED';
+      currentApproval.remarks = remarks;
+      currentApproval.actionAt = new Date();
+      await this.approvalRepo.save(currentApproval);
+
       request.status = 'REJECTED';
       await this.requestRepo.save(request);
 
@@ -684,7 +743,14 @@ export class LeaveService {
 
     const nextLevel = currentApproval.level + 1;
     const nextApproval = request.approvals.find((a) => a.level === nextLevel);
+
     if (nextApproval) {
+      // ── Intermediate step: advance the workflow chain ──
+      currentApproval.status = 'APPROVED';
+      currentApproval.remarks = remarks;
+      currentApproval.actionAt = new Date();
+      await this.approvalRepo.save(currentApproval);
+
       nextApproval.status = 'PENDING';
       await this.approvalRepo.save(nextApproval);
 
@@ -694,71 +760,125 @@ export class LeaveService {
         requestId: request.id,
       });
     } else {
-      request.status = 'APPROVED';
-      await this.requestRepo.save(request);
+      // ── Final approval: settle atomically and idempotently ──
+      // The pessimistic row lock on the approval row serializes concurrent
+      // attempts on the SAME request: the loser waits, then sees the status is
+      // no longer PENDING and backs out WITHOUT deducting twice. The balance is
+      // consumed with an atomic guarded UPDATE so approvals of DIFFERENT
+      // requests touching the SAME employee can never overwrite each other's
+      // delta. If the balance is insufficient the whole transaction rolls back,
+      // so the request is never left marked APPROVED without a deduction.
+      let acted = false;
 
-      let balance = await this.balanceRepo.findOne({
-        where: {
-          user: { id: request.user.id },
-          leaveType: { id: request.leaveType.id },
-        },
-      });
+      await this.dataSource.transaction(async (manager) => {
+        const lockedApproval = await manager.findOne(LeaveApproval, {
+          where: { id: currentApproval.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedApproval || lockedApproval.status !== 'PENDING') {
+          // Already acted on (a retry or a concurrent request) — do nothing.
+          return;
+        }
 
-      if (!balance) {
-        balance = await this.balanceRepo.save(
-          this.balanceRepo.create({
-            user: { id: request.user.id } as any,
-            leaveType: { id: request.leaveType.id } as any,
-            openingBalance: 0,
-            accrued: 0,
-            consumed: 0,
-            carriedForward: 0,
-            encashed: 0,
-            closingBalance: 0,
-          }),
-        );
-      }
+        acted = true;
 
-      const hasExplicitPaidSplit =
-        Number(request.paidDays ?? 0) > 0 ||
-        Number(request.unpaidDays ?? 0) > 0;
-      const payableDays = hasExplicitPaidSplit
-        ? Number(request.paidDays ?? 0)
-        : Number(request.numberOfDays ?? 0);
-      const daysToDeduct = Math.max(0, payableDays);
-      if (daysToDeduct > 0) {
-        balance.consumed += daysToDeduct;
-        balance.closingBalance -= daysToDeduct;
-        await this.balanceRepo.save(balance);
-      }
+        const hasExplicitPaidSplit =
+          Number(request.paidDays ?? 0) > 0 ||
+          Number(request.unpaidDays ?? 0) > 0;
+        const payableDays = hasExplicitPaidSplit
+          ? Number(request.paidDays ?? 0)
+          : Number(request.numberOfDays ?? 0);
+        const daysToDeduct = Math.max(0, payableDays);
 
-      this.messageGateway.emitToUser(userId, {
-        type: 'leave:approved',
-        message: 'Your leave request has been approved',
-        requestId: request.id,
-      });
-      await this.messageService.createMessage(approverId, {
-        organizationId: request.user.organizationId,
-        recipientUserIds: [userId],
-        title: 'Leave Approved',
-        body: 'Your leave request has been approved.',
-        type: 'leave',
-      });
-      if (request.user.email) {
-        this.mailService
-          .sendLeaveStatus(
-            { email: request.user.email, firstName: request.user.firstName },
-            'APPROVED',
-            {
-              leaveType: request.leaveType?.name ?? 'Leave',
-              startDate: request.startDate,
-              endDate: request.endDate,
-              numberOfDays: request.numberOfDays,
-              remarks,
+        if (daysToDeduct > 0) {
+          let txnBalance = await manager.findOne(LeaveBalance, {
+            where: {
+              user: { id: request.user.id },
+              leaveType: { id: request.leaveType.id },
             },
-            request.user.organizationId,
-          )
-          .catch(() => undefined);
+          });
+
+          if (!txnBalance) {
+            txnBalance = await manager.save(
+              manager.create(LeaveBalance, {
+                user: { id: request.user.id } as any,
+                leaveType: { id: request.leaveType.id } as any,
+                openingBalance: 0,
+                accrued: 0,
+                carriedForward: 0,
+                encashed: 0,
+                consumed: 0,
+                closingBalance: 0,
+              }),
+            );
+          }
+
+          const deducted = await manager
+            .createQueryBuilder()
+            .update(LeaveBalance)
+            .set({
+              consumed: () => `consumed + ${daysToDeduct}`,
+              closingBalance: () => `closingBalance - ${daysToDeduct}`,
+            })
+            .where('id = :id AND closingBalance >= :daysToDeduct', {
+              id: txnBalance.id,
+              daysToDeduct,
+            })
+            .execute();
+
+          if (deducted.affected === 0) {
+            throw new BadRequestException(
+              'Insufficient leave balance to approve this request.',
+            );
+          }
+        }
+
+        await manager.update(
+          LeaveApproval,
+          { id: lockedApproval.id },
+          { status: 'APPROVED', remarks, actionAt: new Date() },
+        );
+
+        await manager.update(
+          LeaveRequest,
+          { id: request.id },
+          {
+            status: 'APPROVED',
+            approvedBy: { id: approverId } as any,
+            approvedAt: new Date(),
+          },
+        );
+      });
+
+      if (acted) {
+        this.messageGateway.emitToUser(userId, {
+          type: 'leave:approved',
+          message: 'Your leave request has been approved',
+          requestId: request.id,
+        });
+        await this.messageService.createMessage(approverId, {
+          organizationId: request.user.organizationId,
+          recipientUserIds: [userId],
+          title: 'Leave Approved',
+          body: 'Your leave request has been approved.',
+          type: 'leave',
+        });
+        if (request.user.email) {
+          this.mailService
+            .sendLeaveStatus(
+              { email: request.user.email, firstName: request.user.firstName },
+              'APPROVED',
+              {
+                leaveType: request.leaveType?.name ?? 'Leave',
+                startDate: request.startDate,
+                endDate: request.endDate,
+                numberOfDays: request.numberOfDays,
+                remarks,
+              },
+              request.user.organizationId,
+            )
+            .catch(() => undefined);
+        }
       }
     }
 
