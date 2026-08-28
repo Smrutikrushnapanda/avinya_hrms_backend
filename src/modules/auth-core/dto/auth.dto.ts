@@ -7,6 +7,7 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class LoginDto {
   @IsString()
@@ -40,6 +41,9 @@ export class ResetPasswordDto {
   @IsOptional()
   @IsString()
   @MinLength(3, { message: 'User ID must be at least 3 characters' })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
   newUserName?: string;
 
   @IsString()
