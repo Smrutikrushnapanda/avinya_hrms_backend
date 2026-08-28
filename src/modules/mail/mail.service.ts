@@ -238,9 +238,15 @@ export class MailService {
           Array.isArray(options.to) ? options.to.join(', ') : options.to
         }`,
       );
-    } catch (error) {
+    } catch (error: any) {
+      // Extract SMTP-specific diagnostics for production debugging.
+      // Nodemailer attaches `code` (e.g. 'EAUTH', 'ECONNECTION') and
+      // `responseCode` (e.g. 535, 550) to transport errors.  These are
+      // safe to log — they never contain credentials.
+      const smtpCode = error.code ?? 'UNKNOWN';
+      const smtpResponseCode = error.responseCode ?? 'N/A';
       this.logger.error(
-        `Failed to send email to ${options.to}: ${error.message}`,
+        `Failed to send email to ${options.to} | code=${smtpCode} response=${smtpResponseCode}: ${error.message}`,
         error.stack,
       );
       throw error; // re-throw so callers can handle/log the failure

@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -39,6 +40,8 @@ interface PasswordResetTarget {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private jwtService: JwtService,
     private userActivitiesService: UserActivitiesService,
@@ -528,9 +531,9 @@ export class AuthService {
       } catch (emailError) {
         // Log the detailed error server-side only — never expose provider
         // details, host, credentials, or stack traces to clients.
-        console.error(
-          `[sendPasswordResetOtp] Email delivery failed for ${otpEmail}:`,
-          emailError?.message ?? emailError,
+        this.logger.error(
+          `[sendPasswordResetOtp] Email delivery failed for ${otpEmail}: ${emailError?.message ?? emailError}`,
+          emailError?.stack,
         );
         // The OTP is already persisted, so a retry after the delivery problem
         // is fixed will work. Surface a controlled, safe failure to the caller
