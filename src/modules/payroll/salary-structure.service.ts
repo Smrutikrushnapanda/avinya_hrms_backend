@@ -186,28 +186,24 @@ export class SalaryStructureService {
     excludeId?: string,
   ): Promise<void> {
     const qb = this.salaryStructureRepo
-      .createQueryBuilder('ss')
+      .createQueryBuilder()
       .update(SalaryStructure)
       .set({ status: 'inactive' })
-      .where('ss.employeeId = :employeeId', { employeeId })
-      .andWhere('ss.status = :status', { status: 'active' });
+      .where('"employee_id" = :employeeId', { employeeId })
+      .andWhere('"status" = :status', { status: 'active' });
 
     if (excludeId) {
-      qb.andWhere('ss.id != :excludeId', { excludeId });
+      qb.andWhere('"id" != :excludeId', { excludeId });
     }
 
-    // Overlap condition: existing.effectiveFrom <= new.effectiveTo
-    // AND (existing.effectiveTo IS NULL OR existing.effectiveTo >= new.effectiveFrom)
     if (effectiveTo) {
       qb.andWhere(
-        '(ss.effectiveFrom <= :effectiveTo AND (ss.effectiveTo IS NULL OR ss.effectiveTo >= :effectiveFrom))',
+        '("effective_from" <= :effectiveTo AND ("effective_to" IS NULL OR "effective_to" >= :effectiveFrom))',
         { effectiveFrom, effectiveTo },
       );
     } else {
-      // New structure has no end date — overlaps with any existing structure
-      // whose effectiveTo is null OR whose effectiveTo >= new effectiveFrom
       qb.andWhere(
-        '(ss.effectiveTo IS NULL OR ss.effectiveTo >= :effectiveFrom)',
+        '("effective_to" IS NULL OR "effective_to" >= :effectiveFrom)',
         { effectiveFrom },
       );
     }

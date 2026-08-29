@@ -37,7 +37,7 @@ export class LeaveRequest {
   @Column({ name: 'reconciled', type: 'boolean', default: false })
   reconciled: boolean;
 
-  @Column({ name: 'reconciled_dates', type: 'varchar', length: 2000, nullable: true })
+  @Column({ name: 'reconciled_dates', type: 'text', nullable: true })
   reconciledDates: string;
 
   @Column({ name: 'number_of_days', type: 'float' })
