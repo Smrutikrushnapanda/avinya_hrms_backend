@@ -54,64 +54,69 @@ INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, s
 SELECT 'Payroll', 'BadgeDollarSign', '/admin/payroll', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 8, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/payroll');
 
+-- Salary Structure (/admin/salary-structure)
+INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
+SELECT 'Salary Structure', 'Coins', '/admin/salary-structure', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 9, true
+WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/salary-structure');
+
 -- Polls (/admin/polls)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Polls', 'Vote', '/admin/polls', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 9, true
+SELECT 'Polls', 'Vote', '/admin/polls', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 10, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/polls');
 
 -- Community Posts (/admin/posts)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Community Posts', 'MessageSquarePlus', '/admin/posts', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 10, true
+SELECT 'Community Posts', 'MessageSquarePlus', '/admin/posts', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 11, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/posts');
 
 -- Projects (/admin/projects)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Projects', 'FolderKanban', '/admin/projects', NULL, '["ADMIN"]', '["PRO","ENTERPRISE"]', 11, true
+SELECT 'Projects', 'FolderKanban', '/admin/projects', NULL, '["ADMIN"]', '["PRO","ENTERPRISE"]', 12, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/projects');
 
 -- Assign Work (/admin/assign-work)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Assign Work', 'ListTodo', '/admin/assign-work', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 12, true
+SELECT 'Assign Work', 'ListTodo', '/admin/assign-work', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 13, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/assign-work');
 
 -- Performance (/admin/performance)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Performance', 'TrendingUp', '/admin/performance', 'performance_enabled', '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 13, true
+SELECT 'Performance', 'TrendingUp', '/admin/performance', 'performance_enabled', '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 14, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/performance');
 
 -- Policy (/admin/policy)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Policy', 'Shield', '/admin/policy', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 14, true
+SELECT 'Policy', 'Shield', '/admin/policy', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 15, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/policy');
 
 -- Expenses (/admin/expenses)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Expenses', 'Receipt', '/admin/expenses', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 15, true
+SELECT 'Expenses', 'Receipt', '/admin/expenses', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 16, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/expenses');
 
 -- Office Trips (/admin/office-trips)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Office Trips', 'Plane', '/admin/office-trips', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 16, true
+SELECT 'Office Trips', 'Plane', '/admin/office-trips', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 17, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/office-trips');
 
 -- Messages (/admin/messages)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Messages', 'MessageSquarePlus', '/admin/messages', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 17, true
+SELECT 'Messages', 'MessageSquarePlus', '/admin/messages', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 18, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/messages');
 
 -- Settings (/admin/settings)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Settings', 'Settings', '/admin/settings', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 18, true
+SELECT 'Settings', 'Settings', '/admin/settings', NULL, '["ADMIN","HR"]', '["BASIC","PRO","ENTERPRISE"]', 19, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/settings');
 
 -- Reports (/admin/reports)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Reports', 'BookMarked', '/admin/reports', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 19, true
+SELECT 'Reports', 'BookMarked', '/admin/reports', NULL, '["ADMIN","HR"]', '["PRO","ENTERPRISE"]', 20, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/reports');
 
 -- Log Report (/admin/logreport)
 INSERT INTO menu_items (label, icon_name, route, condition, roles, plan_tiers, sort_order, is_active)
-SELECT 'Log Report', 'FileText', '/admin/logreport', NULL, '["ADMIN"]', '["PRO","ENTERPRISE"]', 20, true
+SELECT 'Log Report', 'FileText', '/admin/logreport', NULL, '["ADMIN"]', '["PRO","ENTERPRISE"]', 21, true
 WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE route = '/admin/logreport');
 
 -- Dashboard (/user/dashboard)

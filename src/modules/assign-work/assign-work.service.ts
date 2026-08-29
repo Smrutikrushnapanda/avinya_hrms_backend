@@ -234,7 +234,7 @@ export class AssignWorkService {
     if (type === WorkSource.INTERNAL) {
       const issue = this.issueRepo.create({
         organizationId,
-        projectId: dto.projectId!,
+        projectId: dto.projectId,
         pageName: dto.otherProjectName || 'General',
         issueTitle: dto.title,
         description: dto.description || null,

@@ -7,6 +7,9 @@ import { PayrollRecord } from './entities/payroll-record.entity';
 import { PayrollSettings } from './entities/payroll-settings.entity';
 import { PayrollNotification } from './entities/payroll-notification.entity';
 import { EmployeeBankDetail } from './entities/employee-bank-detail.entity';
+import { SalaryStructure } from './entities/salary-structure.entity';
+import { SalaryStructureController } from './salary-structure.controller';
+import { SalaryStructureService } from './salary-structure.service';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 
@@ -17,11 +20,13 @@ import { Organization } from '../auth-core/entities/organization.entity';
       PayrollSettings,
       PayrollNotification,
       EmployeeBankDetail,
+      SalaryStructure,
       Employee,
       Organization,
     ]),
   ],
-  controllers: [PayrollController],
-  providers: [PayrollService, MailService],
+  controllers: [PayrollController, SalaryStructureController],
+  providers: [PayrollService, MailService, SalaryStructureService],
+  exports: [SalaryStructureService],
 })
 export class PayrollModule {}

@@ -74,7 +74,7 @@ export class FirebaseService {
 
     const invalidTokens: string[] = [];
     try {
-      const response = await getMessaging(this.app!).sendEachForMulticast({
+      const response = await getMessaging(this.app).sendEachForMulticast({
         tokens: uniqueTokens,
         notification: {
           title: payload.title,

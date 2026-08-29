@@ -1,24 +1,96 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, MoreThanOrEqual } from 'typeorm';
 import { Meeting } from './entities/meeting.entity';
 import { CreateMeetingDto, UpdateMeetingDto } from './dto/meeting.dto';
 import { User } from '../auth-core/entities/user.entity';
 import { MessageService } from '../message/message.service';
+import { MessageGateway } from '../message/message.gateway';
 import { MailService } from '../mail/mail.service';
+import { FirebaseService } from '../firebase/firebase.service';
+import { UserPushToken } from '../auth-core/entities/user-push-token.entity';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class MeetingService implements OnModuleInit {
+  private readonly logger = new Logger(MeetingService.name);
+
   constructor(
     @InjectRepository(Meeting) private meetingRepo: Repository<Meeting>,
     @InjectRepository(User) private userRepo: Repository<User>,
+    @InjectRepository(UserPushToken) private pushTokenRepo: Repository<UserPushToken>,
     private messageService: MessageService,
+    private messageGateway: MessageGateway,
     private mailService: MailService,
+    private firebaseService: FirebaseService,
   ) {}
 
   onModuleInit() {
     console.log('MeetingService initialized - Scheduled notifications enabled');
+  }
+
+  // ─── Notification Dispatch (WebSocket + Push) ───
+
+  private async dispatchMeetingNotifications(
+    participantIds: string[],
+    meeting: { id: string; title: string; scheduledAt: Date; durationMinutes: number; meetingLink?: string | null; description?: string | null; organizationId: string },
+  ): Promise<void> {
+    const scheduledTime = new Date(meeting.scheduledAt);
+    const timeString = scheduledTime.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const dateString = scheduledTime.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const linkLine = meeting.meetingLink
+      ? `\nJoin: ${meeting.meetingLink}`
+      : '';
+
+    const title = `Meeting: ${meeting.title}`;
+    const body = `Scheduled for ${dateString} at ${timeString}\nDuration: ${meeting.durationMinutes} minutes${linkLine}\n${meeting.description || ''}`;
+
+    // 1. In-app message (DB write)
+    const result = await this.messageService.createMessage(participantIds[0], {
+      organizationId: meeting.organizationId,
+      recipientUserIds: participantIds,
+      title,
+      body,
+      type: 'meeting',
+    });
+
+    // 2. WebSocket real-time push
+    this.messageGateway.emitToUsers(participantIds, {
+      message: result.message,
+    });
+
+    // 3. Firebase push notification (mobile + background)
+    try {
+      const uniqueIds = Array.from(new Set(participantIds));
+      const pushTokens = await this.pushTokenRepo.find({
+        where: { userId: In(uniqueIds) },
+        select: ['token'],
+      });
+      const tokens = pushTokens.map((t) => t.token);
+      if (tokens.length > 0) {
+        const { invalidTokens } = await this.firebaseService.sendToTokens(tokens, {
+          title,
+          body,
+          data: {
+            type: 'meeting_notification',
+            meetingId: meeting.id,
+          },
+        });
+        if (invalidTokens.length) {
+          await this.pushTokenRepo.delete({ token: In(invalidTokens) });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Push notification failed for meeting ${meeting.id}: ${(err as Error).message}`);
+    }
   }
 
   // ─── CRUD Operations ───
@@ -260,28 +332,15 @@ export class MeetingService implements OnModuleInit {
     await this.meetingRepo.update(meetingId, { notificationSent: true });
 
     const participantIds = meeting.participants.map((p) => p.id);
-    const scheduledTime = new Date(meeting.scheduledAt);
-    const timeString = scheduledTime.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    const dateString = scheduledTime.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
 
-    const linkLine = meeting.meetingLink
-      ? `\nJoin: ${meeting.meetingLink}`
-      : '';
-
-    // Send in-app notification — single DB write for all participants
-    await this.messageService.createMessage(meeting.createdById, {
+    await this.dispatchMeetingNotifications(participantIds, {
+      id: meeting.id,
+      title: meeting.title,
+      scheduledAt: meeting.scheduledAt,
+      durationMinutes: meeting.durationMinutes,
+      meetingLink: meeting.meetingLink,
+      description: meeting.description,
       organizationId: meeting.organizationId,
-      recipientUserIds: participantIds,
-      title: `Meeting: ${meeting.title}`,
-      body: `Scheduled for ${dateString} at ${timeString}\nDuration: ${meeting.durationMinutes} minutes${linkLine}\n${meeting.description || ''}`,
-      type: 'meeting',
     });
 
     return {
@@ -326,19 +385,15 @@ export class MeetingService implements OnModuleInit {
           if (!result.affected) continue; // another process already sent it
 
           const participantIds = meeting.participants.map((p) => p.id);
-          const scheduledTime = new Date(meeting.scheduledAt);
-          const timeString = scheduledTime.toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-          });
 
-          // Send in-app notification — single DB write for all participants
-          await this.messageService.createMessage(meeting.createdById, {
+          await this.dispatchMeetingNotifications(participantIds, {
+            id: meeting.id,
+            title: meeting.title,
+            scheduledAt: meeting.scheduledAt,
+            durationMinutes: meeting.durationMinutes,
+            meetingLink: meeting.meetingLink,
+            description: meeting.description,
             organizationId: meeting.organizationId,
-            recipientUserIds: participantIds,
-            title: `Meeting Starting: ${meeting.title}`,
-            body: `Your meeting "${meeting.title}" starts at ${timeString}\nDuration: ${meeting.durationMinutes} minutes${meeting.meetingLink ? `\nJoin: ${meeting.meetingLink}` : ''}\n${meeting.description || ''}`,
-            type: 'meeting',
           });
 
           console.log(

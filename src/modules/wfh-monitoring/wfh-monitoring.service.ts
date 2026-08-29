@@ -403,7 +403,7 @@ export class WfhMonitoringService {
       const mm = d.getMinutes() < 30 ? 0 : 30;
       const bucket = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 
-      const entry = userMap.get(uid)!;
+      const entry = userMap.get(uid);
       if (!entry.bucketData[bucket]) {
         entry.bucketData[bucket] = { mouse: 0, keyboard: 0, tabs: 0 };
       }

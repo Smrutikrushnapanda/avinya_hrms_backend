@@ -163,17 +163,26 @@ export class PayrollController {
     @Res() res: Response,
     @GetUser() actor: any,
   ) {
-    const record = await this.payrollRecordRepo.findOne({ where: { id } });
-    if (record) {
+    try {
+      const record = await this.payrollRecordRepo.findOne({ where: { id } });
+      if (!record) {
+        return res.status(404).json({ message: 'Payroll record not found' });
+      }
       await this.assertEmployeeAccess(record.employeeId, actor);
+      const pdf = await this.payrollService.generateSlipPdf(id);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=salary-slip-${id}.pdf`,
+      );
+      return res.send(pdf);
+    } catch (error: any) {
+      const status = error?.status || error?.statusCode || 500;
+      const message = error?.message || 'Failed to generate payslip PDF';
+      if (!res.headersSent) {
+        return res.status(status).json({ message });
+      }
     }
-    const pdf = await this.payrollService.generateSlipPdf(id);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename=salary-slip-${id}.pdf`,
-    );
-    return res.send(pdf);
   }
 
   @Get('notifications/:employeeId')

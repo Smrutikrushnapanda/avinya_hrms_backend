@@ -141,11 +141,7 @@ export class UsersController {
     @Body() dto: UpdateFcmTokenDto,
   ) {
     const userId = user?.userId || user?.id;
-    return this.usersService.updateFcmToken(
-      userId as string,
-      dto.token,
-      dto.platform,
-    );
+    return this.usersService.updateFcmToken(userId, dto.token, dto.platform);
   }
 
   @Patch(':user_id')

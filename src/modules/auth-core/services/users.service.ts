@@ -170,7 +170,9 @@ export class UsersService {
     return count > 0;
   }
 
-  private async countOrganizationAdmins(organizationId: string): Promise<number> {
+  private async countOrganizationAdmins(
+    organizationId: string,
+  ): Promise<number> {
     return this.userRoleRepository
       .createQueryBuilder('userRole')
       .innerJoin('userRole.role', 'role')
@@ -497,7 +499,9 @@ export class UsersService {
         !keepsAdminRole &&
         (await this.countOrganizationAdmins(user.organizationId)) <= 1
       ) {
-        throw new BadRequestException('At least one admin account is required.');
+        throw new BadRequestException(
+          'At least one admin account is required.',
+        );
       }
       await this.userRoleRepository.delete({ user: { id: userId } });
       await this.assignRolesToUser(

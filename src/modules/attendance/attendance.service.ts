@@ -1314,7 +1314,7 @@ export class AttendanceService {
       const key = log.user?.id;
       if (!key) continue;
       if (!logsByUser.has(key)) logsByUser.set(key, []);
-      logsByUser.get(key)!.push(log);
+      logsByUser.get(key).push(log);
     }
 
     const employees: {
@@ -2188,7 +2188,7 @@ export class AttendanceService {
           await this.resolveShiftConfig(orgId, userId),
         );
       }
-      return shiftConfigCache.get(cacheKey)!;
+      return shiftConfigCache.get(cacheKey);
     };
 
     const holidays = await this.holidayRepo.find({
@@ -2272,7 +2272,7 @@ export class AttendanceService {
     logs.forEach((log) => {
       const key = `${log.user.id}|${log.organization.id}`;
       if (!logGroups.has(key)) logGroups.set(key, []);
-      logGroups.get(key)!.push(log);
+      logGroups.get(key).push(log);
     });
 
     const leaveMap = new Map<string, LeaveRequest>();
@@ -2508,7 +2508,7 @@ export class AttendanceService {
       branchId?: string | null,
     ): WorkingDayRuleSource => {
       if (branchId && activeBranchMap.has(branchId)) {
-        return activeBranchMap.get(branchId)!;
+        return activeBranchMap.get(branchId);
       }
       return settings;
     };
