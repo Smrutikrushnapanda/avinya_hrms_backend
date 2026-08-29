@@ -62,6 +62,9 @@ export class PayrollRecord {
   @Column({ name: 'net_pay', type: 'numeric' })
   netPay: number;
 
+  @Column({ name: 'salary_predicate_date', type: 'date', nullable: true })
+  salaryPredicateDate: string | null;
+
   @Column({ name: 'status', type: 'varchar', length: 20, default: 'draft' })
   status: PayrollStatus;
 

@@ -15,6 +15,8 @@ import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { MailService } from './mail.service';
 import * as puppeteer from 'puppeteer';
+import * as https from 'https';
+import * as http from 'http';
 
 @Injectable()
 export class PayrollService {
@@ -110,6 +112,38 @@ export class PayrollService {
     return this.bankDetailRepo.findOne({ where: { employeeId } });
   }
 
+  /**
+   * Fetch a remote image URL and convert it to a base64 data URI.
+   * This makes PDF generation independent of client-side CORS/network.
+   */
+  private async fetchLogoAsDataUri(url: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+      const client = url.startsWith('https') ? https : http;
+      const req = client.get(url, { timeout: 10000 }, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          // Follow redirect
+          this.fetchLogoAsDataUri(res.headers.location).then(resolve).catch(reject);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error(`Logo fetch failed with status ${res.statusCode}`));
+          return;
+        }
+        const contentType = res.headers['content-type'] || 'image/png';
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const base64 = buffer.toString('base64');
+          resolve(`data:${contentType};base64,${base64}`);
+        });
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Logo fetch timed out')); });
+    });
+  }
+
   async upsertBankDetail(
     employeeId: string,
     dto: UpsertEmployeeBankDetailDto,
@@ -169,6 +203,7 @@ export class PayrollService {
       totalEarnings: totals.totalEarnings,
       totalDeductions: totals.totalDeductions,
       netPay: totals.netPay,
+      salaryPredicateDate: dto.salaryPredicateDate || null,
       status: dto.status || 'draft',
     });
     return this.payrollRepo.save(record);
@@ -329,6 +364,22 @@ export class PayrollService {
       relations: ['department', 'designation'],
     });
     if (!employee) throw new NotFoundException('Employee not found');
+
+    // Fetch employee bank/statutory details (PAN, UAN, PF, ESI)
+    const bankDetail = await this.bankDetailRepo.findOne({
+      where: { employeeId: record.employeeId },
+    });
+
+    // Server-side logo fetch: download and convert to base64 data URI
+    // so PDF generation never depends on client-side image loading
+    let logoDataUri: string | null = null;
+    if (settings.logoUrl) {
+      try {
+        logoDataUri = await this.fetchLogoAsDataUri(settings.logoUrl);
+      } catch (err) {
+        this.logger.warn(`Failed to fetch logo for payslip, will use fallback: ${err}`);
+      }
+    }
     const color = settings.primaryColor || '#2f3640';
     const periodStart = new Date(record.periodStart as any);
     const periodEnd = new Date(record.periodEnd as any);
@@ -511,12 +562,14 @@ export class PayrollService {
               <div class="brand">
                 <div class="logo-box">
                   ${
-                    settings.logoUrl
-                      ? `<img src="${settings.logoUrl}" alt="logo" />`
-                      : (settings.companyName || 'C')
-                          .trim()
-                          .charAt(0)
-                          .toUpperCase()
+                    logoDataUri
+                      ? `<img src="${logoDataUri}" alt="logo" />`
+                      : settings.logoUrl
+                        ? `<img src="${settings.logoUrl}" alt="logo" />`
+                        : (settings.companyName || 'C')
+                            .trim()
+                            .charAt(0)
+                            .toUpperCase()
                   }
                 </div>
                 <div>
@@ -537,16 +590,35 @@ export class PayrollService {
                 <div class="status-badge">${record.status}</div>
               </div>
 
+              <div class="section-title">EMPLOYEE DETAILS</div>
               <div class="meta-grid">
                 <div class="meta-item"><div class="meta-k">Employee Number</div><div class="meta-v">${employee.employeeCode || '-'}</div></div>
                 <div class="meta-item"><div class="meta-k">Date Joined</div><div class="meta-v">${employee.dateOfJoining ? fmtDate(new Date(employee.dateOfJoining as any)) : '-'}</div></div>
                 <div class="meta-item"><div class="meta-k">Department</div><div class="meta-v">${employee.department?.name || '-'}</div></div>
                 <div class="meta-item"><div class="meta-k">Designation</div><div class="meta-v">${employee.designation?.name || '-'}</div></div>
-                <div class="meta-item"><div class="meta-k">PAN</div><div class="meta-v">${settings.panNumber || '-'}</div></div>
-                <div class="meta-item"><div class="meta-k">UAN / PF No</div><div class="meta-v">${settings.pfRegistrationNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Employee PAN</div><div class="meta-v">${bankDetail?.panNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">Employee UAN</div><div class="meta-v">${bankDetail?.uanNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">PF Number</div><div class="meta-v">${bankDetail?.pfNumber || '-'}</div></div>
+                <div class="meta-item"><div class="meta-k">ESI Number</div><div class="meta-v">${bankDetail?.esiNumber || '-'}</div></div>
                 <div class="meta-item"><div class="meta-k">Work Email</div><div class="meta-v">${employee.workEmail || '-'}</div></div>
                 <div class="meta-item"><div class="meta-k">Pay Period</div><div class="meta-v">${record.payPeriod}</div></div>
+                ${record.salaryPredicateDate ? `<div class="meta-item"><div class="meta-k">Salary Predicate Date</div><div class="meta-v">${fmtDate(new Date(record.salaryPredicateDate))}</div></div>` : ''}
               </div>
+
+              ${(() => {
+                const hasAnyStatutory = settings.cinNumber || settings.panNumber || settings.tanNumber || settings.gstinNumber || settings.pfRegistrationNumber || settings.esiRegistrationNumber;
+                if (!hasAnyStatutory) return '';
+                return `
+              <div class="section-title">COMPANY STATUTORY DETAILS</div>
+              <div class="meta-grid">
+                ${settings.cinNumber ? `<div class="meta-item"><div class="meta-k">Company CIN</div><div class="meta-v">${settings.cinNumber}</div></div>` : ''}
+                ${settings.panNumber ? `<div class="meta-item"><div class="meta-k">Company PAN</div><div class="meta-v">${settings.panNumber}</div></div>` : ''}
+                ${settings.tanNumber ? `<div class="meta-item"><div class="meta-k">Company TAN</div><div class="meta-v">${settings.tanNumber}</div></div>` : ''}
+                ${settings.gstinNumber ? `<div class="meta-item"><div class="meta-k">GSTIN</div><div class="meta-v">${settings.gstinNumber}</div></div>` : ''}
+                ${settings.pfRegistrationNumber ? `<div class="meta-item"><div class="meta-k">PF Registration No.</div><div class="meta-v">${settings.pfRegistrationNumber}</div></div>` : ''}
+                ${settings.esiRegistrationNumber ? `<div class="meta-item"><div class="meta-k">ESI Registration No.</div><div class="meta-v">${settings.esiRegistrationNumber}</div></div>` : ''}
+              </div>`;
+              })()}
 
               <div class="section-title">SALARY DETAILS</div>
               <div class="days-grid">

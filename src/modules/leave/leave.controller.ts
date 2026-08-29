@@ -209,6 +209,7 @@ export class LeaveController {
       dto.startDate,
       dto.endDate,
       dto.reason,
+      dto.duration,
     );
   }
 
@@ -396,5 +397,38 @@ export class LeaveController {
   ) {
     await this.leaveService.deleteEmployeeLeaveLimit(userId, leaveTypeId);
     return { message: 'Leave limit removed successfully' };
+  }
+
+  // ─── Reconciliation ───
+
+  @Post('reconcile/:requestId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
+  @ApiOperation({
+    summary:
+      'Reconcile a specific leave request — restores balance for dates where employee attended work',
+  })
+  @ApiParam({ name: 'requestId', type: 'string', format: 'uuid' })
+  async reconcileLeaveRequest(
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @GetUser() actor: AuthActor,
+  ) {
+    return this.leaveService.reconcileSingleRequest(requestId, actor.id);
+  }
+
+  @Post('reconcile-all/:orgId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Batch reconcile all unreconciled approved leaves for an organization',
+  })
+  @ApiParam({ name: 'orgId', type: 'string', format: 'uuid' })
+  async reconcileAllLeaves(
+    @Param('orgId', ParseUUIDPipe) orgId: string,
+    @GetUser() actor: AuthActor,
+  ) {
+    this.assertSameOrg(actor, orgId);
+    return this.leaveService.reconcileAllPending(orgId);
   }
 }

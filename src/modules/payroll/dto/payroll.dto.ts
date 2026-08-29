@@ -46,6 +46,10 @@ export class CreatePayrollRecordDto {
   tds: number;
 
   @IsOptional()
+  @IsDateString()
+  salaryPredicateDate?: string;
+
+  @IsOptional()
   @IsEnum(['draft', 'processed', 'paid'])
   status?: PayrollStatus;
 }
@@ -82,6 +86,10 @@ export class UpdatePayrollRecordDto {
   @IsOptional()
   @IsNumber()
   tds?: number;
+
+  @IsOptional()
+  @IsDateString()
+  salaryPredicateDate?: string;
 
   @IsOptional()
   @IsEnum(['draft', 'processed', 'paid'])

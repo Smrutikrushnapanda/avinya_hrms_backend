@@ -31,6 +31,15 @@ export class LeaveRequest {
   @Column({ name: 'end_date', type: 'date' })
   endDate: string;
 
+  @Column({ name: 'duration', type: 'float', default: 1.0 })
+  duration: number;
+
+  @Column({ name: 'reconciled', type: 'boolean', default: false })
+  reconciled: boolean;
+
+  @Column({ name: 'reconciled_dates', type: 'varchar', length: 2000, nullable: true })
+  reconciledDates: string;
+
   @Column({ name: 'number_of_days', type: 'float' })
   numberOfDays: number;
 

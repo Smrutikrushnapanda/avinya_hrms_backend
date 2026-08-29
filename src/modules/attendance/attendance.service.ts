@@ -53,6 +53,8 @@ import {
 } from '../office-trip/entities/office-trip-request.entity';
 import { WfhRequest, EmployeeWorkArrangement } from '../wfh/entities';
 import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.entity';
+import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
+import { LeaveService } from '../leave/leave.service';
 
 type WorkingDayRuleSource = {
   workingDays?: number[] | null;
@@ -107,10 +109,13 @@ export class AttendanceService {
     private officeTripRepo: Repository<OfficeTripRequest>,
     @InjectRepository(WfhRequest)
     private wfhRequestRepo: Repository<WfhRequest>,
+    @InjectRepository(Timeslip)
+    private timeslipRepo: Repository<Timeslip>,
     @InjectRepository(EmployeeWorkArrangement)
     private workArrangementRepo: Repository<EmployeeWorkArrangement>,
     @InjectRepository(WfhActivityLog)
     private wfhActivityLogRepo: Repository<WfhActivityLog>,
+    private readonly leaveService: LeaveService,
   ) {}
 
   private normalizeBranchName(name: string): string {
@@ -520,9 +525,42 @@ export class AttendanceService {
       // If there's only a single punch, treat the employee as present
       // immediately and wait for clock-out to refine working time.
       const hasClockOut = sortedLogs.length > 1;
-      const workingMinutes = hasClockOut
-        ? Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000)
-        : 0;
+
+      // Check for an approved timeslip that corrects punch times for this
+      // date. When a timeslip has been approved, its corrected times take
+      // precedence over raw punch logs so that admin-approved corrections
+      // are not overwritten on the next punch event.
+      let timeslipCorrectedIn: Date | null = null;
+      let timeslipCorrectedOut: Date | null = null;
+      try {
+        const approvedTimeslip = await this.timeslipRepo.findOne({
+          where: {
+            employee: { userId },
+            date: attendanceDate,
+            status: 'APPROVED' as any,
+          },
+        });
+        if (approvedTimeslip) {
+          if (approvedTimeslip.corrected_in) {
+            timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
+          }
+          if (approvedTimeslip.corrected_out) {
+            timeslipCorrectedOut = new Date(approvedTimeslip.corrected_out);
+          }
+        }
+      } catch {
+        // Timeslip table may not exist in all deployments — safe to ignore
+      }
+
+      // Prefer timeslip-corrected times over raw log timestamps
+      const finalInTime = timeslipCorrectedIn ?? inLog.timestamp;
+      const finalOutTime = timeslipCorrectedOut ?? (hasClockOut ? outLog.timestamp : undefined);
+
+      const workingMinutes = finalInTime && finalOutTime
+        ? Math.floor((+finalOutTime - +finalInTime) / 60000)
+        : hasClockOut
+          ? Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000)
+          : 0;
 
       const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
@@ -530,7 +568,7 @@ export class AttendanceService {
         workingMinutes,
         hasClockOut,
         shiftConfig,
-        inLog.timestamp,
+        finalInTime,
       );
 
       const baseData: DeepPartial<Attendance> = {
@@ -538,8 +576,8 @@ export class AttendanceService {
         organization: { id: organizationId },
         attendanceDate,
         processedAt: new Date(),
-        inTime: inLog.timestamp,
-        outTime: hasClockOut ? outLog.timestamp : undefined,
+        inTime: finalInTime,
+        outTime: finalOutTime,
         workingMinutes: Math.max(0, workingMinutes),
         status,
         inPhotoUrl: inLog.photoUrl ?? undefined,
@@ -2321,7 +2359,10 @@ export class AttendanceService {
       const isHoliday = holidaySet.has(attendanceDate);
 
       // 💼 If on leave
-      if (leave) {
+      // Full-day leave OR half-day leave with no attendance logs → mark as on-leave
+      // Half-day leave with attendance logs → fall through to log processing
+      // (employee worked the other half of the day)
+      if (leave && (leave.duration !== 0.5 || logs.length === 0)) {
         baseData.status = 'on-leave';
       }
 
@@ -2339,22 +2380,49 @@ export class AttendanceService {
         const inLog = sortedLogs[0];
         const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
 
-        const workingMinutes = Math.floor(
-          (+outLog.timestamp - +inLog.timestamp) / 60000,
-        );
         const hasClockOut = sortedLogs.length > 1;
         const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
+        // Check for approved timeslip corrections (same logic as logAttendance)
+        let timeslipCorrectedIn: Date | null = null;
+        let timeslipCorrectedOut: Date | null = null;
+        try {
+          const approvedTimeslip = await this.timeslipRepo.findOne({
+            where: {
+              employee: { userId },
+              date: attendanceDate,
+              status: 'APPROVED' as any,
+            },
+          });
+          if (approvedTimeslip) {
+            if (approvedTimeslip.corrected_in) {
+              timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
+            }
+            if (approvedTimeslip.corrected_out) {
+              timeslipCorrectedOut = new Date(approvedTimeslip.corrected_out);
+            }
+          }
+        } catch {
+          // Timeslip table may not exist in all deployments
+        }
+
+        const finalInTime = timeslipCorrectedIn ?? inLog.timestamp;
+        const finalOutTime = timeslipCorrectedOut ?? outLog.timestamp;
+
+        const workingMinutes = finalInTime && finalOutTime
+          ? Math.floor((+finalOutTime - +finalInTime) / 60000)
+          : Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000);
+
         Object.assign(baseData, {
-          inTime: inLog.timestamp,
-          outTime: outLog.timestamp,
+          inTime: finalInTime,
+          outTime: finalOutTime,
           workingMinutes,
           status: shiftConfig
             ? this.determineAttendanceStatus(
                 workingMinutes,
                 hasClockOut,
                 shiftConfig,
-                inLog.timestamp,
+                finalInTime,
               )
             : workingMinutes >= 480
               ? 'present'
@@ -2405,6 +2473,21 @@ export class AttendanceService {
         await this.attendanceRepo.update(existing.id, baseData);
       } else {
         await this.attendanceRepo.save(this.attendanceRepo.create(baseData));
+      }
+
+      // 🔧 Reconcile leave balance if employee attended work on approved leave
+      // Only runs when: leave exists AND final status is NOT 'on-leave'
+      // This handles half-day leave with logs, or edge cases where full-day leave
+      // was overridden by attendance.
+      if (leave && baseData.status !== 'on-leave') {
+        const orgId =
+          leaveRequests.find((l) => l.user.id === userId)?.user?.organizationId ??
+          logs.find((l) => l.user.id === userId)?.organization?.id;
+        if (orgId) {
+          this.leaveService
+            .reconcileLeaveForDate(userId, attendanceDate, orgId)
+            .catch(() => undefined); // Best-effort, non-blocking
+        }
       }
     }
   }

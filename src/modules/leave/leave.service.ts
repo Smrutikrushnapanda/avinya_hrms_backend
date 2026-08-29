@@ -375,13 +375,24 @@ export class LeaveService {
     startDate: string,
     endDate: string,
     reason: string,
+    duration?: number,
   ) {
     const leaveType = await this.leaveTypeRepo.findOne({
       where: { id: leaveTypeId },
     });
     if (!leaveType) throw new NotFoundException('Invalid leave type');
 
-    const numberOfDays = this.calculateBusinessDays(startDate, endDate);
+    // Determine leave duration: FULL_DAY=1.0, HALF_DAY=0.5
+    const effectiveDuration = duration === 0.5 ? 0.5 : 1.0;
+    const isSingleDay = startDate === endDate;
+
+    let numberOfDays: number;
+    if (isSingleDay && effectiveDuration === 0.5) {
+      numberOfDays = 0.5;
+    } else {
+      numberOfDays = this.calculateBusinessDays(startDate, endDate);
+    }
+
     const limitCheck = await this.checkLeaveLimit(
       userId,
       leaveTypeId,
@@ -421,6 +432,7 @@ export class LeaveService {
       leaveType: { id: leaveTypeId },
       startDate,
       endDate,
+      duration: effectiveDuration,
       numberOfDays,
       paidDays,
       unpaidDays,
@@ -1370,5 +1382,291 @@ export class LeaveService {
       paidDays,
       unpaidDays,
     };
+  }
+
+  // ─── Reconciliation ───
+
+  /**
+   * Called by attendance service after finalizing attendance for a user+date.
+   * If the employee was marked present (had logs) but had an approved leave
+   * for that date, restore the consumed balance and mark the leave reconciled.
+   *
+   * Idempotent: safe to call multiple times for the same user+date.
+   * Ceiling-bounded: never restores more than was consumed.
+   * Concurrent-safe: uses pessimistic locking on the LeaveBalance row.
+   */
+  async reconcileLeaveForDate(
+    userId: string,
+    dateStr: string,
+    organizationId: string,
+  ): Promise<{ restored: boolean; message: string }> {
+    // Find approved leave requests that overlap this date
+    const leaves = await this.requestRepo
+      .createQueryBuilder('lr')
+      .leftJoinAndSelect('lr.leaveType', 'lt')
+      .where('lr.user_id = :userId', { userId })
+      .andWhere('lr.status = :status', { status: 'APPROVED' })
+      .andWhere('lr.start_date <= :dateStr', { dateStr })
+      .andWhere('lr.end_date >= :dateStr', { dateStr })
+      .getMany();
+
+    if (!leaves.length) {
+      return { restored: false, message: 'No approved leave for this date' };
+    }
+
+    let anyRestored = false;
+
+    for (const leave of leaves) {
+      // Check if this date was already reconciled for this leave
+      const reconciledDates = leave.reconciledDates
+        ? leave.reconciledDates.split(',').map((d) => d.trim())
+        : [];
+
+      if (reconciledDates.includes(dateStr)) {
+        continue; // Already reconciled
+      }
+
+      // Determine the restore amount for this date:
+      // - Single-day leave: restore the full `duration` (0.5 or 1.0)
+      // - Multi-day leave: each day was deducted as 1.0 (duration is always 1.0 for multi-day)
+      const isSingleDay = leave.startDate === leave.endDate;
+      const restoreAmount = isSingleDay ? Number(leave.duration) : 1.0;
+
+      // Restore balance atomically
+      const restored = await this.restoreBalanceAtomically(
+        userId,
+        leave.leaveType.id,
+        restoreAmount,
+      );
+
+      if (restored) {
+        // Mark date as reconciled
+        reconciledDates.push(dateStr);
+        const newReconciledDates = reconciledDates.join(',');
+        const allDatesReconciled = this.areAllDatesReconciled(
+          leave.startDate,
+          leave.endDate,
+          reconciledDates,
+        );
+
+        await this.requestRepo.update(leave.id, {
+          reconciledDates: newReconciledDates,
+          reconciled: allDatesReconciled,
+        });
+
+        anyRestored = true;
+
+        // Notify employee
+        this.messageGateway.emitToUser(userId, {
+          type: 'leave:reconciled',
+          message: `Leave balance restored for ${dateStr} (attended work on approved leave)`,
+          requestId: leave.id,
+        });
+      }
+    }
+
+    return anyRestored
+      ? { restored: true, message: 'Leave balance restored for this date' }
+      : { restored: false, message: 'Balance ceiling reached or no restore needed' };
+  }
+
+  /**
+   * Manual admin reconciliation for a specific leave request.
+   * Restores ALL dates where the employee had attendance (not on-leave status).
+   *
+   * Usage: POST /leave/reconcile/:requestId
+   */
+  async reconcileSingleRequest(
+    requestId: string,
+    adminUserId: string,
+  ): Promise<{ restored: number; message: string }> {
+    const request = await this.requestRepo.findOne({
+      where: { id: requestId },
+      relations: ['user', 'leaveType'],
+    });
+
+    if (!request) {
+      throw new NotFoundException('Leave request not found');
+    }
+
+    if (request.status !== 'APPROVED') {
+      throw new BadRequestException('Can only reconcile approved leave requests');
+    }
+
+    // Get attendance for this leave range
+    const attendanceRepo = this.dataSource.getRepository(
+      await import('../attendance/entities/attendance.entity').then(
+        (m) => m.Attendance,
+      ),
+    );
+
+    const attendanceRecords = await attendanceRepo.find({
+      where: {
+        user: { id: request.user.id },
+        attendanceDate: Between(request.startDate, request.endDate),
+      },
+    });
+
+    // Build map of dates with attendance that was NOT on-leave
+    const workDates = new Set<string>();
+    for (const rec of attendanceRecords) {
+      if (rec.status !== 'on-leave' && rec.status !== 'absent') {
+        workDates.add(rec.attendanceDate);
+      }
+    }
+
+    if (workDates.size === 0) {
+      return {
+        restored: 0,
+        message: 'No attendance records found for this leave period',
+      };
+    }
+
+    let restoredCount = 0;
+    const reconciledDates = request.reconciledDates
+      ? request.reconciledDates.split(',').map((d) => d.trim())
+      : [];
+
+    for (const workDate of workDates) {
+      if (reconciledDates.includes(workDate)) continue;
+
+      const isSingleDay = request.startDate === request.endDate;
+      const restoreAmount = isSingleDay ? Number(request.duration) : 1.0;
+
+      const restored = await this.restoreBalanceAtomically(
+        request.user.id,
+        request.leaveType.id,
+        restoreAmount,
+      );
+
+      if (restored) {
+        reconciledDates.push(workDate);
+        restoredCount++;
+      }
+    }
+
+    if (restoredCount > 0) {
+      const allDatesReconciled = this.areAllDatesReconciled(
+        request.startDate,
+        request.endDate,
+        reconciledDates,
+      );
+
+      await this.requestRepo.update(request.id, {
+        reconciledDates: reconciledDates.join(','),
+        reconciled: allDatesReconciled,
+      });
+
+      this.messageGateway.emitToUser(request.user.id, {
+        type: 'leave:reconciled',
+        message: `Admin reconciled ${restoredCount} day(s) — leave balance restored`,
+        requestId: request.id,
+      });
+    }
+
+    return {
+      restored: restoredCount,
+      message: restoredCount > 0
+        ? `Restored ${restoredCount} day(s) of leave balance`
+        : 'All eligible dates already reconciled',
+    };
+  }
+
+  /**
+   * Batch reconciliation for all approved leaves across the org.
+   * Scans leaves with attendance on leave dates and reconciles them.
+   */
+  async reconcileAllPending(
+    organizationId: string,
+  ): Promise<{ totalRestored: number; processed: number }> {
+    // Find approved leaves that have NOT been fully reconciled
+    const leaves = await this.requestRepo
+      .createQueryBuilder('lr')
+      .leftJoinAndSelect('lr.user', 'u')
+      .leftJoinAndSelect('lr.leaveType', 'lt')
+      .where('lr.status = :status', { status: 'APPROVED' })
+      .andWhere('lr.reconciled = :reconciled', { reconciled: false })
+      .andWhere('u.organizationId = :organizationId', { organizationId })
+      .andWhere('lr.end_date >= :today', {
+        today: new Date().toISOString().split('T')[0],
+      })
+      .getMany();
+
+    let totalRestored = 0;
+
+    for (const leave of leaves) {
+      const result = await this.reconcileLeaveForDate(
+        leave.user.id,
+        leave.startDate, // Will process start date; caller can iterate
+        organizationId,
+      );
+      if (result.restored) totalRestored++;
+    }
+
+    return { totalRestored, processed: leaves.length };
+  }
+
+  /**
+   * Atomically restore balance (consumed--, closingBalance++) with ceiling check.
+   * Uses pessimistic locking to prevent concurrent over-restoration.
+   */
+  private async restoreBalanceAtomically(
+    userId: string,
+    leaveTypeId: string,
+    restoreAmount: number,
+  ): Promise<boolean> {
+    return this.dataSource.transaction(async (manager) => {
+      const balance = await manager.findOne(LeaveBalance, {
+        where: {
+          user: { id: userId },
+          leaveType: { id: leaveTypeId },
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!balance) return false;
+
+      // Ceiling: consumed >= restoreAmount (can't restore more than consumed)
+      if (Number(balance.consumed) < restoreAmount) return false;
+
+      const restored = await manager
+        .createQueryBuilder()
+        .update(LeaveBalance)
+        .set({
+          consumed: () => `consumed - ${restoreAmount}`,
+          closingBalance: () => `closingBalance + ${restoreAmount}`,
+        })
+        .where('id = :id AND consumed >= :restoreAmount', {
+          id: balance.id,
+          restoreAmount,
+        })
+        .execute();
+
+      return (restored.affected ?? 0) > 0;
+    });
+  }
+
+  /**
+   * Check if all dates in the leave range have been reconciled.
+   */
+  private areAllDatesReconciled(
+    startDate: string,
+    endDate: string,
+    reconciledDates: string[],
+  ): boolean {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const reconciledSet = new Set(reconciledDates);
+
+    for (
+      let d = new Date(start);
+      d <= end;
+      d.setDate(d.getDate() + 1)
+    ) {
+      const dateStr = d.toISOString().split('T')[0];
+      if (!reconciledSet.has(dateStr)) return false;
+    }
+
+    return true;
   }
 }

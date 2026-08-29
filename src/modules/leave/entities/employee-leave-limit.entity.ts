@@ -29,21 +29,21 @@ export class EmployeeLeaveLimitEntity {
   organization!: Organization;
 
   @Column({
-    type: 'int',
+    type: 'float',
     nullable: true,
     comment: 'Maximum days allowed per year. NULL = no limit',
   })
   maxDaysPerYear: number | null = null;
 
   @Column({
-    type: 'int',
+    type: 'float',
     nullable: true,
     comment: 'Maximum paid leave days allowed per month. NULL = no limit',
   })
   maxDaysPerMonth: number | null = null;
 
   @Column({
-    type: 'int',
+    type: 'float',
     nullable: true,
     comment: 'Maximum days allowed per request. NULL = no limit',
   })

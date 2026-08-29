@@ -28,7 +28,7 @@ export class LeaveBalanceTemplate {
   @JoinColumn({ name: 'leave_type_id' })
   leaveType: LeaveType;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: 'float', default: 0 })
   openingBalance: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

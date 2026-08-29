@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import {
@@ -21,6 +21,8 @@ import { StorageService } from './storage.service';
 import { OfficeTripRequest } from '../office-trip/entities/office-trip-request.entity';
 import { WfhRequest, EmployeeWorkArrangement } from '../wfh/entities';
 import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.entity';
+import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
+import { LeaveModule } from '../leave/leave.module';
 
 @Module({
   imports: [
@@ -39,7 +41,9 @@ import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.enti
       WfhRequest,
       EmployeeWorkArrangement,
       WfhActivityLog,
+      Timeslip,
     ]),
+    forwardRef(() => LeaveModule),
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService, Common, StorageService],
