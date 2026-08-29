@@ -115,9 +115,17 @@ export class MeetingService implements OnModuleInit {
     await this.meetingRepo.save(savedMeeting);
 
     // Add participants if provided
-    if (dto.participantIds && dto.participantIds.length > 0) {
+    // Always ensure the creator is included as a participant so the meeting
+    // appears in their "My Meetings" list and they receive notifications.
+    const participantSet = new Set<string>([
+      ...(dto.participantIds || []),
+      dto.createdById,
+    ]);
+    const participantIds = Array.from(participantSet);
+
+    if (participantIds.length > 0) {
       const participants = await this.userRepo.findBy({
-        id: In(dto.participantIds),
+        id: In(participantIds),
       });
       savedMeeting.participants = participants;
       await this.meetingRepo.save(savedMeeting);
