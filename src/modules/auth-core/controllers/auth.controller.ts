@@ -124,7 +124,7 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'lax',
-      maxAge: 1000 * 60 * 60, // 1 hour
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days — matches JWT expiresIn
     });
 
     // Log login action
@@ -189,7 +189,7 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'lax',
-      maxAge: 1000 * 60 * 60,
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days — matches JWT expiresIn
     });
 
     await this.logReportService.create({
