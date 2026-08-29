@@ -1320,6 +1320,55 @@ export class EmployeeService {
     }
   }
 
+  // --- EMPLOYEE SELECTOR: lightweight search with department/designation filters ---
+  async getEmployeeSelector(
+    organizationId: string,
+    filters: {
+      search?: string;
+      departmentId?: string;
+      designationId?: string;
+      limit?: number;
+    },
+  ) {
+    const { search, departmentId, designationId, limit = 50 } = filters;
+
+    const qb = this.employeeRepository
+      .createQueryBuilder('employee')
+      .leftJoinAndSelect('employee.department', 'department')
+      .leftJoinAndSelect('employee.designation', 'designation')
+      .select([
+        'employee.id',
+        'employee.firstName',
+        'employee.lastName',
+        'employee.employeeCode',
+        'employee.workEmail',
+        'department.id',
+        'department.name',
+        'designation.id',
+        'designation.name',
+      ])
+      .where('employee.organizationId = :organizationId', { organizationId })
+      .andWhere('employee.status = :status', { status: 'active' });
+
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`;
+      qb.andWhere(
+        '(employee.firstName ILIKE :s OR employee.lastName ILIKE :s OR employee.employeeCode ILIKE :s OR employee.workEmail ILIKE :s)',
+        { s: term },
+      );
+    }
+
+    if (departmentId && departmentId !== 'all') {
+      qb.andWhere('employee.departmentId = :departmentId', { departmentId });
+    }
+
+    if (designationId && designationId !== 'all') {
+      qb.andWhere('employee.designationId = :designationId', { designationId });
+    }
+
+    return qb.orderBy('employee.firstName', 'ASC').take(limit).getMany();
+  }
+
   // --- NEW: GET EMPLOYEE HIERARCHY ---
   async getEmployeeHierarchy(organizationId: string, employeeId?: string) {
     try {

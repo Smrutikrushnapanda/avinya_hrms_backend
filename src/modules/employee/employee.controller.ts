@@ -168,6 +168,31 @@ export class EmployeeController {
     return this.employeeService.findAll(organizationId);
   }
 
+  @Get('selector')
+  @CacheTTL(60)
+  @ApiOperation({ summary: 'Lightweight employee selector with search and filters' })
+  @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiQuery({ name: 'search', type: 'string', required: false })
+  @ApiQuery({ name: 'departmentId', type: 'string', required: false })
+  @ApiQuery({ name: 'designationId', type: 'string', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  async getSelector(
+    @Query('organizationId') organizationId: string,
+    @Query('search') search?: string,
+    @Query('departmentId') departmentId?: string,
+    @Query('designationId') designationId?: string,
+    @Query('limit') limit?: number,
+    @GetUser() actor?: User,
+  ) {
+    this.assertSameOrg(actor, organizationId);
+    return this.employeeService.getEmployeeSelector(organizationId, {
+      search,
+      departmentId,
+      designationId,
+      limit: limit ? Number(limit) : 50,
+    });
+  }
+
   @Get(':id')
   @CacheTTL(600) // 10 minutes cache for single employee
   @ApiOperation({ summary: 'Get employee by employee ID' })

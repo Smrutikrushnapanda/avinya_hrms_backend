@@ -1,4 +1,4 @@
-import { Module, ClassSerializerInterceptor } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -117,7 +117,6 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
     AppService,
     { provide: APP_GUARD, useClass: PlanAccessGuard },
     { provide: APP_INTERCEPTOR, useClass: LogReportInterceptor },
-    { provide: APP_INTERCEPTOR, useClass: ClassSerializerInterceptor },
   ],
 })
 export class AppModule {}
