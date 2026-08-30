@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, MoreThanOrEqual } from 'typeorm';
 import { Meeting } from './entities/meeting.entity';
@@ -18,7 +24,8 @@ export class MeetingService implements OnModuleInit {
   constructor(
     @InjectRepository(Meeting) private meetingRepo: Repository<Meeting>,
     @InjectRepository(User) private userRepo: Repository<User>,
-    @InjectRepository(UserPushToken) private pushTokenRepo: Repository<UserPushToken>,
+    @InjectRepository(UserPushToken)
+    private pushTokenRepo: Repository<UserPushToken>,
     private messageService: MessageService,
     private messageGateway: MessageGateway,
     private mailService: MailService,
@@ -33,7 +40,15 @@ export class MeetingService implements OnModuleInit {
 
   private async dispatchMeetingNotifications(
     participantIds: string[],
-    meeting: { id: string; title: string; scheduledAt: Date; durationMinutes: number; meetingLink?: string | null; description?: string | null; organizationId: string },
+    meeting: {
+      id: string;
+      title: string;
+      scheduledAt: Date;
+      durationMinutes: number;
+      meetingLink?: string | null;
+      description?: string | null;
+      organizationId: string;
+    },
   ): Promise<void> {
     const scheduledTime = new Date(meeting.scheduledAt);
     const timeString = scheduledTime.toLocaleTimeString('en-US', {
@@ -76,26 +91,50 @@ export class MeetingService implements OnModuleInit {
       });
       const tokens = pushTokens.map((t) => t.token);
       if (tokens.length > 0) {
-        const { invalidTokens } = await this.firebaseService.sendToTokens(tokens, {
-          title,
-          body,
-          data: {
-            type: 'meeting_notification',
-            meetingId: meeting.id,
+        const { invalidTokens } = await this.firebaseService.sendToTokens(
+          tokens,
+          {
+            title,
+            body,
+            data: {
+              type: 'meeting_notification',
+              meetingId: meeting.id,
+            },
           },
-        });
+        );
         if (invalidTokens.length) {
           await this.pushTokenRepo.delete({ token: In(invalidTokens) });
         }
       }
     } catch (err) {
-      this.logger.warn(`Push notification failed for meeting ${meeting.id}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Push notification failed for meeting ${meeting.id}: ${(err as Error).message}`,
+      );
     }
   }
 
   // ─── CRUD Operations ───
 
   async createMeeting(dto: CreateMeetingDto): Promise<Meeting> {
+    // ── Tenant isolation: validate ALL participants belong to the same org ──
+    const allParticipantIds = Array.from(
+      new Set([...(dto.participantIds || []), dto.createdById]),
+    );
+    let validatedParticipants: User[] = [];
+    if (allParticipantIds.length > 0) {
+      validatedParticipants = await this.userRepo.findBy({
+        id: In(allParticipantIds),
+      });
+      const invalidParticipants = validatedParticipants.filter(
+        (p) => p.organizationId !== dto.organizationId,
+      );
+      if (invalidParticipants.length > 0) {
+        throw new ForbiddenException(
+          `Some participants do not belong to your organization: ${invalidParticipants.map((p) => p.id).join(', ')}`,
+        );
+      }
+    }
+
     const meeting = this.meetingRepo.create({
       title: dto.title,
       description: dto.description,
@@ -114,20 +153,9 @@ export class MeetingService implements OnModuleInit {
     savedMeeting.meetingLink = `https://meet.jit.si/hrms-${roomId}`;
     await this.meetingRepo.save(savedMeeting);
 
-    // Add participants if provided
-    // Always ensure the creator is included as a participant so the meeting
-    // appears in their "My Meetings" list and they receive notifications.
-    const participantSet = new Set<string>([
-      ...(dto.participantIds || []),
-      dto.createdById,
-    ]);
-    const participantIds = Array.from(participantSet);
-
-    if (participantIds.length > 0) {
-      const participants = await this.userRepo.findBy({
-        id: In(participantIds),
-      });
-      savedMeeting.participants = participants;
+    // Assign validated participants (creator always included)
+    if (validatedParticipants.length > 0) {
+      savedMeeting.participants = validatedParticipants;
       await this.meetingRepo.save(savedMeeting);
     }
 
@@ -176,9 +204,18 @@ export class MeetingService implements OnModuleInit {
 
     // Update participants if provided
     if (dto.participantIds) {
+      // ── Tenant isolation: validate ALL participants belong to the same org ──
       const participants = await this.userRepo.findBy({
         id: In(dto.participantIds),
       });
+      const invalidParticipants = participants.filter(
+        (p) => p.organizationId !== meeting.organizationId,
+      );
+      if (invalidParticipants.length > 0) {
+        throw new ForbiddenException(
+          `Some participants do not belong to your organization: ${invalidParticipants.map((p) => p.id).join(', ')}`,
+        );
+      }
       meeting.participants = participants;
       // Reset notification flag if schedule or participants changed
       meeting.notificationSent = false;

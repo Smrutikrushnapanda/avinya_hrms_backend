@@ -60,7 +60,11 @@ export class PostsService {
     const saved = await this.postRepo.save(post);
 
     // Fire-and-forget notification dispatch — don't block the response.
-    this.dispatchPostNotification(saved, data.authorId, data.organizationId).catch((err) =>
+    this.dispatchPostNotification(
+      saved,
+      data.authorId,
+      data.organizationId,
+    ).catch((err) =>
       this.logger.warn(`Post notification failed: ${(err as Error).message}`),
     );
 
@@ -128,17 +132,22 @@ export class PostsService {
       });
       const tokens = pushTokens.map((t) => t.token);
       if (tokens.length > 0) {
-        const { invalidTokens } = await this.firebaseService.sendToTokens(tokens, {
-          title,
-          body,
-          data: { type: 'post_notification', postId: post.id },
-        });
+        const { invalidTokens } = await this.firebaseService.sendToTokens(
+          tokens,
+          {
+            title,
+            body,
+            data: { type: 'post_notification', postId: post.id },
+          },
+        );
         if (invalidTokens.length) {
           await this.pushTokenRepo.delete({ token: In(invalidTokens) });
         }
       }
     } catch (err) {
-      this.logger.warn(`Push notification failed for post ${post.id}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Push notification failed for post ${post.id}: ${(err as Error).message}`,
+      );
     }
   }
 

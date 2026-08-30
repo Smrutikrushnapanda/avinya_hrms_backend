@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
+import { Department } from './entities/department.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UserRole } from '../auth-core/entities/user-role.entity';
@@ -30,6 +31,7 @@ import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { MailService } from '../mail/mail.service';
 import { DateTime } from 'luxon';
+import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -45,6 +47,8 @@ export class EmployeeService {
   constructor(
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
+    @InjectRepository(Department)
+    private readonly departmentRepository: Repository<Department>,
     @InjectRepository(Branch)
     private readonly branchRepository: Repository<Branch>,
 
@@ -81,6 +85,7 @@ export class EmployeeService {
     private readonly wfhService: WfhService,
     private readonly storageService: StorageService,
     private readonly mailService: MailService,
+    private readonly timezoneService: OrganizationTimezoneService,
   ) {}
 
   async create(dto: CreateEmployeeDto) {
@@ -488,6 +493,55 @@ export class EmployeeService {
       }
     }
 
+    // FK isolation: validate departmentId, branchId, shiftId, reportingTo
+    // belong to the same organization as the employee being updated
+    if (
+      dto.departmentId ||
+      dto.branchId ||
+      dto.shiftId ||
+      dto.reportingTo
+    ) {
+      const existingEmployee = await this.findOne(id);
+      const orgId = existingEmployee.organizationId;
+
+      if (dto.departmentId) {
+        const dept = await this.departmentRepository.findOne({
+          where: { id: dto.departmentId, organizationId: orgId },
+        });
+        if (!dept) {
+          throw new BadRequestException(
+            'Department does not belong to your organization',
+          );
+        }
+      }
+
+      if (dto.branchId) {
+        const branch = await this.branchRepository.findOne({
+          where: { id: dto.branchId, organizationId: orgId },
+        });
+        if (!branch) {
+          throw new BadRequestException(
+            'Branch does not belong to your organization',
+          );
+        }
+      }
+
+      if (dto.shiftId) {
+        await this.ensureShiftBelongsToOrganization(orgId, dto.shiftId);
+      }
+
+      if (dto.reportingTo) {
+        const manager = await this.employeeRepository.findOne({
+          where: { id: dto.reportingTo, organizationId: orgId },
+        });
+        if (!manager) {
+          throw new BadRequestException(
+            'Manager does not belong to your organization',
+          );
+        }
+      }
+    }
+
     if (Object.keys(employeeUpdate).length > 0) {
       await this.employeeRepository.update(id, employeeUpdate);
     }
@@ -698,14 +752,14 @@ export class EmployeeService {
         organizationId,
       );
 
-      const nowIst = DateTime.now().setZone('Asia/Kolkata');
-      const todayStr = nowIst.toFormat('yyyy-MM-dd');
-      const lastMonthStart = nowIst
+      const nowOrg = await this.timezoneService.getNow(organizationId);
+      const todayStr = nowOrg.toFormat('yyyy-MM-dd');
+      const lastMonthStart = nowOrg
         .minus({ months: 1 })
         .startOf('month')
         .toFormat('yyyy-MM-dd');
-      const thisMonthStart = nowIst.startOf('month').toFormat('yyyy-MM-dd');
-      const thisMonthPayPeriod = nowIst.toFormat('yyyy-MM');
+      const thisMonthStart = nowOrg.startOf('month').toFormat('yyyy-MM-dd');
+      const thisMonthPayPeriod = nowOrg.toFormat('yyyy-MM');
 
       // Single consolidated query — uses only 1 connection instead of 9
       const [row] = await this.entityManager.query(

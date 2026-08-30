@@ -152,7 +152,8 @@ export class EmployeeController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create a new employee' })
-  create(@Body() dto: CreateEmployeeDto) {
+  create(@Body() dto: CreateEmployeeDto, @GetUser() actor: User) {
+    dto.organizationId = actor.organizationId;
     return this.employeeService.create(dto);
   }
 
@@ -170,7 +171,9 @@ export class EmployeeController {
 
   @Get('selector')
   @CacheTTL(60)
-  @ApiOperation({ summary: 'Lightweight employee selector with search and filters' })
+  @ApiOperation({
+    summary: 'Lightweight employee selector with search and filters',
+  })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({ name: 'departmentId', type: 'string', required: false })
@@ -264,7 +267,13 @@ export class EmployeeController {
   @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update employee by ID' })
   @ApiParam({ name: 'id', type: 'string' })
-  update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateEmployeeDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
     return this.employeeService.update(id, dto);
   }
 
@@ -273,7 +282,9 @@ export class EmployeeController {
   @Roles('ADMIN', 'HR', 'SUPERADMIN')
   @ApiOperation({ summary: 'Delete employee by ID' })
   @ApiParam({ name: 'id', type: 'string' })
-  remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
     return this.employeeService.remove(id);
   }
 }

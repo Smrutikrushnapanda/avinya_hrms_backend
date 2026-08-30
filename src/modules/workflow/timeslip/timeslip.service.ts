@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -38,6 +39,47 @@ export class TimeslipService {
     private readonly messageService: MessageService,
     private readonly attendanceCalculation: AttendanceCalculationService,
   ) {}
+
+  private async assertTimeslipBelongsToOrg(
+    timeslipId: string,
+    organizationId?: string,
+  ): Promise<Timeslip> {
+    if (!organizationId) {
+      // SUPERADMIN — skip check
+      const timeslip = await this.timeslipRepo.findOne({
+        where: { id: timeslipId },
+        relations: ['employee'],
+      });
+      if (!timeslip) throw new NotFoundException('Timeslip not found');
+      return timeslip;
+    }
+    const timeslip = await this.timeslipRepo.findOne({
+      where: { id: timeslipId },
+      relations: ['employee'],
+    });
+    if (!timeslip) throw new NotFoundException('Timeslip not found');
+    if (timeslip.employee?.organizationId !== organizationId) {
+      throw new ForbiddenException(
+        'Timeslip does not belong to your organization',
+      );
+    }
+    return timeslip;
+  }
+
+  private async assertEmployeeBelongsToOrg(
+    employeeId: string,
+    organizationId?: string,
+  ): Promise<void> {
+    if (!organizationId) return; // SUPERADMIN
+    const employee = await this.employeeRepo.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new ForbiddenException(
+        'Employee does not belong to your organization',
+      );
+    }
+  }
 
   /**
    * When a timeslip is APPROVED, update the Attendance record with corrected
@@ -144,10 +186,7 @@ export class TimeslipService {
       // If the timeslip no longer exists or is no longer approved, do not
       // apply any correction. This prevents an outdated approval from being
       // applied after the timeslip was cancelled/rejected.
-      if (
-        !currentTimeslip ||
-        (currentTimeslip as Timeslip).status !== 'APPROVED'
-      ) {
+      if (!currentTimeslip || currentTimeslip.status !== 'APPROVED') {
         // Timeslip not approved (or cancelled) — nothing to apply.
         // Still update processedAt to record that we checked.
         await manager.update(Attendance, existing.id, {
@@ -180,11 +219,10 @@ export class TimeslipService {
         missing_type === 'BOTH';
 
       // 9. Calculate derived fields from the merged source fields.
-      const workingMinutes =
-        this.attendanceCalculation.calculateWorkingMinutes(
-          effectiveIn,
-          effectiveOut,
-        );
+      const workingMinutes = this.attendanceCalculation.calculateWorkingMinutes(
+        effectiveIn,
+        effectiveOut,
+      );
 
       const status = this.attendanceCalculation.determineAttendanceStatus(
         workingMinutes,
@@ -228,9 +266,8 @@ export class TimeslipService {
         'src/modules/attendance/entities/attendance-shift.entity'
       );
       // Use the settings repo that's already injected
-      const shiftRepo = this.attendanceSettingsRepo.manager.getRepository(
-        AttendanceShift,
-      );
+      const shiftRepo =
+        this.attendanceSettingsRepo.manager.getRepository(AttendanceShift);
       const shift = await shiftRepo.findOne({
         where: { id: employee.shiftId, organizationId, isActive: true },
       });
@@ -257,9 +294,8 @@ export class TimeslipService {
       const { Branch } = await import(
         'src/modules/attendance/entities/branch.entity'
       );
-      const branchRepo = this.attendanceSettingsRepo.manager.getRepository(
-        Branch,
-      );
+      const branchRepo =
+        this.attendanceSettingsRepo.manager.getRepository(Branch);
       const branch = await branchRepo.findOne({
         where: { id: employee.branchId, organizationId, isActive: true },
       });
@@ -272,11 +308,12 @@ export class TimeslipService {
           halfDayCutoffTime: branch.halfDayCutoffTime,
           workingDays: branch.workingDays,
           weekdayOffRules: branch.weekdayOffRules,
-          timezone: (
-            await this.attendanceSettingsRepo.findOne({
-              where: { organizationId },
-            })
-          )?.timezone ?? 'Asia/Kolkata',
+          timezone:
+            (
+              await this.attendanceSettingsRepo.findOne({
+                where: { organizationId },
+              })
+            )?.timezone ?? 'Asia/Kolkata',
         };
       }
     }
@@ -412,7 +449,11 @@ export class TimeslipService {
   }
 
   /** ---- CREATE ---- */
-  async createTimeslip(dto: CreateTimeslipDto) {
+  async createTimeslip(dto: CreateTimeslipDto, organizationId?: string) {
+    // Org isolation: validate employee belongs to caller's org
+    const effectiveOrgId = organizationId ?? dto.organizationId;
+    await this.assertEmployeeBelongsToOrg(dto.employeeId, effectiveOrgId);
+
     // 0a) Cross-field validation: correctedIn must be before correctedOut
     if (dto.correctedIn && dto.correctedOut) {
       if (new Date(dto.correctedIn) >= new Date(dto.correctedOut)) {
@@ -463,7 +504,7 @@ export class TimeslipService {
     });
     await this.approvalRepo.save(approval);
 
-    return this.findOne(timeslip.id);
+    return this.findOne(timeslip.id, effectiveOrgId);
   }
 
   /** ---- GET ALL (paginated) ---- */
@@ -490,7 +531,17 @@ export class TimeslipService {
     };
   }
 
-  async findByEmployee(employeeId: string, page = 1, limit = 10) {
+  async findByEmployee(
+    employeeId: string,
+    page = 1,
+    limit = 10,
+    organizationId?: string,
+  ) {
+    // Org isolation: validate employee belongs to caller's org
+    if (organizationId) {
+      await this.assertEmployeeBelongsToOrg(employeeId, organizationId);
+    }
+
     const qb = this.timeslipRepo
       .createQueryBuilder('t')
       .leftJoin('t.employee', 'emp')
@@ -516,8 +567,13 @@ export class TimeslipService {
         'ap.lastName',
         'ap.employeeCode',
       ])
-      .where('emp.id = :employeeId', { employeeId })
-      .orderBy('t.created_at', 'DESC')
+      .where('emp.id = :employeeId', { employeeId });
+
+    if (organizationId) {
+      qb.andWhere('emp.organizationId = :organizationId', { organizationId });
+    }
+
+    qb.orderBy('t.created_at', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -545,17 +601,19 @@ export class TimeslipService {
   }
 
   /** ---- GET ONE ---- */
-  async findOne(id: string) {
-    const timeslip = await this.timeslipRepo.findOne({
+  async findOne(id: string, organizationId?: string) {
+    const timeslip = await this.assertTimeslipBelongsToOrg(id, organizationId);
+    return this.timeslipRepo.findOne({
       where: { id },
       relations: ['employee', 'approvals', 'approvals.approver'],
     });
-    if (!timeslip) throw new NotFoundException('Timeslip not found');
-    return timeslip;
   }
 
   /** ---- UPDATE ---- */
-  async update(id: string, dto: UpdateTimeslipDto) {
+  async update(id: string, dto: UpdateTimeslipDto, organizationId?: string) {
+    // Org isolation: validate timeslip belongs to caller's org
+    await this.assertTimeslipBelongsToOrg(id, organizationId);
+
     await this.timeslipRepo.update(id, {
       date: dto.date,
       missing_type: dto.missingType,
@@ -564,20 +622,20 @@ export class TimeslipService {
       reason: dto.reason,
       status: dto.status,
     });
-    return this.findOne(id);
+    return this.findOne(id, organizationId);
   }
 
   /** ---- DELETE ---- */
-  async remove(id: string) {
-    const timeslip = await this.findOne(id);
+  async remove(id: string, organizationId?: string) {
+    const timeslip = await this.assertTimeslipBelongsToOrg(id, organizationId);
     await this.timeslipRepo.remove(timeslip);
     return { deleted: true };
   }
 
   /** ---- APPROVE ---- */
-  async approve(id: string, dto: ApproveTimeslipDto) {
-    // ensure timeslip exists
-    await this.findOne(id);
+  async approve(id: string, dto: ApproveTimeslipDto, organizationId?: string) {
+    // Org isolation: validate timeslip belongs to caller's org
+    await this.assertTimeslipBelongsToOrg(id, organizationId);
 
     // Find the pending approval for this approver
     const approval = await this.approvalRepo.findOne({
@@ -627,7 +685,7 @@ export class TimeslipService {
       await this.notifyEmployeeOnFinalStatus(id, finalStatus, senderEmployeeId);
     }
 
-    return this.findOne(id);
+    return this.findOne(id, organizationId);
   }
 
   /** ---- BATCH UPDATE STATUSES ---- */
@@ -635,10 +693,26 @@ export class TimeslipService {
   async batchUpdateStatuses(
     dto: BatchUpdateTimeslipStatusDto,
     approverId?: string,
+    organizationId?: string,
   ): Promise<{ updatedCount: number; message: string; errors?: string[] }> {
     const { timeslipIds, status } = dto;
     const errors: string[] = [];
     let successCount = 0;
+
+    // Org isolation: validate all timeslip IDs belong to caller's org
+    if (organizationId) {
+      const ownedCount = await this.timeslipRepo
+        .createQueryBuilder('t')
+        .leftJoin('t.employee', 'emp')
+        .where('t.id IN (:...ids)', { ids: timeslipIds })
+        .andWhere('emp.organizationId = :organizationId', { organizationId })
+        .getCount();
+      if (ownedCount !== timeslipIds.length) {
+        throw new ForbiddenException(
+          'One or more timeslips do not belong to your organization',
+        );
+      }
+    }
 
     if (!approverId && status === 'PENDING') {
       throw new BadRequestException(
@@ -830,8 +904,13 @@ export class TimeslipService {
   }
 
   /** ---- GET ALL BY EMPLOYEE ---- */
-  async findAllByEmployee(employeeId: string) {
-    const timeslips = await this.timeslipRepo
+  async findAllByEmployee(employeeId: string, organizationId?: string) {
+    // Org isolation: validate employee belongs to caller's org
+    if (organizationId) {
+      await this.assertEmployeeBelongsToOrg(employeeId, organizationId);
+    }
+
+    const qb = this.timeslipRepo
       .createQueryBuilder('t')
       .leftJoin('t.employee', 'emp')
       .leftJoin('t.approvals', 'a')
@@ -857,9 +936,13 @@ export class TimeslipService {
         'ap.lastName',
         'ap.employeeCode',
       ])
-      .where('emp.id = :employeeId', { employeeId })
-      .orderBy('t.created_at', 'DESC')
-      .getMany();
+      .where('emp.id = :employeeId', { employeeId });
+
+    if (organizationId) {
+      qb.andWhere('emp.organizationId = :organizationId', { organizationId });
+    }
+
+    const timeslips = await qb.orderBy('t.created_at', 'DESC').getMany();
 
     return timeslips.map((t: any) => this.mapTimeslipItem(t));
   }
@@ -868,6 +951,7 @@ export class TimeslipService {
   async findByApprover(
     approverId: string,
     options: { status?: string; page: number; limit: number },
+    organizationId?: string,
   ) {
     const { status, page, limit } = options;
 
@@ -907,6 +991,13 @@ export class TimeslipService {
         'a.approver_id',
       ])
       .where('a.approver_id = :approverId', { approverId });
+
+    if (organizationId) {
+      queryBuilder = queryBuilder.andWhere(
+        'emp.organizationId = :organizationId',
+        { organizationId },
+      );
+    }
 
     if (status) {
       queryBuilder = queryBuilder.andWhere('a.action = :status', { status });
@@ -985,7 +1076,10 @@ export class TimeslipService {
   }
 
   /** ---- CORRECTED BATCH APPROVE SUBMISSIONS ---- */
-  async batchApproveSubmissions(dto: BatchApproveSubmissionsDto): Promise<{
+  async batchApproveSubmissions(
+    dto: BatchApproveSubmissionsDto,
+    organizationId?: string,
+  ): Promise<{
     updatedCount: number;
     completedTimeslips: string[];
     message: string;
@@ -995,6 +1089,22 @@ export class TimeslipService {
     const errors: string[] = [];
     const completedTimeslips: string[] = [];
     let successCount = 0;
+
+    // Org isolation: validate all approval IDs belong to caller's org
+    if (organizationId) {
+      const ownedApprovals = await this.approvalRepo
+        .createQueryBuilder('approval')
+        .leftJoin('approval.timeslip', 't')
+        .leftJoin('t.employee', 'emp')
+        .where('approval.id IN (:...ids)', { ids: approvalIds })
+        .andWhere('emp.organizationId = :organizationId', { organizationId })
+        .getCount();
+      if (ownedApprovals !== approvalIds.length) {
+        throw new ForbiddenException(
+          'One or more approvals do not belong to your organization',
+        );
+      }
+    }
 
     const existingApprovals = await this.approvalRepo
       .createQueryBuilder('approval')

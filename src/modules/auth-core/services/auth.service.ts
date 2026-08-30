@@ -18,6 +18,7 @@ import { UserRole } from '../entities/user-role.entity';
 import { JwtPayload, ResetPasswordDto } from '../dto/auth.dto';
 import { RoleType } from '../enums/role-type.enum';
 import { UserActivitiesService } from './user-activities.service';
+import { OrganizationTimezoneService } from 'src/shared/organization-timezone.service';
 import { TimeslipApproval } from 'src/modules/workflow/timeslip/entities/timeslip-approval.entity';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
 import { LeaveApprovalAssignment } from 'src/modules/leave/entities/leave-approval-assignment.entity';
@@ -65,6 +66,7 @@ export class AuthService {
     private userPushTokenRepository: Repository<UserPushToken>,
     private storageService: StorageService,
     private mailService: MailService,
+    private timezoneService: OrganizationTimezoneService,
   ) {}
 
   // Generate JWT after successful login
@@ -168,6 +170,11 @@ export class AuthService {
       ...user,
       avatar,
       isApprover,
+      // Canonical organization timezone (IANA) resolved server-side from the
+      // authenticated user's organization — never from client input.
+      organizationTimezone: await this.timezoneService.getOrganizationTimezone(
+        user.organizationId,
+      ),
       employee: employee
         ? {
             ...employee,

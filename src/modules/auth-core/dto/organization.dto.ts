@@ -103,6 +103,10 @@ export class CreateOrganizationDto {
 
   @IsOptional()
   @IsString()
+  timezone?: string;
+
+  @IsOptional()
+  @IsString()
   createdBy?: string;
 }
 
@@ -271,6 +275,10 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 
   @IsOptional()
   @IsString()

@@ -21,6 +21,7 @@ export class Common {
     destination: string,
     contentType: string,
     isPublic = true,
+    organizationId?: string,
   ): Promise<string> {
     if (!isPublic) {
       this.logger.warn(
@@ -28,13 +29,25 @@ export class Common {
       );
     }
 
-    const normalizedDestination = destination
+    // Sanitize destination to prevent path traversal
+    const safeDestination = destination
+      .replace(/[^a-zA-Z0-9/_-]/g, '')
+      .replace(/\.\./g, '')
+      .replace(/^\.+/, '')
+      .trim();
+
+    const normalizedDestination = safeDestination
       .replace(/\\/g, '/')
       .split('/')
       .filter(Boolean)
       .join('/');
     const parsedPath = pathPosix.parse(normalizedDestination);
-    const folder = [this.baseFolder, parsedPath.dir].filter(Boolean).join('/');
+
+    const baseFolder = organizationId
+      ? `hrms/${organizationId}/common`
+      : this.baseFolder;
+
+    const folder = [baseFolder, parsedPath.dir].filter(Boolean).join('/');
     const publicId = parsedPath.name;
 
     try {
@@ -43,10 +56,10 @@ export class Common {
           {
             folder,
             public_id: publicId,
-            overwrite: true,
+            overwrite: false,
             resource_type: 'auto',
             use_filename: false,
-            unique_filename: false,
+            unique_filename: true,
           },
           (error, uploadResult) => {
             if (error) {

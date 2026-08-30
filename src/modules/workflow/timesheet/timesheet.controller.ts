@@ -42,7 +42,8 @@ export class TimesheetController {
   @Post()
   @ApiOperation({ summary: 'Create a single timesheet work-log entry' })
   @ApiBadRequestResponse({ description: 'Invalid timesheet payload' })
-  create(@Body() dto: CreateTimesheetDto) {
+  create(@Body() dto: CreateTimesheetDto, @GetUser() user: JwtPayload) {
+    dto.organizationId = user.organizationId;
     return this.timesheetService.createTimesheet(dto);
   }
 
@@ -53,13 +54,16 @@ export class TimesheetController {
   @ApiBadRequestResponse({
     description: 'Invalid timesheet payload or overlapping entries',
   })
-  createBatch(@Body() dto: CreateTimesheetBatchDto) {
+  createBatch(
+    @Body() dto: CreateTimesheetBatchDto,
+    @GetUser() user: JwtPayload,
+  ) {
+    dto.organizationId = user.organizationId;
     return this.timesheetService.createTimesheetBatch(dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'List timesheets by organization and employee' })
-  @ApiQuery({ name: 'organizationId', required: true, type: String })
   @ApiQuery({ name: 'employeeId', required: false, type: String })
   @ApiQuery({ name: 'fromDate', required: false, type: String })
   @ApiQuery({ name: 'toDate', required: false, type: String })
@@ -69,7 +73,7 @@ export class TimesheetController {
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 50 })
   @ApiOkResponse({ description: 'Timesheets returned successfully' })
   list(
-    @Query('organizationId') organizationId: string,
+    @GetUser() user: JwtPayload,
     @Query('employeeId') employeeId?: string,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
@@ -79,7 +83,7 @@ export class TimesheetController {
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
   ) {
     return this.timesheetService.listTimesheets({
-      organizationId,
+      organizationId: user.organizationId,
       employeeId,
       fromDate,
       toDate,

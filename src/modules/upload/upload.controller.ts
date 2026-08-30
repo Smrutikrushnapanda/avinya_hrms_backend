@@ -18,6 +18,8 @@ import {
 } from '@nestjs/swagger';
 import { UploadService, UploadResponseDto } from './upload.service';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
 
 /**
  * Allowed MIME types for image uploads
@@ -99,6 +101,7 @@ export class UploadController {
   )
   async uploadImage(
     @UploadedFile() file: Express.Multer.File,
+    @GetUser() actor: User,
   ): Promise<UploadResponseDto> {
     this.logger.log(`Received upload request for file: ${file?.originalname}`);
 
@@ -106,6 +109,8 @@ export class UploadController {
       throw new BadRequestException('File is required');
     }
 
-    return await this.uploadService.uploadImage(file);
+    const organizationId =
+      (actor as any)?.organizationId || actor.organizationId;
+    return await this.uploadService.uploadImage(file, organizationId);
   }
 }

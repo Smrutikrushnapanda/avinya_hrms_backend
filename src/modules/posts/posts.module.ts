@@ -13,7 +13,14 @@ import { UserPushToken } from '../auth-core/entities/user-push-token.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, PostLike, PostComment, Employee, User, UserPushToken]),
+    TypeOrmModule.forFeature([
+      Post,
+      PostLike,
+      PostComment,
+      Employee,
+      User,
+      UserPushToken,
+    ]),
     MessageModule,
     AuthCoreModule,
   ],

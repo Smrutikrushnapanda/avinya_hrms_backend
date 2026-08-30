@@ -102,13 +102,19 @@ export class AttendanceCalculationService {
    * @param approvedTimeslipCorrectedOut - Approved timeslip corrected_out (or null)
    * @param approvedTimeslipMissingType - The timeslip's missing_type ('IN' | 'OUT' | 'BOTH')
    */
-  resolveEffectivePunches(sortedPunchLogs: { timestamp: Date; type: string }[], approvedTimeslipCorrectedIn: Date | null, approvedTimeslipCorrectedOut: Date | null, approvedTimeslipMissingType: 'IN' | 'OUT' | 'BOTH' | null): {
+  resolveEffectivePunches(
+    sortedPunchLogs: { timestamp: Date; type: string }[],
+    approvedTimeslipCorrectedIn: Date | null,
+    approvedTimeslipCorrectedOut: Date | null,
+    approvedTimeslipMissingType: 'IN' | 'OUT' | 'BOTH' | null,
+  ): {
     effectiveIn: Date | null;
     effectiveOut: Date | null;
     hasClockOut: boolean;
   } {
     const inLog = sortedPunchLogs[0]?.timestamp ?? null;
-    const lastLog = sortedPunchLogs[sortedPunchLogs.length - 1]?.timestamp ?? null;
+    const lastLog =
+      sortedPunchLogs[sortedPunchLogs.length - 1]?.timestamp ?? null;
 
     // Determine raw clock-out existence: more than one punch AND last is check-out
     const rawLogsOnly = sortedPunchLogs.filter(
@@ -146,7 +152,10 @@ export class AttendanceCalculationService {
    * Calculate working minutes from effective in/out times.
    * Returns 0 if either time is missing.
    */
-  calculateWorkingMinutes(effectiveIn: Date | null, effectiveOut: Date | null): number {
+  calculateWorkingMinutes(
+    effectiveIn: Date | null,
+    effectiveOut: Date | null,
+  ): number {
     if (!effectiveIn || !effectiveOut) return 0;
     let diffMs = +effectiveOut - +effectiveIn;
     if (diffMs < 0) {
@@ -208,9 +217,7 @@ export class AttendanceCalculationService {
       config.graceMinutes ?? config.lateThresholdMinutes ?? 0;
     const lateAfterMinutes = Number(lateAfterRaw);
     const safeLateAfter = Math.max(0, lateAfterMinutes);
-    const lateCutoff = new Date(
-      windowStart.getTime() + safeLateAfter * 60_000,
-    );
+    const lateCutoff = new Date(windowStart.getTime() + safeLateAfter * 60_000);
     return inTime.getTime() > lateCutoff.getTime();
   }
 

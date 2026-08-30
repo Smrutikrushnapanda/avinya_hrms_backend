@@ -26,6 +26,14 @@ export class OrganizationSettings {
   organization: Organization;
 
   @Column({
+    name: 'timezone',
+    type: 'varchar',
+    length: 50,
+    default: 'Asia/Kolkata',
+  })
+  timezone: string;
+
+  @Column({
     name: 'home_header_background_color',
     type: 'varchar',
     length: 20,

@@ -13,6 +13,7 @@ import { PollQuestion } from './entities/poll-question.entity';
 import { CreateQuestionDto, QuestionType } from './dto/create-question.dto';
 import { PollOption } from './entities/poll-option.entity';
 import { DateTime } from 'luxon';
+import { OrganizationTimezoneService } from 'src/shared/organization-timezone.service';
 import { PollResponse } from './entities/poll-response.entity';
 import { Employee } from '../employee/entities/employee.entity'; // ADDED
 import {
@@ -48,19 +49,22 @@ export class PollsService {
     private readonly pollResponseRepo: Repository<PollResponse>,
     @InjectRepository(Employee) // ADDED
     private readonly employeeRepo: Repository<Employee>, // ADDED
+    private readonly timezoneService: OrganizationTimezoneService,
   ) {}
 
   async createPoll(dto: CreatePollDto, organizationId: string) {
-    // Step 1: Save Poll
-    const timeZone = 'Asia/Kolkata';
+    // Step 1: Save Poll — interpret business times in the org's timezone
+    const timeZone = await this.timezoneService.getOrganizationTimezone(
+      organizationId,
+    );
     const poll = this.pollRepo.create({
       title: dto.title,
       description: dto.description,
       is_anonymous: dto.isAnonymous,
-      start_time: DateTime.fromISO(dto.startTime, { zone: 'Asia/Kolkata' })
+      start_time: DateTime.fromISO(dto.startTime, { zone: timeZone })
         .toUTC()
         .toJSDate(),
-      end_time: DateTime.fromISO(dto.endTime, { zone: 'Asia/Kolkata' })
+      end_time: DateTime.fromISO(dto.endTime, { zone: timeZone })
         .toUTC()
         .toJSDate(),
       created_by: dto.createdBy,
@@ -115,16 +119,18 @@ export class PollsService {
     if (updateData.isAnonymous !== undefined)
       poll.is_anonymous = updateData.isAnonymous;
     if (updateData.startTime !== undefined) {
-      poll.start_time = DateTime.fromISO(updateData.startTime, {
-        zone: 'Asia/Kolkata',
-      })
+      const tz = await this.timezoneService.getOrganizationTimezone(
+        organizationId,
+      );
+      poll.start_time = DateTime.fromISO(updateData.startTime, { zone: tz })
         .toUTC()
         .toJSDate();
     }
     if (updateData.endTime !== undefined) {
-      poll.end_time = DateTime.fromISO(updateData.endTime, {
-        zone: 'Asia/Kolkata',
-      })
+      const tz = await this.timezoneService.getOrganizationTimezone(
+        organizationId,
+      );
+      poll.end_time = DateTime.fromISO(updateData.endTime, { zone: tz })
         .toUTC()
         .toJSDate();
     }

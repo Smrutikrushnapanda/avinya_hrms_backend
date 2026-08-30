@@ -183,8 +183,14 @@ describe('AttendanceCalculationService', () => {
       const { effectiveIn, effectiveOut, hasClockOut } =
         service.resolveEffectivePunches(
           [
-            { timestamp: new Date('2026-08-20T06:30:00.000Z'), type: 'check-in' }, // 12:00 IST
-            { timestamp: new Date('2026-08-20T14:28:00.000Z'), type: 'check-out' }, // 19:58 IST
+            {
+              timestamp: new Date('2026-08-20T06:30:00.000Z'),
+              type: 'check-in',
+            }, // 12:00 IST
+            {
+              timestamp: new Date('2026-08-20T14:28:00.000Z'),
+              type: 'check-out',
+            }, // 19:58 IST
           ],
           null, // no corrected in
           null, // no corrected out
@@ -205,16 +211,18 @@ describe('AttendanceCalculationService', () => {
   // ── TEST 7: Rejected Correction ─────────────────────────────────────
   describe('TEST 7 — Rejected Correction (original attendance remains)', () => {
     it('should use raw punch times when timeslip is rejected', () => {
-      const { effectiveIn, hasClockOut } =
-        service.resolveEffectivePunches(
-          [
-            { timestamp: new Date('2026-08-20T06:30:00.000Z'), type: 'check-in' },
-            { timestamp: new Date('2026-08-20T14:28:00.000Z'), type: 'check-out' },
-          ],
-          null, // corrected in exists but timeslip not approved → null
-          null,
-          null, // missing type is null (not approved)
-        );
+      const { effectiveIn, hasClockOut } = service.resolveEffectivePunches(
+        [
+          { timestamp: new Date('2026-08-20T06:30:00.000Z'), type: 'check-in' },
+          {
+            timestamp: new Date('2026-08-20T14:28:00.000Z'),
+            type: 'check-out',
+          },
+        ],
+        null, // corrected in exists but timeslip not approved → null
+        null,
+        null, // missing type is null (not approved)
+      );
 
       expect(hasClockOut).toBe(true);
     });
@@ -223,16 +231,15 @@ describe('AttendanceCalculationService', () => {
   // ── TEST 8: Duplicate Punch (idempotency) ───────────────────────────
   describe('TEST 8 — Duplicate Punch', () => {
     it('should handle two check-in logs gracefully', () => {
-      const { effectiveIn, hasClockOut } =
-        service.resolveEffectivePunches(
-          [
-            { timestamp: new Date('2026-08-20T03:30:00.000Z'), type: 'check-in' },
-            { timestamp: new Date('2026-08-20T03:30:05.000Z'), type: 'check-in' }, // duplicate
-          ],
-          null,
-          null,
-          null,
-        );
+      const { effectiveIn, hasClockOut } = service.resolveEffectivePunches(
+        [
+          { timestamp: new Date('2026-08-20T03:30:00.000Z'), type: 'check-in' },
+          { timestamp: new Date('2026-08-20T03:30:05.000Z'), type: 'check-in' }, // duplicate
+        ],
+        null,
+        null,
+        null,
+      );
 
       // First check-in is used as effective in
       expect(effectiveIn?.toISOString()).toBe(
@@ -250,7 +257,10 @@ describe('AttendanceCalculationService', () => {
     it('should use last check-out as out time, not break-end', () => {
       const sortedLogs = [
         { timestamp: new Date('2026-08-20T03:30:00.000Z'), type: 'check-in' }, // 09:00
-        { timestamp: new Date('2026-08-20T07:00:00.000Z'), type: 'break-start' }, // 12:30
+        {
+          timestamp: new Date('2026-08-20T07:00:00.000Z'),
+          type: 'break-start',
+        }, // 12:30
         { timestamp: new Date('2026-08-20T07:30:00.000Z'), type: 'break-end' }, // 13:00
         { timestamp: new Date('2026-08-20T14:28:00.000Z'), type: 'check-out' }, // 19:58
       ];
@@ -271,12 +281,19 @@ describe('AttendanceCalculationService', () => {
     it('should not treat break-end as clock-out when no check-out exists', () => {
       const sortedLogs = [
         { timestamp: new Date('2026-08-20T03:30:00.000Z'), type: 'check-in' },
-        { timestamp: new Date('2026-08-20T07:00:00.000Z'), type: 'break-start' },
+        {
+          timestamp: new Date('2026-08-20T07:00:00.000Z'),
+          type: 'break-start',
+        },
         { timestamp: new Date('2026-08-20T07:30:00.000Z'), type: 'break-end' },
       ];
 
-      const { effectiveOut, hasClockOut } =
-        service.resolveEffectivePunches(sortedLogs, null, null, null);
+      const { effectiveOut, hasClockOut } = service.resolveEffectivePunches(
+        sortedLogs,
+        null,
+        null,
+        null,
+      );
 
       // Only check-in and break logs → no real check-out
       expect(effectiveOut).toBeNull();
@@ -400,12 +417,7 @@ describe('AttendanceCalculationService', () => {
       const correctedIn = new Date('2026-08-20T04:30:00.000Z'); // 10:00 IST (corrected)
 
       const { effectiveIn, effectiveOut, hasClockOut } =
-        service.resolveEffectivePunches(
-          sortedLogs,
-          correctedIn,
-          null,
-          'IN',
-        );
+        service.resolveEffectivePunches(sortedLogs, correctedIn, null, 'IN');
 
       // IN should be corrected
       expect(effectiveIn?.toISOString()).toBe(correctedIn.toISOString());
@@ -424,12 +436,7 @@ describe('AttendanceCalculationService', () => {
       const correctedOut = new Date('2026-08-20T14:30:00.000Z'); // 20:00 IST (corrected)
 
       const { effectiveIn, effectiveOut, hasClockOut } =
-        service.resolveEffectivePunches(
-          sortedLogs,
-          null,
-          correctedOut,
-          'OUT',
-        );
+        service.resolveEffectivePunches(sortedLogs, null, correctedOut, 'OUT');
 
       // IN should be raw check-in
       expect(effectiveIn?.toISOString()).toBe(

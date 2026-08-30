@@ -10,6 +10,7 @@ import { Server, Socket } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ChatParticipant } from '../chat/entities/chat-participant.entity';
+import { ChatConversation } from '../chat/entities/chat-conversation.entity';
 
 @WebSocketGateway({
   cors: {
@@ -25,8 +26,7 @@ import { ChatParticipant } from '../chat/entities/chat-participant.entity';
           'https://avinya-hrms.vercel.app',
           'http://localhost:3000',
           'http://127.0.0.1:3000',
-        ].includes(origin) ||
-        /^https:\/\/[\w-]+\.vercel\.app$/.test(origin)
+        ].includes(origin)
       ) {
         callback(null, true);
       } else {
@@ -46,9 +46,14 @@ export class MessageGateway
     private readonly jwtService: JwtService,
     @InjectRepository(ChatParticipant)
     private readonly participantRepo: Repository<ChatParticipant>,
+    @InjectRepository(ChatConversation)
+    private readonly conversationRepo: Repository<ChatConversation>,
   ) {}
 
-  private socketIndex = new Map<string, { userId: string; orgId?: string }>();
+  private socketIndex = new Map<
+    string,
+    { userId: string; orgId?: string; roles?: string[] }
+  >();
   private userConnections = new Map<
     string,
     { count: number; orgId?: string }
@@ -72,6 +77,7 @@ export class MessageGateway
 
       const userId = payload?.userId;
       const orgId = payload?.organizationId;
+      const roles = payload?.roles as string[] | undefined;
       if (!userId) {
         client.disconnect(true);
         return;
@@ -81,7 +87,7 @@ export class MessageGateway
       if (orgId) {
         client.join(`org:${orgId}`);
       }
-      this.socketIndex.set(client.id, { userId, orgId });
+      this.socketIndex.set(client.id, { userId, orgId, roles });
       const existing = this.userConnections.get(userId);
       const nextCount = (existing?.count || 0) + 1;
       this.userConnections.set(userId, { count: nextCount, orgId });
@@ -148,6 +154,18 @@ export class MessageGateway
       return;
     }
 
+    const conversation = await this.conversationRepo.findOne({
+      where: { id: payload.conversationId },
+      select: ['id', 'organizationId'],
+    });
+    if (!conversation) return;
+    if (conversation.organizationId !== data.orgId) {
+      const isSuperadmin = data.roles?.includes('SUPERADMIN');
+      if (!isSuperadmin) {
+        return;
+      }
+    }
+
     const participants = await this.participantRepo.find({
       where: { conversationId: payload.conversationId },
       select: ['userId'],
@@ -167,12 +185,21 @@ export class MessageGateway
   }
 
   @SubscribeMessage('chat:meeting-end')
-  async handleMeetingEnd(
-    client: Socket,
-    payload: { conversationId: string },
-  ) {
+  async handleMeetingEnd(client: Socket, payload: { conversationId: string }) {
     const data = this.socketIndex.get(client.id);
     if (!data?.userId) return;
+
+    const conversation = await this.conversationRepo.findOne({
+      where: { id: payload.conversationId },
+      select: ['id', 'organizationId'],
+    });
+    if (!conversation) return;
+    if (conversation.organizationId !== data.orgId) {
+      const isSuperadmin = data.roles?.includes('SUPERADMIN');
+      if (!isSuperadmin) {
+        return;
+      }
+    }
 
     const participants = await this.participantRepo.find({
       where: { conversationId: payload.conversationId },

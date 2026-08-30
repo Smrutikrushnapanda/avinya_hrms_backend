@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   UseInterceptors,
   BadRequestException,
+  ForbiddenException,
   UploadedFile,
   UseGuards,
 } from '@nestjs/common';
@@ -50,9 +51,10 @@ import {
   ApiQuery,
   ApiOkResponse,
 } from '@nestjs/swagger';
-import { DateTime } from 'luxon';
 import { UploadAttendancePhotoDto } from './dto';
 import { StorageService } from './storage.service';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
 
 @ApiTags('Attendance')
 @Controller('attendance')
@@ -63,12 +65,24 @@ export class AttendanceController {
     private readonly storageService: StorageService,
   ) {}
 
+  private isSuperadmin(actor: User): boolean {
+    return (actor as any)?.roles?.some(
+      (r: { roleName: string }) => r.roleName === 'SUPERADMIN',
+    );
+  }
+
   @Get('photo-url')
   @ApiOperation({
     summary: 'Generate signed URL for stored attendance photo key',
   })
   @ApiQuery({ name: 'key', type: 'string', required: true })
-  async getPhotoSignedUrl(@Query('key') key: string) {
+  async getPhotoSignedUrl(@Query('key') key: string, @GetUser() actor: User) {
+    const orgMatch = key.match(/hrms\/attendance\/([a-f0-9-]+)\//);
+    if (orgMatch && orgMatch[1] !== actor.organizationId) {
+      if (!this.isSuperadmin(actor)) {
+        throw new ForbiddenException('Access denied to this photo');
+      }
+    }
     const signedUrl = await this.storageService.getSignedUrl(key);
     return { key, signedUrl, expiresIn: 60 * 60 * 24 * 180 };
   }
@@ -114,10 +128,29 @@ export class AttendanceController {
   )
   async uploadAttendancePhoto(
     @Body() dto: UploadAttendancePhotoDto,
+    @GetUser() actor: User,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) {
       throw new BadRequestException('Photo file is required');
+    }
+
+    if (!this.isSuperadmin(actor) && dto.companyId !== actor.organizationId) {
+      throw new ForbiddenException(
+        'You can only upload attendance photos for your own organization',
+      );
+    }
+
+    if (!this.isSuperadmin(actor) && dto.userId) {
+      const employee = await this.attendanceService.findEmployeeByUserAndOrg(
+        dto.userId,
+        dto.companyId,
+      );
+      if (!employee) {
+        throw new ForbiddenException(
+          'User does not belong to the specified organization',
+        );
+      }
     }
 
     const key = await this.storageService.uploadAttendancePhoto(
@@ -141,7 +174,13 @@ export class AttendanceController {
     description: 'Attendance settings',
     type: AttendanceSettings,
   })
-  async getSettings(@Query('organizationId') organizationId: string) {
+  async getSettings(
+    @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
+  ) {
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getAttendanceSettings(organizationId);
   }
 
@@ -157,7 +196,11 @@ export class AttendanceController {
   async updateSettings(
     @Query('organizationId') organizationId: string,
     @Body() dto: UpdateAttendanceSettingsDto,
+    @GetUser() actor: User,
   ) {
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.updateAttendanceSettings(organizationId, dto);
   }
 
@@ -165,13 +208,20 @@ export class AttendanceController {
   @Get('branches')
   @ApiOperation({ summary: 'List branches for organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
-  async getBranches(@Query('organizationId') organizationId: string) {
+  async getBranches(
+    @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
+  ) {
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.listBranches(organizationId);
   }
 
   @Post('branches')
   @ApiOperation({ summary: 'Create branch with timings' })
-  async createBranch(@Body() dto: CreateBranchDto) {
+  async createBranch(@Body() dto: CreateBranchDto, @GetUser() actor: User) {
+    dto.organizationId = actor.organizationId;
     return this.attendanceService.createBranch(dto);
   }
 
@@ -191,7 +241,13 @@ export class AttendanceController {
   @Get('shifts')
   @ApiOperation({ summary: 'List shifts for organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
-  async getShifts(@Query('organizationId') organizationId: string) {
+  async getShifts(
+    @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
+  ) {
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.listShifts(organizationId);
   }
 
@@ -202,7 +258,8 @@ export class AttendanceController {
     description: 'Created shift',
     type: AttendanceShift,
   })
-  async createShift(@Body() dto: CreateShiftDto) {
+  async createShift(@Body() dto: CreateShiftDto, @GetUser() actor: User) {
+    dto.organizationId = actor.organizationId;
     return this.attendanceService.createShift(dto);
   }
 
@@ -233,7 +290,9 @@ export class AttendanceController {
   })
   async createWifiLocation(
     @Body() dto: CreateWifiLocationDto,
+    @GetUser() actor: User,
   ): Promise<WifiLocation> {
+    dto.organizationId = actor.organizationId;
     return this.attendanceService.createWifiLocation(dto);
   }
 
@@ -248,7 +307,11 @@ export class AttendanceController {
   })
   async getWifiLocations(
     @Query('organizationId') organizationId: string,
+    @GetUser() actor: User,
   ): Promise<WifiLocation[]> {
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getWifiLocations(organizationId);
   }
 
@@ -289,7 +352,9 @@ export class AttendanceController {
   })
   async registerDevice(
     @Body() dto: CreateBiometricDeviceDto,
+    @GetUser() actor: User,
   ): Promise<BiometricDevice> {
+    dto.organizationId = actor.organizationId;
     return this.attendanceService.registerBiometricDevice(dto);
   }
 
@@ -524,7 +589,19 @@ export class AttendanceController {
   async getTodayLogsByUserOrg(
     @Query('organizationId') organizationId: string,
     @Query('userId') userId: string,
+    @GetUser() actor?: User,
   ) {
+    // Tenant isolation: never trust a client-supplied organizationId.
+    // Derive the target org from the authenticated JWT context, and reject
+    // any caller (other than SUPERADMIN) whose org differs from the requested
+    // org.
+    if (
+      actor &&
+      !this.isSuperadmin(actor) &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getTodayLogsByUserOrg(organizationId, userId);
   }
 
@@ -541,7 +618,15 @@ export class AttendanceController {
   async getBreakStatus(
     @Query('organizationId') organizationId: string,
     @Query('userId') userId: string,
+    @GetUser() actor?: User,
   ) {
+    if (
+      actor &&
+      !this.isSuperadmin(actor) &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getCurrentBreakStatus(organizationId, userId);
   }
 
@@ -635,10 +720,14 @@ export class AttendanceController {
   async getHolidaysForFinancialYear(
     @Query('organizationId') organizationId: string,
     @Query('fromYear') fromYear: string,
+    @GetUser() actor: User,
   ) {
     const year = parseInt(fromYear, 10);
     if (!organizationId || isNaN(year)) {
       throw new BadRequestException('Invalid organizationId or fromYear');
+    }
+    if (!this.isSuperadmin(actor) && actor.organizationId !== organizationId) {
+      throw new ForbiddenException('Access denied');
     }
 
     return this.attendanceService.getHolidaysForFinancialYear(
@@ -650,7 +739,8 @@ export class AttendanceController {
   // ➕ Create holiday
   @Post('holidays')
   @ApiOperation({ summary: 'Create holiday' })
-  async createHoliday(@Body() dto: CreateHolidayDto) {
+  async createHoliday(@Body() dto: CreateHolidayDto, @GetUser() actor: User) {
+    dto.organizationId = actor.organizationId;
     return this.attendanceService.createHoliday(dto);
   }
 
@@ -705,7 +795,15 @@ export class AttendanceController {
     @Query('limit') limit = 20,
     @Query('search') search?: string,
     @Query('status') status?: Attendance['status'],
+    @GetUser() actor?: User,
   ) {
+    if (
+      actor &&
+      !this.isSuperadmin(actor) &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getAttendanceByDateWithFilters(
       organizationId,
       date,
@@ -725,16 +823,13 @@ export class AttendanceController {
   })
   @ApiOperation({ summary: 'Generate attendance summary for a specific date' })
   async processSummary(@Query('date') date?: string) {
-    // If no date passed, use today's date in Asia/Kolkata
-    const finalDate = date
-      ? DateTime.fromISO(date, { zone: 'Asia/Kolkata' }).toJSDate()
-      : new Date(
-          DateTime.now().setZone('Asia/Kolkata').toISODate() ??
-            new Date().toISOString().slice(0, 10),
-        );
-
-    await this.attendanceService.generateDailyAttendanceSummary(finalDate);
-    console.log(`Attendance summary generated for date ${finalDate}`);
+    // Per-organization processing: with no explicit date, each organization's
+    // summary is generated for ITS OWN local "today" (org timezone). An
+    // explicit admin date is interpreted as a calendar date in each org's
+    // timezone. Never a single hardcoded global timezone.
+    await this.attendanceService.generateDailySummariesForAllOrganizations(
+      date,
+    );
     return { message: 'Summary generated' };
   }
 
@@ -746,8 +841,12 @@ export class AttendanceController {
     description: 'All logs with anomalies recorded today',
     type: [AttendanceLog],
   })
-  async getTodayAnomalies(): Promise<AttendanceLog[]> {
-    return this.attendanceService.getTodayAnomalies();
+  async getTodayAnomalies(@GetUser() actor?: User): Promise<AttendanceLog[]> {
+    // Organization derived from the authenticated JWT context — never a
+    // client-supplied organizationId. SUPERADMIN without an org context
+    // receives the legacy platform-wide behavior.
+    const organizationId = actor?.organizationId;
+    return this.attendanceService.getTodayAnomalies(organizationId);
   }
 
   @Get('report')
@@ -834,7 +933,15 @@ export class AttendanceController {
     @Query('year') year: number,
     @Query('month') month: number,
     @Query('userIds') userIds: string = 'ALL',
+    @GetUser() actor?: User,
   ) {
+    if (
+      actor &&
+      !this.isSuperadmin(actor) &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.attendanceService.getAttendanceReport(
       organizationId,
       year,

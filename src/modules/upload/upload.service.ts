@@ -98,16 +98,24 @@ export class UploadService {
   /**
    * Upload an image file to Cloudinary
    * @param file - The multer file object
+   * @param organizationId - Optional organization ID for tenant isolation
    * @returns Promise<UploadResponseDto> - Contains url and public_id
    */
-  async uploadImage(file: Express.Multer.File): Promise<UploadResponseDto> {
+  async uploadImage(
+    file: Express.Multer.File,
+    organizationId?: string,
+  ): Promise<UploadResponseDto> {
     // Validate file
     this.validateFile(file);
+
+    const folder = organizationId
+      ? `hrms/${organizationId}/employees`
+      : CLOUDINARY_FOLDER;
 
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: CLOUDINARY_FOLDER,
+          folder,
           resource_type: 'image',
           transformation: [{ quality: 'auto:best' }, { fetch_format: 'auto' }],
         },

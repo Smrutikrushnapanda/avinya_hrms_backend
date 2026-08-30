@@ -23,11 +23,27 @@ export class PlanAccessGuard implements CanActivate {
   private readonly planRestrictionsEnabled =
     process.env.ENABLE_PLAN_RESTRICTIONS !== 'false';
 
+  private static restrictionWarningShown = false;
+
   constructor(
     private readonly reflector: Reflector,
     private readonly pricingService: PricingService,
     private readonly jwtService: JwtService,
-  ) {}
+  ) {
+    if (!this.planRestrictionsEnabled) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'ENABLE_PLAN_RESTRICTIONS=false is not allowed in production. Remove this environment variable.',
+        );
+      }
+      if (!PlanAccessGuard.restrictionWarningShown) {
+        PlanAccessGuard.restrictionWarningShown = true;
+        console.warn(
+          '⚠️  PLAN RESTRICTIONS DISABLED — all plan tiers have full access. This is for development only.',
+        );
+      }
+    }
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') {

@@ -147,6 +147,10 @@ export class LogReportService {
     };
   }
 
+  async findById(id: string): Promise<LogReport | null> {
+    return this.logRepo.findOne({ where: { id } });
+  }
+
   async delete(id: string): Promise<void> {
     const result = await this.logRepo.delete(id);
     if (result.affected === 0) {

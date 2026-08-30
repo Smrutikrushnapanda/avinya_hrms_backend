@@ -149,6 +149,10 @@ export class OrganizationService {
       data.allowEarlyRelievingByAdmin,
     );
     settings.sessionStartMonth = Number(data.sessionStartMonth ?? 4) || 4;
+    settings.timezone =
+      data.timezone && data.timezone.trim()
+        ? data.timezone.trim()
+        : 'Asia/Kolkata';
     settings.leaveCarryForwardEnabled = Boolean(data.leaveCarryForwardEnabled);
     settings.wfhCarryForwardEnabled = Boolean(data.wfhCarryForwardEnabled);
     await this.orgSettingsRepo.save(settings);
@@ -338,6 +342,7 @@ export class OrganizationService {
       settings.wfhMonitorReminderEnabled = true;
       settings.wfhMonitorReminderIntervalMinutes = 30;
       settings.wfhMonitorReminderEmailCutoffMinutes = 120;
+      settings.timezone = 'Asia/Kolkata';
     }
     const previousSessionStartMonth = Number(settings.sessionStartMonth || 4);
 
@@ -381,6 +386,14 @@ export class OrganizationService {
     }
     if (data.allowEarlyRelievingByAdmin !== undefined) {
       settings.allowEarlyRelievingByAdmin = data.allowEarlyRelievingByAdmin;
+    }
+
+    // Canonical organization timezone (IANA identifier). Stored on
+    // organization_settings — the single source of truth for business timezone.
+    if (data.timezone !== undefined) {
+      settings.timezone = data.timezone && data.timezone.trim()
+        ? data.timezone.trim()
+        : 'Asia/Kolkata';
     }
 
     if (data.sessionStartMonth !== undefined) {
@@ -607,6 +620,7 @@ export class OrganizationService {
     return {
       ...org,
       name: org.organizationName,
+      timezone: org.settings?.timezone || 'Asia/Kolkata',
       homeHeaderBackgroundColor:
         org.settings?.homeHeaderBackgroundColor || null,
       homeHeaderMediaUrl: org.settings?.homeHeaderMediaUrl || null,

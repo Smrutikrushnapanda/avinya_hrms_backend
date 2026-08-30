@@ -18,6 +18,7 @@ import { WfhRequest } from '../wfh/entities/wfh-request.entity';
 import { EmployeeWorkArrangement } from '../wfh/entities/employee-work-arrangement.entity';
 import { Employee } from '../employee/entities/employee.entity';
 import { AttendanceService } from '../attendance/attendance.service';
+import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 import {
   TAC_CURRENT_VERSION,
   WFH_MONITORING_TAC_TEXT,
@@ -45,6 +46,7 @@ export class WfhMonitoringService {
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
     private attendanceService: AttendanceService,
+    private timezoneService: OrganizationTimezoneService,
   ) {}
 
   /**
@@ -78,12 +80,30 @@ export class WfhMonitoringService {
     );
   }
 
-  private today(): string {
-    return new Date().toISOString().split('T')[0];
+  private async today(organizationId: string): Promise<string> {
+    return this.timezoneService.getToday(organizationId);
+  }
+
+  /** Resolve org "today" when only a userId is available (e.g. self-service endpoints). */
+  private async todayForUser(userId: string): Promise<string> {
+    const orgId = await this.resolveUserOrgId(userId);
+    if (!orgId) return new Date().toISOString().split('T')[0]; // defensive fallback (UTC)
+    return this.today(orgId);
+  }
+
+  private async resolveUserOrgId(userId: string): Promise<string | null> {
+    const emp = await this.employeeRepo.findOne({
+      where: { userId },
+      select: ['organizationId'],
+      cache: false,
+    });
+    return emp?.organizationId ?? null;
   }
 
   private async hasApprovedWfhToday(userId: string): Promise<boolean> {
-    const today = this.today();
+    const orgId = await this.resolveUserOrgId(userId);
+    if (!orgId) return false;
+    const today = await this.today(orgId);
     const req = await this.wfhRequestRepo
       .createQueryBuilder('req')
       .where('req.user_id = :userId', { userId })
@@ -177,7 +197,7 @@ export class WfhMonitoringService {
   }
 
   private async getOrCreateTodayLog(userId: string): Promise<WfhActivityLog> {
-    const date = this.today();
+    const date = await this.todayForUser(userId);
     let log = await this.activityRepo.findOne({
       where: { user: { id: userId }, date },
     });
@@ -208,7 +228,7 @@ export class WfhMonitoringService {
     userId: string,
   ): Promise<WfhActivityLog | null> {
     const log = await this.activityRepo.findOne({
-      where: { user: { id: userId }, date: this.today() },
+      where: { user: { id: userId }, date: await this.todayForUser(userId) },
     });
     if (log?.workStartedAt && !log.workEndedAt) {
       log.workEndedAt = new Date();
@@ -218,7 +238,7 @@ export class WfhMonitoringService {
   }
 
   async heartbeat(userId: string, organizationId: string, dto: HeartbeatDto) {
-    const date = dto.date ?? this.today();
+    const date = dto.date ?? (await this.today(organizationId));
 
     // 1. Update the daily aggregate log
     const log = await this.getOrCreateTodayLog(userId);
@@ -286,7 +306,10 @@ export class WfhMonitoringService {
   }
 
   async getMyToday(userId: string) {
-    const date = this.today();
+    const orgId = await this.resolveUserOrgId(userId);
+    // Resolve "today" in the user's organization timezone; a real user always
+    // has an org, so this is only a defensive fallback.
+    const date = orgId ? await this.today(orgId) : '';
     const [log, hasApprovedWfh] = await Promise.all([
       this.activityRepo.findOne({ where: { user: { id: userId }, date } }),
       this.hasApprovedWfhToday(userId),
@@ -312,7 +335,7 @@ export class WfhMonitoringService {
   }
 
   async getEmployeeActivity(employeeUserId: string, date?: string) {
-    const targetDate = date ?? this.today();
+    const targetDate = date ?? (await this.todayForUser(employeeUserId));
     const log = await this.activityRepo.findOne({
       where: { user: { id: employeeUserId }, date: targetDate },
       relations: ['user'],
@@ -338,7 +361,7 @@ export class WfhMonitoringService {
    * Response shape: { buckets: string[], employees: { userId, name, email, mouse, keyboard, tabs }[] }
    */
   async getChartData(organizationId: string, date?: string) {
-    const targetDate = date ?? this.today();
+    const targetDate = date ?? (await this.today(organizationId));
 
     // Build 30-min time buckets for a full working day (00:00 → 23:30)
     const buckets: string[] = [];
@@ -426,7 +449,7 @@ export class WfhMonitoringService {
   }
 
   async getTeamActivity(organizationId: string, date?: string) {
-    const targetDate = date ?? this.today();
+    const targetDate = date ?? (await this.today(organizationId));
 
     // 1. Find all users with approved WFH for this date in the org
     const approvedUsers = await this.getApprovedWfhUsersForOrg(
@@ -571,7 +594,9 @@ export class WfhMonitoringService {
     const sessionDate = new Date(activeSession.sessionStart)
       .toISOString()
       .split('T')[0];
-    if (sessionDate === this.today()) {
+    const orgId = await this.resolveUserOrgId(userId);
+    const todayStr = orgId ? await this.today(orgId) : sessionDate;
+    if (sessionDate === todayStr) {
       return activeSession;
     }
 
@@ -647,7 +672,7 @@ export class WfhMonitoringService {
   }
 
   async getAppSummary(userId: string, date?: string) {
-    const targetDate = date ?? this.today();
+    const targetDate = date ?? (await this.todayForUser(userId));
     const rows = await this.appSummaryRepo.find({
       where: { user: { id: userId }, trackedDate: targetDate },
       order: { totalDurationSeconds: 'DESC' },
@@ -678,7 +703,7 @@ export class WfhMonitoringService {
    * the older browser-tab heartbeat mechanism.
    */
   async getTeamAppSummary(organizationId: string, date?: string) {
-    const targetDate = date ?? this.today();
+    const targetDate = date ?? (await this.today(organizationId));
 
     const approvedUsers = await this.getApprovedWfhUsersForOrg(
       organizationId,
@@ -767,7 +792,7 @@ export class WfhMonitoringService {
    * in the org. Used by the admin dashboard to show "what they're doing right now".
    */
   async getTeamCurrentActivity(organizationId: string) {
-    const today = this.today();
+    const today = await this.today(organizationId);
 
     const approvedUsers = await this.getApprovedWfhUsersForOrg(
       organizationId,

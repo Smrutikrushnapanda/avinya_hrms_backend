@@ -18,6 +18,7 @@ import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { FirebaseService } from '../firebase/firebase.service';
 import { Express } from 'express';
+import { Response } from 'express';
 
 @Injectable()
 export class ChatService {
@@ -508,5 +509,37 @@ export class ChatService {
     return others.every(
       (p) => p.lastReadAt && p.lastReadAt >= message.createdAt,
     );
+  }
+
+  async findAttachmentByFilename(
+    filename: string,
+  ): Promise<ChatAttachment | null> {
+    return this.attachmentRepo.findOne({
+      where: { url: `/static/uploads/chat/${filename}` },
+    });
+  }
+
+  async findConversationByAttachmentId(
+    attachmentId: string,
+  ): Promise<ChatConversation | null> {
+    const attachment = await this.attachmentRepo.findOne({
+      where: { id: attachmentId },
+      relations: ['message'],
+    });
+    if (!attachment || !attachment.message) return null;
+
+    return this.conversationRepo.findOne({
+      where: { id: attachment.message.conversationId },
+    });
+  }
+
+  async isParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const participant = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+    });
+    return !!participant;
   }
 }

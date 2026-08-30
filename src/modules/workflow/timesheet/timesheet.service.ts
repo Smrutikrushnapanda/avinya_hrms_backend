@@ -15,6 +15,7 @@ import { CreateTimesheetBatchDto } from './dto/create-timesheet-batch.dto';
 import { UpdateTimesheetDto } from './dto/update-timesheet.dto';
 import { ApproveTimesheetDayDto } from './dto/approve-timesheet-day.dto';
 import { Employee } from 'src/modules/employee/entities/employee.entity';
+import { OrganizationTimezoneService } from 'src/shared/organization-timezone.service';
 
 type TimesheetQuery = {
   organizationId: string;
@@ -46,6 +47,7 @@ export class TimesheetService {
     private timesheetRepo: Repository<Timesheet>,
     @InjectRepository(Employee)
     private employeeRepo: Repository<Employee>,
+    private readonly timezoneService: OrganizationTimezoneService,
   ) {}
 
   private formatDateLocal(date: Date): string {
@@ -63,8 +65,8 @@ export class TimesheetService {
     return new Date(y, m - 1, d);
   }
 
-  private today(): string {
-    return this.formatDateLocal(new Date());
+  private today(organizationId: string): Promise<string> {
+    return this.timezoneService.getToday(organizationId);
   }
 
   /** Resolves the acting user's Employee.id (timesheets are employee-keyed; JWT only carries userId). */
@@ -84,11 +86,13 @@ export class TimesheetService {
     return employee.id;
   }
 
-  private assertDateWithinRange(dateStr: string) {
+  private async assertDateWithinRange(dateStr: string, organizationId: string) {
     const dateOnly = this.parseDateOnly(dateStr);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Date(
+      `${await this.timezoneService.getToday(organizationId)}T00:00:00Z`,
+    );
+    today.setUTCHours(0, 0, 0, 0);
 
     const diffMs = today.getTime() - dateOnly.getTime();
     const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
@@ -174,7 +178,7 @@ export class TimesheetService {
   }
 
   async createTimesheet(dto: CreateTimesheetDto) {
-    this.assertDateWithinRange(dto.date);
+    await this.assertDateWithinRange(dto.date, dto.organizationId);
 
     const employee = await this.employeeRepo.findOne({
       where: { id: dto.employeeId, organizationId: dto.organizationId },
@@ -202,7 +206,7 @@ export class TimesheetService {
   }
 
   async createTimesheetBatch(dto: CreateTimesheetBatchDto) {
-    this.assertDateWithinRange(dto.date);
+    await this.assertDateWithinRange(dto.date, dto.organizationId);
 
     const employee = await this.employeeRepo.findOne({
       where: { id: dto.employeeId, organizationId: dto.organizationId },
@@ -277,7 +281,8 @@ export class TimesheetService {
         'You can only edit your own timesheet entries',
       );
     }
-    if (entry.date !== this.today()) {
+    const entryOrgToday = await this.today(entry.organizationId);
+    if (entry.date !== entryOrgToday) {
       throw new ForbiddenException(
         "Only today's timesheet entries can be edited",
       );
@@ -328,7 +333,8 @@ export class TimesheetService {
         'You can only delete your own timesheet entries',
       );
     }
-    if (entry.date !== this.today()) {
+    const entryOrgToday = await this.today(entry.organizationId);
+    if (entry.date !== entryOrgToday) {
       throw new ForbiddenException(
         "Only today's timesheet entries can be deleted",
       );

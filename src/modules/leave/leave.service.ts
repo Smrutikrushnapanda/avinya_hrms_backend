@@ -379,8 +379,22 @@ export class LeaveService {
   ) {
     const leaveType = await this.leaveTypeRepo.findOne({
       where: { id: leaveTypeId },
+      relations: ['organization'],
     });
     if (!leaveType) throw new NotFoundException('Invalid leave type');
+
+    // ── Tenant isolation: validate leave type and employee belong to the same org ──
+    const employee = await this.employeeRepo.findOne({
+      where: { userId },
+      select: ['id', 'userId', 'organizationId'],
+    });
+    if (employee?.organizationId && leaveType.organization?.id) {
+      if (employee.organizationId !== leaveType.organization.id) {
+        throw new ForbiddenException(
+          'Leave type does not belong to your organization',
+        );
+      }
+    }
 
     // Determine leave duration: FULL_DAY=1.0, HALF_DAY=0.5
     const effectiveDuration = duration === 0.5 ? 0.5 : 1.0;
@@ -1467,7 +1481,10 @@ export class LeaveService {
 
     return anyRestored
       ? { restored: true, message: 'Leave balance restored for this date' }
-      : { restored: false, message: 'Balance ceiling reached or no restore needed' };
+      : {
+          restored: false,
+          message: 'Balance ceiling reached or no restore needed',
+        };
   }
 
   /**
@@ -1490,7 +1507,9 @@ export class LeaveService {
     }
 
     if (request.status !== 'APPROVED') {
-      throw new BadRequestException('Can only reconcile approved leave requests');
+      throw new BadRequestException(
+        'Can only reconcile approved leave requests',
+      );
     }
 
     // Get attendance for this leave range
@@ -1566,9 +1585,10 @@ export class LeaveService {
 
     return {
       restored: restoredCount,
-      message: restoredCount > 0
-        ? `Restored ${restoredCount} day(s) of leave balance`
-        : 'All eligible dates already reconciled',
+      message:
+        restoredCount > 0
+          ? `Restored ${restoredCount} day(s) of leave balance`
+          : 'All eligible dates already reconciled',
     };
   }
 
@@ -1658,11 +1678,7 @@ export class LeaveService {
     const end = new Date(endDate);
     const reconciledSet = new Set(reconciledDates);
 
-    for (
-      let d = new Date(start);
-      d <= end;
-      d.setDate(d.getDate() + 1)
-    ) {
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
       if (!reconciledSet.has(dateStr)) return false;
     }

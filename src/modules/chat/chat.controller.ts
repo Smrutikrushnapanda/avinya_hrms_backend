@@ -2,11 +2,14 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -30,7 +33,7 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import * as fs from 'fs';
-import { Express } from 'express';
+import { Express, Response } from 'express';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 
 @ApiTags('Chat')
@@ -175,5 +178,59 @@ export class ChatController {
       user as Partial<User> & { userId?: string },
     );
     return this.chatService.sendMessage(id, senderId, dto, files);
+  }
+
+  @Get('files/:filename')
+  @ApiOperation({
+    summary:
+      'Download a chat file (requires authentication and participant access)',
+  })
+  @ApiParam({ name: 'filename', type: 'string' })
+  async serveChatFile(
+    @Param('filename') filename: string,
+    @GetUser() user: User,
+    @Res() res: Response,
+  ) {
+    const userId = this.getAuthenticatedUserId(
+      user as Partial<User> & { userId?: string },
+    );
+    const organizationId = (user as any)?.organizationId || user.organizationId;
+
+    const attachment =
+      await this.chatService.findAttachmentByFilename(filename);
+    if (!attachment) {
+      throw new NotFoundException('File not found');
+    }
+
+    const conversation = await this.chatService.findConversationByAttachmentId(
+      attachment.id,
+    );
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const isParticipant = await this.chatService.isParticipant(
+      conversation.id,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (conversation.organizationId !== organizationId) {
+      const isSuperadmin = (user as any)?.roles?.some(
+        (r: any) => r.roleName === 'SUPERADMIN',
+      );
+      if (!isSuperadmin) {
+        throw new ForbiddenException('Access denied');
+      }
+    }
+
+    const filePath = join(process.cwd(), 'public', 'uploads', 'chat', filename);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('File not found');
+    }
+
+    return res.sendFile(filePath);
   }
 }

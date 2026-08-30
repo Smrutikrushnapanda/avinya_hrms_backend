@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   UseInterceptors,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
@@ -32,6 +33,9 @@ import { ApproveTimeslipDto } from './dto/approve-timeslip.dto';
 import { BatchUpdateTimeslipStatusDto } from './dto/batch-update-timeslip-status.dto';
 import { BatchApproveSubmissionsDto } from './dto/batch-approve-submissions.dto';
 import { JwtAuthGuard } from '../../auth-core/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth-core/guards/roles.guard';
+import { Roles } from '../../auth-core/decorators/roles.decorator';
+import { GetUser } from '../../auth-core/decorators/get-user.decorator';
 
 @ApiTags('Timeslips')
 @ApiBearerAuth()
@@ -40,16 +44,33 @@ import { JwtAuthGuard } from '../../auth-core/guards/jwt-auth.guard';
 export class TimeslipController {
   constructor(private readonly timeslipService: TimeslipService) {}
 
+  private assertSameOrg(actor: any, organizationId: string) {
+    if (
+      !actor?.roles?.some(
+        (r: { roleName: string }) => r.roleName === 'SUPERADMIN',
+      ) &&
+      actor?.organizationId &&
+      actor.organizationId !== organizationId
+    ) {
+      throw new ForbiddenException(
+        'You can only access timeslip data for your own organization.',
+      );
+    }
+  }
+
   /** ---- Create a new timeslip ---- */
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Create a new timeslip (employee correction request)',
   })
   @ApiCreatedResponse({ description: 'Timeslip created successfully.' })
   @ApiBadRequestResponse({ description: 'Invalid input.' })
   @ApiBody({ type: CreateTimeslipDto })
-  create(@Body() dto: CreateTimeslipDto) {
-    return this.timeslipService.createTimeslip(dto);
+  create(@Body() dto: CreateTimeslipDto, @GetUser() actor: any) {
+    this.assertSameOrg(actor, dto.organizationId);
+    return this.timeslipService.createTimeslip(dto, actor?.organizationId);
   }
 
   /** ---- Get all timeslips (paginated) ---- */
@@ -61,6 +82,7 @@ export class TimeslipController {
   findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+    @GetUser() actor: any,
   ) {
     const maxLimit = 100;
     if (limit > maxLimit) limit = maxLimit;
@@ -82,11 +104,17 @@ export class TimeslipController {
     @Param('id') employeeId: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
+    @GetUser() actor: any,
   ) {
     const maxLimit = 100;
     if (limit > maxLimit) limit = maxLimit;
 
-    return this.timeslipService.findByEmployee(employeeId, page, limit);
+    return this.timeslipService.findByEmployee(
+      employeeId,
+      page,
+      limit,
+      actor?.organizationId,
+    );
   }
 
   /** ---- Get a single timeslip ---- */
@@ -95,33 +123,43 @@ export class TimeslipController {
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
   @ApiOkResponse({ description: 'Timeslip returned.' })
   @ApiNotFoundResponse({ description: 'Timeslip not found.' })
-  findOne(@Param('id') id: string) {
-    return this.timeslipService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() actor: any) {
+    return this.timeslipService.findOne(id, actor?.organizationId);
   }
 
   /** ---- Update a timeslip (employee correction) ---- */
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({ summary: 'Update a timeslip (employee update)' })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
   @ApiBody({ type: UpdateTimeslipDto })
   @ApiOkResponse({ description: 'Timeslip updated successfully.' })
   @ApiBadRequestResponse({ description: 'Invalid update payload.' })
-  update(@Param('id') id: string, @Body() dto: UpdateTimeslipDto) {
-    return this.timeslipService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTimeslipDto,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.update(id, dto, actor?.organizationId);
   }
 
   /** ---- Delete a timeslip ---- */
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({ summary: 'Delete a timeslip' })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
   @ApiOkResponse({ description: 'Timeslip deleted successfully.' })
   @ApiNotFoundResponse({ description: 'Timeslip not found.' })
-  remove(@Param('id') id: string) {
-    return this.timeslipService.remove(id);
+  remove(@Param('id') id: string, @GetUser() actor: any) {
+    return this.timeslipService.remove(id, actor?.organizationId);
   }
 
   /** ---- Approve / Reject timeslip ---- */
   @Post(':id/approve')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Approve or reject a timeslip (action by approver)',
   })
@@ -129,12 +167,18 @@ export class TimeslipController {
   @ApiBody({ type: ApproveTimeslipDto })
   @ApiOkResponse({ description: 'Timeslip approval action recorded.' })
   @ApiBadRequestResponse({ description: 'Invalid approval payload.' })
-  approve(@Param('id') id: string, @Body() dto: ApproveTimeslipDto) {
-    return this.timeslipService.approve(id, dto);
+  approve(
+    @Param('id') id: string,
+    @Body() dto: ApproveTimeslipDto,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.approve(id, dto, actor?.organizationId);
   }
 
   //New Api
   @Post('batch-update-status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Batch update statuses of multiple timeslips',
     description: 'Update the status of multiple timeslips in a single request',
@@ -151,8 +195,15 @@ export class TimeslipController {
   @ApiBadRequestResponse({ description: 'Invalid input data' })
   @ApiNotFoundResponse({ description: 'No timeslips found with provided IDs' })
   @ApiBody({ type: BatchUpdateTimeslipStatusDto })
-  async batchUpdateStatuses(@Body() dto: BatchUpdateTimeslipStatusDto) {
-    return this.timeslipService.batchUpdateStatuses(dto, dto.approverId);
+  async batchUpdateStatuses(
+    @Body() dto: BatchUpdateTimeslipStatusDto,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.batchUpdateStatuses(
+      dto,
+      dto.approverId,
+      actor?.organizationId,
+    );
   }
 
   @Get('all-by-employee/:employeeId')
@@ -188,8 +239,14 @@ export class TimeslipController {
   @ApiNotFoundResponse({
     description: 'Employee not found or no timeslips exist.',
   })
-  async getAllByEmployee(@Param('employeeId') employeeId: string) {
-    return this.timeslipService.findAllByEmployee(employeeId);
+  async getAllByEmployee(
+    @Param('employeeId') employeeId: string,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.findAllByEmployee(
+      employeeId,
+      actor?.organizationId,
+    );
   }
 
   /** ---- Get timeslips for an approver ---- */
@@ -269,18 +326,21 @@ export class TimeslipController {
     @Query('status') status?: 'PENDING' | 'APPROVED' | 'REJECTED',
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
+    @GetUser() actor?: any,
   ) {
     const maxLimit = 100;
     if (limit > maxLimit) limit = maxLimit;
 
-    return this.timeslipService.findByApprover(approverId, {
-      status,
-      page,
-      limit,
-    });
+    return this.timeslipService.findByApprover(
+      approverId,
+      { status, page, limit },
+      actor?.organizationId,
+    );
   }
 
   @Post('batch-approve-submissions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Batch approve/reject timeslip submissions',
     description:
@@ -298,7 +358,13 @@ export class TimeslipController {
     },
   })
   @ApiBody({ type: BatchApproveSubmissionsDto })
-  async batchApproveSubmissions(@Body() dto: BatchApproveSubmissionsDto) {
-    return this.timeslipService.batchApproveSubmissions(dto);
+  async batchApproveSubmissions(
+    @Body() dto: BatchApproveSubmissionsDto,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.batchApproveSubmissions(
+      dto,
+      actor?.organizationId,
+    );
   }
 }

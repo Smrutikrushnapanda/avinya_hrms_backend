@@ -58,6 +58,8 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { LeaveService } from '../leave/leave.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
 import { Cron } from '@nestjs/schedule';
+import { Organization } from '../auth-core/entities/organization.entity';
+import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 
 type WorkingDayRuleSource = {
   workingDays?: number[] | null;
@@ -122,17 +124,29 @@ export class AttendanceService {
     private wfhActivityLogRepo: Repository<WfhActivityLog>,
     private readonly leaveService: LeaveService,
     private readonly attendanceCalculation: AttendanceCalculationService,
+    private readonly timezoneService: OrganizationTimezoneService,
   ) {}
+
+  async findEmployeeByUserAndOrg(userId: string, organizationId: string) {
+    return this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['id', 'userId', 'organizationId'],
+    });
+  }
 
   /**
    * Daily cron job: recalculate yesterday's attendance summary.
    *
-   * Runs at 1:00 AM IST (19:30 UTC previous day) to ensure all punches
-   * from the previous day have been submitted.
+   * MULTI-TENANT TIMEZONE-AWARE (STEP 4):
+   * The old cron computed a single global "yesterday" in Asia/Kolkata and
+   * applied it to every organization. That is wrong when organizations span
+   * timezones. This cron now enumerates every organization, resolves that
+   * organization's OWN timezone, computes ITS local "yesterday", and generates
+   * the summary scoped to that organization + date — so dates are never mixed
+   * between organizations.
    *
-   * Safety properties:
+   * Safety properties (unchanged):
    * - Idempotent: safe to rerun for the same date
-   * - Timezone-aware: always processes "yesterday" in Asia/Kolkata
    * - Preserves approved corrections: the summary logic reads approved
    *   timeslips and applies their corrections
    * - Preserves admin overrides: if admin explicitly set a status, the
@@ -141,24 +155,27 @@ export class AttendanceService {
    */
   @Cron('0 30 19 * * *', { timeZone: 'UTC' })
   async handleDailyAttendanceSummary() {
-    const yesterday = DateTime.now().setZone('Asia/Kolkata').minus({ days: 1 });
-    const date = yesterday.toJSDate();
-    const dateStr = yesterday.toFormat('yyyy-MM-dd');
+    const orgRepo = this.dataSource.getRepository(Organization);
+    const organizations = await orgRepo.find({ select: ['id'] });
 
     this.logger.log(
-      `Running daily attendance summary for ${dateStr} (Asia/Kolkata)`,
+      `Running daily attendance summary across ${organizations.length} organizations (per-org local timezone)`,
     );
 
-    try {
-      await this.generateDailyAttendanceSummary(date);
-      this.logger.log(
-        `Daily attendance summary completed successfully for ${dateStr}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Daily attendance summary failed for ${dateStr}: ${error.message}`,
-        error.stack,
-      );
+    for (const org of organizations) {
+      try {
+        // Organization-local "yesterday", never mixed across orgs.
+        const yesterday = await this.timezoneService.getYesterday(org.id);
+        await this.generateDailyAttendanceSummary(yesterday, org.id);
+        this.logger.log(
+          `Daily attendance summary completed for org ${org.id} (date ${yesterday})`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Daily attendance summary failed for org ${org.id}: ${error.message}`,
+          error.stack,
+        );
+      }
     }
   }
 
@@ -735,7 +752,9 @@ export class AttendanceService {
   ) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeLimit = Math.min(200, Math.max(1, Number(limit) || 20));
-    const normalizedDate = this.normalizeAttendanceDate(date);
+    const reportTz =
+      await this.timezoneService.getOrganizationTimezone(organizationId);
+    const normalizedDate = this.normalizeAttendanceDate(date, reportTz);
     const normalizedStatus = this.normalizeAttendanceStatus(status);
 
     const query = this.attendanceRepo
@@ -791,9 +810,9 @@ export class AttendanceService {
     const formatTime = (date?: Date): string | undefined => {
       if (!date) return undefined;
 
-      // Convert from UTC to Asia/Kolkata
+      // Convert the UTC instant to the organization's business timezone.
       const local = DateTime.fromJSDate(date, { zone: 'utc' }).setZone(
-        'Asia/Kolkata',
+        reportTz,
       );
 
       const hours = local.hour.toString().padStart(2, '0');
@@ -900,11 +919,14 @@ export class AttendanceService {
     };
   }
 
-  private normalizeAttendanceDate(dateInput: string): string {
+  private normalizeAttendanceDate(
+    dateInput: string,
+    timezone = 'Asia/Kolkata',
+  ): string {
     const trimmed = (dateInput || '').trim();
     if (!trimmed) return trimmed;
 
-    const parsedIso = DateTime.fromISO(trimmed, { zone: 'Asia/Kolkata' });
+    const parsedIso = DateTime.fromISO(trimmed, { zone: timezone });
     if (parsedIso.isValid) {
       return parsedIso.toFormat('yyyy-MM-dd');
     }
@@ -912,7 +934,7 @@ export class AttendanceService {
     const parsedJsDate = new Date(trimmed);
     if (!Number.isNaN(parsedJsDate.getTime())) {
       return DateTime.fromJSDate(parsedJsDate)
-        .setZone('Asia/Kolkata')
+        .setZone(timezone)
         .toFormat('yyyy-MM-dd');
     }
 
@@ -1570,20 +1592,22 @@ export class AttendanceService {
       outLocationAddress?: string;
     }[]
   > {
+    const monthlyTz =
+      await this.timezoneService.getOrganizationTimezone(organizationId);
     const fromDate = DateTime.fromObject(
       { year, month, day: 1 },
-      { zone: 'Asia/Kolkata' },
+      { zone: monthlyTz },
     ).toJSDate();
     const toDate = DateTime.fromObject(
       { year, month, day: 1 },
-      { zone: 'Asia/Kolkata' },
+      { zone: monthlyTz },
     )
       .endOf('month')
       .toJSDate();
 
     const formatDateLocal = (date: Date): string => {
       return DateTime.fromJSDate(date)
-        .setZone('Asia/Kolkata')
+        .setZone(monthlyTz)
         .toFormat('yyyy-MM-dd');
     };
 
@@ -1841,10 +1865,16 @@ export class AttendanceService {
   }
 
   // ✅ UPDATED METHOD: Include user information in today's anomalies
-  async getTodayAnomalies(): Promise<any[]> {
-    const kolkataNow = DateTime.now().setZone('Asia/Kolkata');
-    const from = kolkataNow.startOf('day').toUTC().toJSDate();
-    const to = kolkataNow.endOf('day').toUTC().toJSDate();
+  async getTodayAnomalies(organizationId?: string): Promise<any[]> {
+    // "Today" is determined by the target organization's timezone — never a
+    // hardcoded global zone. When no organization context is provided
+    // (e.g. platform SUPERADMIN), fall back to the legacy default.
+    const tz = organizationId
+      ? await this.timezoneService.getOrganizationTimezone(organizationId)
+      : 'Asia/Kolkata';
+    const orgNow = DateTime.now().setZone(tz);
+    const from = orgNow.startOf('day').toUTC().toJSDate();
+    const to = orgNow.endOf('day').toUTC().toJSDate();
 
     const queryBuilder = this.attendanceLogRepo
       .createQueryBuilder('log')
@@ -1852,6 +1882,13 @@ export class AttendanceService {
       .where('log.anomalyFlag = :anomalyFlag', { anomalyFlag: true })
       .andWhere('log.timestamp BETWEEN :from AND :to', { from, to })
       .orderBy('log.timestamp', 'DESC');
+
+    // Tenant isolation: scope anomaly logs to the organization context.
+    if (organizationId) {
+      queryBuilder.andWhere('log.organizationId = :organizationId', {
+        organizationId,
+      });
+    }
 
     const results = await queryBuilder.getMany();
     await this.overlayEmployeeNames(results.map((log) => log.user));
@@ -2289,11 +2326,51 @@ export class AttendanceService {
     };
   }
 
-  async generateDailyAttendanceSummary(date: Date = new Date()): Promise<void> {
-    const kolkataDate = DateTime.fromJSDate(date).setZone('Asia/Kolkata');
-    const start = kolkataDate.startOf('day').toUTC().toJSDate();
-    const end = kolkataDate.endOf('day').toUTC().toJSDate();
-    const dateStr = kolkataDate.toFormat('yyyy-MM-dd');
+  /**
+   * Process daily attendance summaries for every organization, each using its
+   * own local business date (organization timezone). Never mixes dates across
+   * organizations. An explicitly provided date (admin override) is interpreted
+   * as a calendar date in each organization's timezone.
+   */
+  async generateDailySummariesForAllOrganizations(
+    date?: string,
+  ): Promise<void> {
+    const orgRepo = this.dataSource.getRepository(Organization);
+    const organizations = await orgRepo.find({ select: ['id'] });
+    this.logger.log(
+      `Running daily attendance summary across ${organizations.length} organizations (per-org local timezone)`,
+    );
+    for (const org of organizations) {
+      try {
+        const localDate = date ?? (await this.timezoneService.getToday(org.id));
+        await this.generateDailyAttendanceSummary(localDate, org.id);
+        this.logger.log(
+          `Daily attendance summary completed for org ${org.id} (date ${localDate})`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Daily attendance summary failed for org ${org.id}: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  async generateDailyAttendanceSummary(
+    date: Date | string = new Date(),
+    organizationId?: string,
+  ): Promise<void> {
+    // Resolve the effective date in the target organization's timezone.
+    const tz = organizationId
+      ? await this.timezoneService.getOrganizationTimezone(organizationId)
+      : 'Asia/Kolkata';
+    const dayInZone =
+      typeof date === 'string'
+        ? DateTime.fromISO(date, { zone: tz })
+        : DateTime.fromJSDate(date).setZone(tz);
+    const start = dayInZone.startOf('day').toUTC().toJSDate();
+    const end = dayInZone.endOf('day').toUTC().toJSDate();
+    const dateStr = dayInZone.toFormat('yyyy-MM-dd');
+    const scopeOrg = organizationId ?? null;
 
     // Cache user-level shift configs so branch calendar rules are reused during this run.
     const shiftConfigCache = new Map<
@@ -2312,7 +2389,10 @@ export class AttendanceService {
     };
 
     const holidays = await this.holidayRepo.find({
-      where: { date: Between(start, end) },
+      where: {
+        date: Between(start, end),
+        ...(scopeOrg ? { organizationId: scopeOrg } : {}),
+      },
     });
     const holidaySet = new Set(
       holidays.map((h) => formatLocal(new Date(h.date), 'yyyy-MM-dd')),
@@ -2332,6 +2412,9 @@ export class AttendanceService {
       .andWhere('(req.endDate IS NULL OR req.endDate >= :dateStr)', {
         dateStr,
       })
+      .andWhere(scopeOrg ? 'user.organization_id = :orgId' : '1 = 1', {
+        orgId: scopeOrg,
+      })
       .getMany();
     for (const req of approvedWfhRequests) {
       if (req.user?.id && req.user?.organizationId) {
@@ -2340,7 +2423,11 @@ export class AttendanceService {
     }
 
     const permanentRemoteArrangements = await this.workArrangementRepo.find({
-      where: { arrangementType: 'PERMANENT_REMOTE', isActive: true },
+      where: {
+        arrangementType: 'PERMANENT_REMOTE',
+        isActive: true,
+        ...(scopeOrg ? { organization: { id: scopeOrg } } : {}),
+      },
       relations: ['user'],
     });
     for (const arrangement of permanentRemoteArrangements) {
@@ -2372,6 +2459,7 @@ export class AttendanceService {
       where: {
         timestamp: Between(start, end),
         anomalyFlag: false,
+        ...(scopeOrg ? { organization: { id: scopeOrg } } : {}),
       },
       relations: ['user', 'organization'],
       order: { timestamp: 'ASC' },
@@ -2383,6 +2471,7 @@ export class AttendanceService {
         status: 'APPROVED',
         startDate: LessThanOrEqual(dateStr),
         endDate: MoreThanOrEqual(dateStr),
+        ...(scopeOrg ? { user: { organizationId: scopeOrg } } : {}),
       },
       relations: ['user'],
     });
@@ -2633,7 +2722,8 @@ export class AttendanceService {
       // was overridden by attendance.
       if (leave && baseData.status !== 'on-leave') {
         const orgId =
-          leaveRequests.find((l) => l.user.id === userId)?.user?.organizationId ??
+          leaveRequests.find((l) => l.user.id === userId)?.user
+            ?.organizationId ??
           logs.find((l) => l.user.id === userId)?.organization?.id;
         if (orgId) {
           this.leaveService

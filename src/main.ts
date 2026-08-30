@@ -37,15 +37,9 @@ async function bootstrap() {
     'http://127.0.0.1:3000',
   ];
 
-  const vercelPreviewRegex = /^https:\/\/[\w-]+\.vercel\.app$/;
-
   app.enableCors({
     origin(origin, callback) {
-      if (
-        !origin ||
-        allowedOrigins.includes(origin) ||
-        vercelPreviewRegex.test(origin)
-      ) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(null, false);
@@ -65,16 +59,18 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger setup
-  const config = new DocumentBuilder()
-    .setTitle('Avinya HRMS API')
-    .setDescription('Avinya HRMS API Documentation')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  // Swagger setup — disabled in production
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Avinya HRMS API')
+      .setDescription('Avinya HRMS API Documentation')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   // Start server
   await app.listen(process.env.PORT || 8080, '0.0.0.0');

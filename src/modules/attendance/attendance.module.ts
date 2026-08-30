@@ -47,7 +47,12 @@ import { LeaveModule } from '../leave/leave.module';
     forwardRef(() => LeaveModule),
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, AttendanceCalculationService, Common, StorageService],
+  providers: [
+    AttendanceService,
+    AttendanceCalculationService,
+    Common,
+    StorageService,
+  ],
   exports: [TypeOrmModule, AttendanceService, AttendanceCalculationService],
 })
 export class AttendanceModule {}

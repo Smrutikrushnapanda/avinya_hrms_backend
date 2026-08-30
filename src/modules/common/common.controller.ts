@@ -25,6 +25,9 @@ import { Common } from './common.service';
 import { Express } from 'express';
 import { DateTime } from 'luxon';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
+import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { User } from '../auth-core/entities/user.entity';
+import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 
 const MAX_UPLOAD_SIZE = 2 * 1024 * 1024;
 
@@ -32,7 +35,10 @@ const MAX_UPLOAD_SIZE = 2 * 1024 * 1024;
 @Controller('common')
 @UseGuards(JwtAuthGuard)
 export class CommonController {
-  constructor(private readonly commonService: Common) {}
+  constructor(
+    private readonly commonService: Common,
+    private readonly timezoneService: OrganizationTimezoneService,
+  ) {}
 
   @Post('upload')
   @ApiOperation({ summary: 'Upload a file' })
@@ -81,6 +87,7 @@ export class CommonController {
     @UploadedFile() file: Express.Multer.File,
     @Query('path') path: string,
     @Query('public') isPublic: string,
+    @GetUser() actor: User,
     @Res() res: any,
   ) {
     if (!file) {
@@ -88,12 +95,15 @@ export class CommonController {
     }
 
     try {
+      const organizationId =
+        (actor as any)?.organizationId || actor.organizationId;
       const destination = `${path || 'uploads'}/${Date.now()}-${file.originalname}`;
       const url = await this.commonService.uploadFile(
         file.buffer,
         destination,
         file.mimetype,
         isPublic !== 'false',
+        organizationId,
       );
       return res.status(201).json({ url });
     } catch (err: any) {
@@ -109,22 +119,34 @@ export class CommonController {
   }
 
   @Get('time/now')
-  @ApiOperation({ summary: 'Get current server time in IST' })
+  @ApiOperation({ summary: 'Get current server time in org timezone' })
   @ApiResponse({
     status: 200,
-    description: 'Current server time in ISO and formatted string',
+    description: 'Current time in the authenticated org timezone (ISO with Z)',
     schema: {
       example: {
-        isoTime: '2025-08-19T11:25:30.123+05:30',
+        isoTime: '2025-08-19T11:25:30.123Z',
         formatted: '19-08-2025 11:25:30',
+        timezone: 'Asia/Kolkata',
       },
     },
   })
-  getServerTime() {
-    const ist = DateTime.now().setZone('Asia/Kolkata');
+  async getServerTime(@GetUser() actor?: User) {
+    // Resolve the authenticated organization's timezone — never a hardcoded
+    // Asia/Kolkata assumption. Transport is UTC ISO 8601 with Z.
+    const orgId = (actor as any)?.organizationId || actor?.organizationId;
+    const tz = orgId
+      ? await this.timezoneService.getOrganizationTimezone(orgId)
+      : 'Asia/Kolkata';
+    const now = DateTime.utc();
     return {
-      isoTime: ist.toISO(),
-      formatted: ist.toFormat('dd-LL-yyyy HH:mm:ss'),
+      isoTime: now.toISO(), // UTC ISO 8601 with Z
+      formatted: OrganizationTimezoneService.formatForZone(
+        now.toJSDate(),
+        tz,
+        'dd-LL-yyyy HH:mm:ss',
+      ),
+      timezone: tz,
     };
   }
 }

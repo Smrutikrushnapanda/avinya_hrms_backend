@@ -10,6 +10,7 @@ import { join } from 'path';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import * as fs from 'fs';
 import { GlobalCacheModule } from './shared/cache.module';
+import { TimezoneModule } from './shared/timezone.module';
 import { AuthCoreModule } from './modules/auth-core/auth-core.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
@@ -43,6 +44,7 @@ import { AssignWorkModule } from './modules/assign-work/assign-work.module';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LogReportInterceptor } from './shared/log-report.interceptor';
 import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
   imports: [
@@ -73,6 +75,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
       });
     })(),
     GlobalCacheModule,
+    TimezoneModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {
@@ -115,6 +118,7 @@ import { PlanAccessGuard } from './modules/pricing/guards/plan-access.guard';
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: PlanAccessGuard },
     { provide: APP_INTERCEPTOR, useClass: LogReportInterceptor },
   ],

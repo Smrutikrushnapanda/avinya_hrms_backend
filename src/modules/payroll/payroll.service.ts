@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PayrollRecord, PayrollStatus } from './entities/payroll-record.entity';
@@ -120,9 +125,16 @@ export class PayrollService {
     return new Promise((resolve, reject) => {
       const client = url.startsWith('https') ? https : http;
       const req = client.get(url, { timeout: 10000 }, (res) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
           // Follow redirect
-          this.fetchLogoAsDataUri(res.headers.location).then(resolve).catch(reject);
+          this.fetchLogoAsDataUri(res.headers.location)
+            .then(resolve)
+            .catch(reject);
           return;
         }
         if (res.statusCode !== 200) {
@@ -140,7 +152,10 @@ export class PayrollService {
         res.on('error', reject);
       });
       req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('Logo fetch timed out')); });
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Logo fetch timed out'));
+      });
     });
   }
 
@@ -187,6 +202,16 @@ export class PayrollService {
   }
 
   async create(dto: CreatePayrollRecordDto): Promise<PayrollRecord> {
+    // Validate employee belongs to this organization
+    const employee = await this.employeeRepo.findOne({
+      where: { id: dto.employeeId, organizationId: dto.organizationId },
+    });
+    if (!employee) {
+      throw new ForbiddenException(
+        'Employee does not belong to this organization',
+      );
+    }
+
     const totals = this.computeTotals(dto);
     const record = this.payrollRepo.create({
       organizationId: dto.organizationId,
@@ -377,7 +402,9 @@ export class PayrollService {
       try {
         logoDataUri = await this.fetchLogoAsDataUri(settings.logoUrl);
       } catch (err) {
-        this.logger.warn(`Failed to fetch logo for payslip, will use fallback: ${err}`);
+        this.logger.warn(
+          `Failed to fetch logo for payslip, will use fallback: ${err}`,
+        );
       }
     }
     const color = settings.primaryColor || '#2f3640';
@@ -606,7 +633,13 @@ export class PayrollService {
               </div>
 
               ${(() => {
-                const hasAnyStatutory = settings.cinNumber || settings.panNumber || settings.tanNumber || settings.gstinNumber || settings.pfRegistrationNumber || settings.esiRegistrationNumber;
+                const hasAnyStatutory =
+                  settings.cinNumber ||
+                  settings.panNumber ||
+                  settings.tanNumber ||
+                  settings.gstinNumber ||
+                  settings.pfRegistrationNumber ||
+                  settings.esiRegistrationNumber;
                 if (!hasAnyStatutory) return '';
                 return `
               <div class="section-title">COMPANY STATUTORY DETAILS</div>
