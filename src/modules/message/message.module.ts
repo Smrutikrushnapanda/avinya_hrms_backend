@@ -7,10 +7,11 @@ import { MessageService } from './message.service';
 import { MessageController } from './message.controller';
 import { MessageGateway } from './message.gateway';
 import { Employee } from '../employee/entities/employee.entity';
+import { ChatParticipant } from '../chat/entities/chat-participant.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Message, MessageRecipient, Employee]),
+    TypeOrmModule.forFeature([Message, MessageRecipient, Employee, ChatParticipant]),
     JwtModule.register({
       secret: process.env.JWT_SECRET_KEY,
     }),

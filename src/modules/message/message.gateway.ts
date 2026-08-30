@@ -7,6 +7,9 @@ import {
 } from '@nestjs/websockets';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ChatParticipant } from '../chat/entities/chat-participant.entity';
 
 @WebSocketGateway({
   cors: {
@@ -39,7 +42,11 @@ export class MessageGateway
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    @InjectRepository(ChatParticipant)
+    private readonly participantRepo: Repository<ChatParticipant>,
+  ) {}
 
   private socketIndex = new Map<string, { userId: string; orgId?: string }>();
   private userConnections = new Map<
@@ -123,7 +130,7 @@ export class MessageGateway
   }
 
   @SubscribeMessage('chat:meeting-start')
-  handleMeetingStart(
+  async handleMeetingStart(
     client: Socket,
     payload: {
       conversationId: string;
@@ -140,20 +147,45 @@ export class MessageGateway
     ) {
       return;
     }
-    client.to(`org:${data.orgId}`).emit('chat:meeting-start', {
-      conversationId: payload.conversationId,
-      url: payload.url,
-      callerName: payload.callerName || data.userId,
-      callerAvatar: payload.callerAvatar || '',
+
+    const participants = await this.participantRepo.find({
+      where: { conversationId: payload.conversationId },
+      select: ['userId'],
+    });
+    const participantIds = participants.map((p) => p.userId);
+
+    participantIds.forEach((userId) => {
+      if (userId !== data.userId) {
+        this.server.to(`user:${userId}`).emit('chat:meeting-start', {
+          conversationId: payload.conversationId,
+          url: payload.url,
+          callerName: payload.callerName || data.userId,
+          callerAvatar: payload.callerAvatar || '',
+        });
+      }
     });
   }
 
   @SubscribeMessage('chat:meeting-end')
-  handleMeetingEnd(client: Socket, payload: { conversationId: string }) {
+  async handleMeetingEnd(
+    client: Socket,
+    payload: { conversationId: string },
+  ) {
     const data = this.socketIndex.get(client.id);
-    if (!data?.orgId) return;
-    client.to(`org:${data.orgId}`).emit('chat:meeting-end', {
-      conversationId: payload.conversationId,
+    if (!data?.userId) return;
+
+    const participants = await this.participantRepo.find({
+      where: { conversationId: payload.conversationId },
+      select: ['userId'],
+    });
+    const participantIds = participants.map((p) => p.userId);
+
+    participantIds.forEach((userId) => {
+      if (userId !== data.userId) {
+        this.server.to(`user:${userId}`).emit('chat:meeting-end', {
+          conversationId: payload.conversationId,
+        });
+      }
     });
   }
 
