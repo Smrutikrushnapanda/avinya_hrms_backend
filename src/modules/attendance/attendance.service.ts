@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
@@ -55,6 +56,8 @@ import { WfhRequest, EmployeeWorkArrangement } from '../wfh/entities';
 import { WfhActivityLog } from '../wfh-monitoring/entities/wfh-activity-log.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { LeaveService } from '../leave/leave.service';
+import { AttendanceCalculationService } from './attendance-calculation.service';
+import { Cron } from '@nestjs/schedule';
 
 type WorkingDayRuleSource = {
   workingDays?: number[] | null;
@@ -72,6 +75,8 @@ type ShiftRuleSource = WorkingDayRuleSource & {
 
 @Injectable()
 export class AttendanceService {
+  private readonly logger = new Logger(AttendanceService.name);
+
   constructor(
     @InjectDataSource()
     private dataSource: DataSource,
@@ -116,7 +121,46 @@ export class AttendanceService {
     @InjectRepository(WfhActivityLog)
     private wfhActivityLogRepo: Repository<WfhActivityLog>,
     private readonly leaveService: LeaveService,
+    private readonly attendanceCalculation: AttendanceCalculationService,
   ) {}
+
+  /**
+   * Daily cron job: recalculate yesterday's attendance summary.
+   *
+   * Runs at 1:00 AM IST (19:30 UTC previous day) to ensure all punches
+   * from the previous day have been submitted.
+   *
+   * Safety properties:
+   * - Idempotent: safe to rerun for the same date
+   * - Timezone-aware: always processes "yesterday" in Asia/Kolkata
+   * - Preserves approved corrections: the summary logic reads approved
+   *   timeslips and applies their corrections
+   * - Preserves admin overrides: if admin explicitly set a status, the
+   *   daily summary uses the same status branches (leave/holiday/WFH)
+   *   that the admin would have used
+   */
+  @Cron('0 30 19 * * *', { timeZone: 'UTC' })
+  async handleDailyAttendanceSummary() {
+    const yesterday = DateTime.now().setZone('Asia/Kolkata').minus({ days: 1 });
+    const date = yesterday.toJSDate();
+    const dateStr = yesterday.toFormat('yyyy-MM-dd');
+
+    this.logger.log(
+      `Running daily attendance summary for ${dateStr} (Asia/Kolkata)`,
+    );
+
+    try {
+      await this.generateDailyAttendanceSummary(date);
+      this.logger.log(
+        `Daily attendance summary completed successfully for ${dateStr}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Daily attendance summary failed for ${dateStr}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
 
   private normalizeBranchName(name: string): string {
     return name.trim().replace(/\s+/g, ' ');
@@ -504,122 +548,164 @@ export class AttendanceService {
     // attempt (bad WiFi/GPS/face match) must never count as attendance, so
     // it's excluded here even though the raw log itself was still saved
     // above for audit purposes.
-    const dayLogs = await this.attendanceLogRepo.find({
-      where: {
-        user: { id: userId },
-        organization: { id: organizationId },
-        timestamp: Between(logsWindowStart, logsWindowEnd),
-        anomalyFlag: false,
-      },
-      order: { timestamp: 'ASC' },
-    });
+    //
+    // CONCURRENCY GUARANTEE:
+    // The entire ensure-row → lock → read-locked-state → calculate → write
+    // sequence executes inside a single PostgreSQL transaction with
+    // SELECT FOR UPDATE on the attendance row. This serializes concurrent
+    // attendance writers (punch + timeslip) so that:
+    //
+    // - An approved timeslip correction is never overwritten by a stale raw
+    //   punch that read the timeslip before approval.
+    // - A real raw out_time is never erased by an IN-only timeslip that
+    //   read a stale null out_time.
+    // - working_minutes and status are always derived from the final merged
+    //   source fields, not from a stale snapshot.
+    await this.dataSource.transaction(async (manager) => {
+      // 5a. Ensure the attendance row exists. The atomic ON CONFLICT prevents
+      //     the insert-if-not-exists race. We only overwrite processed_at on
+      //     conflict — all other fields are untouched.
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(Attendance)
+        .values({
+          user_id: userId,
+          organization_id: organizationId,
+          attendance_date: attendanceDate,
+          status: 'pending',
+          processed_at: new Date(),
+        } as any)
+        .orUpdate({
+          conflict_target: ['user_id', 'attendance_date'],
+          overwrite: ['processed_at'],
+        })
+        .execute();
 
-    if (dayLogs.length > 0) {
-      const sortedLogs = [...dayLogs].sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-      const inLog = sortedLogs[0];
-      const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
+      // 5b. Lock the row. SELECT FOR UPDATE blocks concurrent attendance
+      //     writers until this transaction commits. This is the serialization
+      //     point that prevents lost updates.
+      const existingAttendance = await manager.findOne(Attendance, {
+        where: { user: { id: userId }, attendanceDate },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-      // If there's only a single punch, treat the employee as present
-      // immediately and wait for clock-out to refine working time.
-      const hasClockOut = sortedLogs.length > 1;
+      if (!existingAttendance) return;
 
-      // Check for an approved timeslip that corrects punch times for this
-      // date. When a timeslip has been approved, its corrected times take
-      // precedence over raw punch logs so that admin-approved corrections
-      // are not overwritten on the next punch event.
-      let timeslipCorrectedIn: Date | null = null;
-      let timeslipCorrectedOut: Date | null = null;
-      try {
-        const approvedTimeslip = await this.timeslipRepo.findOne({
-          where: {
-            employee: { userId },
-            date: attendanceDate,
-            status: 'APPROVED' as any,
-          },
-        });
-        if (approvedTimeslip) {
-          if (approvedTimeslip.corrected_in) {
-            timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
-          }
-          if (approvedTimeslip.corrected_out) {
-            timeslipCorrectedOut = new Date(approvedTimeslip.corrected_out);
-          }
-        }
-      } catch {
-        // Timeslip table may not exist in all deployments — safe to ignore
-      }
-
-      // Prefer timeslip-corrected times over raw log timestamps
-      const finalInTime = timeslipCorrectedIn ?? inLog.timestamp;
-      const finalOutTime = timeslipCorrectedOut ?? (hasClockOut ? outLog.timestamp : undefined);
-
-      const workingMinutes = finalInTime && finalOutTime
-        ? Math.floor((+finalOutTime - +finalInTime) / 60000)
-        : hasClockOut
-          ? Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000)
-          : 0;
-
-      const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
-
-      const status = this.determineAttendanceStatus(
-        workingMinutes,
-        hasClockOut,
-        shiftConfig,
-        finalInTime,
-      );
-
-      const baseData: DeepPartial<Attendance> = {
-        user: { id: userId },
-        organization: { id: organizationId },
-        attendanceDate,
-        processedAt: new Date(),
-        inTime: finalInTime,
-        outTime: finalOutTime,
-        workingMinutes: Math.max(0, workingMinutes),
-        status,
-        inPhotoUrl: inLog.photoUrl ?? undefined,
-        inLatitude: inLog.latitude,
-        inLongitude: inLog.longitude,
-        inLocationAddress: inLog.locationAddress,
-        inWifiSsid: inLog.wifiSsid,
-        inWifiBssid: inLog.wifiBssid,
-        inDeviceInfo: inLog.deviceInfo,
-        outPhotoUrl:
-          hasClockOut && outLog.photoUrl ? outLog.photoUrl : undefined,
-        outLatitude: hasClockOut ? outLog.latitude : undefined,
-        outLongitude: hasClockOut ? outLog.longitude : undefined,
-        outLocationAddress: hasClockOut ? outLog.locationAddress : undefined,
-        outWifiSsid: hasClockOut ? outLog.wifiSsid : undefined,
-        outWifiBssid: hasClockOut ? outLog.wifiBssid : undefined,
-        outDeviceInfo: hasClockOut ? outLog.deviceInfo : undefined,
-        // Always false/undefined here — this summary is only ever built from
-        // the non-anomalous logs queried above.
-        anomalyFlag: false,
-        anomalyReason: undefined,
-        branch: branchId ? { id: branchId } : undefined,
-        officeTrip: tripLog?.officeTripId
-          ? { id: tripLog.officeTripId }
-          : undefined,
-        officeTripId: tripLog?.officeTripId ?? null,
-        tripType: tripLog?.tripType ?? null,
-      };
-
-      const existingAttendance = await this.attendanceRepo.findOne({
+      // 5c. Read day logs (inside transaction for consistency).
+      const dayLogs = await manager.find(AttendanceLog, {
         where: {
           user: { id: userId },
           organization: { id: organizationId },
-          attendanceDate,
+          timestamp: Between(logsWindowStart, logsWindowEnd),
+          anomalyFlag: false,
         },
+        order: { timestamp: 'ASC' },
       });
-      if (existingAttendance) {
-        await this.attendanceRepo.update(existingAttendance.id, baseData);
-      } else {
-        await this.attendanceRepo.save(this.attendanceRepo.create(baseData));
+
+      if (dayLogs.length > 0) {
+        const sortedLogs = [...dayLogs].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        // Filter to punch-only logs for attendance calculation.
+        const punchLogs = sortedLogs.filter(
+          (l) => l.type === 'check-in' || l.type === 'check-out',
+        );
+
+        const inLog = sortedLogs[0];
+
+        // Check for an approved timeslip inside the locked transaction.
+        let timeslipCorrectedIn: Date | null = null;
+        let timeslipCorrectedOut: Date | null = null;
+        let timeslipMissingType: 'IN' | 'OUT' | 'BOTH' | null = null;
+        try {
+          const approvedTimeslip = await manager.findOne(Timeslip, {
+            where: {
+              employee: { userId },
+              date: attendanceDate,
+              status: 'APPROVED' as any,
+            },
+          });
+          if (approvedTimeslip) {
+            timeslipMissingType = approvedTimeslip.missing_type;
+            if (approvedTimeslip.corrected_in) {
+              timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
+            }
+            if (approvedTimeslip.corrected_out) {
+              timeslipCorrectedOut = new Date(approvedTimeslip.corrected_out);
+            }
+          }
+        } catch {
+          // Timeslip table may not exist in all deployments — safe to ignore
+        }
+
+        // Use the authoritative resolution for effective punches
+        const { effectiveIn, effectiveOut, hasClockOut } =
+          this.attendanceCalculation.resolveEffectivePunches(
+            sortedLogs,
+            timeslipCorrectedIn,
+            timeslipCorrectedOut,
+            timeslipMissingType,
+          );
+
+        // For photo/GPS data, use the actual punch logs (not timeslip-corrected)
+        const punchOutLog =
+          punchLogs.length > 1 ? punchLogs[punchLogs.length - 1] : null;
+
+        const workingMinutes =
+          this.attendanceCalculation.calculateWorkingMinutes(
+            effectiveIn,
+            effectiveOut,
+          );
+
+        const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
+
+        const status = this.attendanceCalculation.determineAttendanceStatus(
+          workingMinutes,
+          hasClockOut,
+          shiftConfig,
+          effectiveIn,
+        );
+
+        // Write all fields in a single UPDATE inside the same transaction.
+        await manager.update(Attendance, existingAttendance.id, {
+          inTime: effectiveIn,
+          outTime: effectiveOut,
+          workingMinutes: Math.max(0, workingMinutes),
+          status,
+          inPhotoUrl: inLog.photoUrl ?? undefined,
+          inLatitude: inLog.latitude,
+          inLongitude: inLog.longitude,
+          inLocationAddress: inLog.locationAddress,
+          inWifiSsid: inLog.wifiSsid,
+          inWifiBssid: inLog.wifiBssid,
+          inDeviceInfo: inLog.deviceInfo,
+          outPhotoUrl:
+            hasClockOut && punchOutLog?.photoUrl
+              ? punchOutLog.photoUrl
+              : undefined,
+          outLatitude: hasClockOut ? punchOutLog?.latitude : undefined,
+          outLongitude: hasClockOut ? punchOutLog?.longitude : undefined,
+          outLocationAddress: hasClockOut
+            ? punchOutLog?.locationAddress
+            : undefined,
+          outWifiSsid: hasClockOut ? punchOutLog?.wifiSsid : undefined,
+          outWifiBssid: hasClockOut ? punchOutLog?.wifiBssid : undefined,
+          outDeviceInfo: hasClockOut ? punchOutLog?.deviceInfo : undefined,
+          anomalyFlag: false,
+          anomalyReason: undefined,
+          branch: branchId ? { id: branchId } : undefined,
+          officeTrip: tripLog?.officeTripId
+            ? { id: tripLog.officeTripId }
+            : undefined,
+          officeTripId: tripLog?.officeTripId ?? null,
+          tripType: tripLog?.tripType ?? null,
+          processedAt: new Date(),
+        });
       }
-    }
+    });
 
     // 6️⃣ Respond to frontend
     const responseData = {
@@ -2078,26 +2164,22 @@ export class AttendanceService {
     return Math.max(1, threshold);
   }
 
+  /**
+   * @deprecated Use AttendanceCalculationService.determineAttendanceStatus instead.
+   * This method delegates to the shared calculation service for backward compatibility.
+   */
   private determineAttendanceStatus(
     workingMinutes: number,
     hasClockOut: boolean,
     config: ShiftRuleSource,
     inTime?: Date | null,
   ): Attendance['status'] {
-    const isLateCheckIn = inTime
-      ? this.isLatePunchIn(new Date(inTime), config)
-      : false;
-    if (!hasClockOut) return isLateCheckIn ? 'late' : 'present';
-    const fullShiftMinutes = this.calculateShiftDurationMinutes(
-      config.workStartTime,
-      config.workEndTime,
+    return this.attendanceCalculation.determineAttendanceStatus(
+      workingMinutes,
+      hasClockOut,
+      config,
+      inTime,
     );
-    const halfDayThreshold = this.calculateHalfDayThresholdMinutes(config);
-    if (workingMinutes >= fullShiftMinutes) {
-      return isLateCheckIn ? 'late' : 'present';
-    }
-    if (workingMinutes >= halfDayThreshold) return 'half-day';
-    return 'absent';
   }
 
   private isLatePunchIn(inTime: Date, config: ShiftRuleSource): boolean {
@@ -2377,15 +2459,22 @@ export class AttendanceService {
           (a, b) =>
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         );
-        const inLog = sortedLogs[0];
-        const outLog = sortedLogs[sortedLogs.length - 1] ?? inLog;
 
-        const hasClockOut = sortedLogs.length > 1;
+        // Filter to punch-only logs for attendance calculation.
+        // Break-start/break-end logs must NOT be used as effective in/out.
+        const punchLogs = sortedLogs.filter(
+          (l) => l.type === 'check-in' || l.type === 'check-out',
+        );
+
+        const inLog = sortedLogs[0]; // first log of any type for photo/GPS data
+        const punchOutLog =
+          punchLogs.length > 1 ? punchLogs[punchLogs.length - 1] : null;
         const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
         // Check for approved timeslip corrections (same logic as logAttendance)
         let timeslipCorrectedIn: Date | null = null;
         let timeslipCorrectedOut: Date | null = null;
+        let timeslipMissingType: 'IN' | 'OUT' | 'BOTH' | null = null;
         try {
           const approvedTimeslip = await this.timeslipRepo.findOne({
             where: {
@@ -2395,6 +2484,7 @@ export class AttendanceService {
             },
           });
           if (approvedTimeslip) {
+            timeslipMissingType = approvedTimeslip.missing_type;
             if (approvedTimeslip.corrected_in) {
               timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
             }
@@ -2406,29 +2496,37 @@ export class AttendanceService {
           // Timeslip table may not exist in all deployments
         }
 
-        const finalInTime = timeslipCorrectedIn ?? inLog.timestamp;
-        const finalOutTime = timeslipCorrectedOut ?? outLog.timestamp;
+        // Use the authoritative resolution for effective punches
+        const { effectiveIn, effectiveOut, hasClockOut } =
+          this.attendanceCalculation.resolveEffectivePunches(
+            sortedLogs,
+            timeslipCorrectedIn,
+            timeslipCorrectedOut,
+            timeslipMissingType,
+          );
 
-        const workingMinutes = finalInTime && finalOutTime
-          ? Math.floor((+finalOutTime - +finalInTime) / 60000)
-          : Math.floor((+outLog.timestamp - +inLog.timestamp) / 60000);
+        const workingMinutes =
+          this.attendanceCalculation.calculateWorkingMinutes(
+            effectiveIn,
+            effectiveOut,
+          );
 
         Object.assign(baseData, {
-          inTime: finalInTime,
-          outTime: finalOutTime,
+          inTime: effectiveIn,
+          outTime: effectiveOut,
           workingMinutes,
           status: shiftConfig
-            ? this.determineAttendanceStatus(
+            ? this.attendanceCalculation.determineAttendanceStatus(
                 workingMinutes,
                 hasClockOut,
                 shiftConfig,
-                finalInTime,
+                effectiveIn,
               )
-            : workingMinutes >= 480
-              ? 'present'
-              : workingMinutes >= 160
-                ? 'half-day'
-                : 'absent',
+            : this.attendanceCalculation.determineAttendanceStatusFallback(
+                workingMinutes,
+                hasClockOut,
+                effectiveIn,
+              ),
           inPhotoUrl: inLog.photoUrl,
           inLatitude: inLog.latitude,
           inLongitude: inLog.longitude,
@@ -2436,13 +2534,13 @@ export class AttendanceService {
           inWifiSsid: inLog.wifiSsid,
           inWifiBssid: inLog.wifiBssid,
           inDeviceInfo: inLog.deviceInfo,
-          outPhotoUrl: outLog.photoUrl,
-          outLatitude: outLog.latitude,
-          outLongitude: outLog.longitude,
-          outLocationAddress: outLog.locationAddress,
-          outWifiSsid: outLog.wifiSsid,
-          outWifiBssid: outLog.wifiBssid,
-          outDeviceInfo: outLog.deviceInfo,
+          outPhotoUrl: punchOutLog?.photoUrl,
+          outLatitude: punchOutLog?.latitude,
+          outLongitude: punchOutLog?.longitude,
+          outLocationAddress: punchOutLog?.locationAddress,
+          outWifiSsid: punchOutLog?.wifiSsid,
+          outWifiBssid: punchOutLog?.wifiBssid,
+          outDeviceInfo: punchOutLog?.deviceInfo,
           officeTripId: tripLog?.officeTripId ?? null,
           tripType: tripLog?.tripType ?? null,
         });
@@ -2466,14 +2564,68 @@ export class AttendanceService {
         baseData.status = 'absent';
       }
 
-      const existing = await this.attendanceRepo.findOne({
-        where: { user: { id: userId }, attendanceDate },
-      });
-      if (existing) {
-        await this.attendanceRepo.update(existing.id, baseData);
-      } else {
-        await this.attendanceRepo.save(this.attendanceRepo.create(baseData));
-      }
+      // Use atomic upsert to prevent insert race condition.
+      await this.attendanceRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Attendance)
+        .values({
+          user_id: userId,
+          organization_id: organizationId,
+          attendance_date: attendanceDate,
+          in_time: baseData.inTime,
+          out_time: baseData.outTime,
+          working_minutes: baseData.workingMinutes ?? 0,
+          status: baseData.status,
+          in_photo_url: baseData.inPhotoUrl,
+          in_latitude: baseData.inLatitude,
+          in_longitude: baseData.inLongitude,
+          in_location_address: baseData.inLocationAddress,
+          in_wifi_ssid: baseData.inWifiSsid,
+          in_wifi_bssid: baseData.inWifiBssid,
+          in_device_info: baseData.inDeviceInfo,
+          out_photo_url: baseData.outPhotoUrl,
+          out_latitude: baseData.outLatitude,
+          out_longitude: baseData.outLongitude,
+          out_location_address: baseData.outLocationAddress,
+          out_wifi_ssid: baseData.outWifiSsid,
+          out_wifi_bssid: baseData.outWifiBssid,
+          out_device_info: baseData.outDeviceInfo,
+          anomaly_flag: baseData.anomalyFlag ?? false,
+          anomaly_reason: baseData.anomalyReason,
+          office_trip_id: baseData.officeTripId,
+          trip_type: baseData.tripType,
+          processed_at: new Date(),
+        } as any)
+        .orUpdate({
+          conflict_target: ['user_id', 'attendance_date'],
+          overwrite: [
+            'in_time',
+            'out_time',
+            'working_minutes',
+            'status',
+            'in_photo_url',
+            'in_latitude',
+            'in_longitude',
+            'in_location_address',
+            'in_wifi_ssid',
+            'in_wifi_bssid',
+            'in_device_info',
+            'out_photo_url',
+            'out_latitude',
+            'out_longitude',
+            'out_location_address',
+            'out_wifi_ssid',
+            'out_wifi_bssid',
+            'out_device_info',
+            'anomaly_flag',
+            'anomaly_reason',
+            'office_trip_id',
+            'trip_type',
+            'processed_at',
+          ],
+        })
+        .execute();
 
       // 🔧 Reconcile leave balance if employee attended work on approved leave
       // Only runs when: leave exists AND final status is NOT 'on-leave'

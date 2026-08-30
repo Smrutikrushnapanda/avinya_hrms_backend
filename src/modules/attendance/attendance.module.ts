@@ -12,6 +12,7 @@ import {
 } from './entities';
 
 import { AttendanceService } from './attendance.service';
+import { AttendanceCalculationService } from './attendance-calculation.service';
 import { AttendanceController } from './attendance.controller';
 import { Common } from '../common/common.service';
 import { LeaveRequest } from '../leave/entities';
@@ -46,7 +47,7 @@ import { LeaveModule } from '../leave/leave.module';
     forwardRef(() => LeaveModule),
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, Common, StorageService],
-  exports: [TypeOrmModule, AttendanceService],
+  providers: [AttendanceService, AttendanceCalculationService, Common, StorageService],
+  exports: [TypeOrmModule, AttendanceService, AttendanceCalculationService],
 })
 export class AttendanceModule {}

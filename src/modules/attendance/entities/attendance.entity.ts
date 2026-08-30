@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
@@ -13,6 +14,7 @@ import { Branch } from './branch.entity';
 import { OfficeTripRequest } from '../../office-trip/entities/office-trip-request.entity';
 
 @Entity('attendance')
+@Index('idx_attendance_user_date', ['user', 'attendanceDate'], { unique: true })
 export class Attendance {
   @PrimaryGeneratedColumn('uuid')
   id: string;

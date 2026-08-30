@@ -3,8 +3,8 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Timeslip } from './entities/timeslip.entity';
 import { TimeslipApproval } from './entities/timeslip-approval.entity';
 import { CreateTimeslipDto } from './dto/create-timeslip.dto';
@@ -17,10 +17,13 @@ import { MessageGateway } from 'src/modules/message/message.gateway';
 import { MessageService } from 'src/modules/message/message.service';
 import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
 import { AttendanceSettings } from 'src/modules/attendance/entities/attendance-settings.entity';
+import { AttendanceCalculationService } from 'src/modules/attendance/attendance-calculation.service';
 
 @Injectable()
 export class TimeslipService {
   constructor(
+    @InjectDataSource()
+    private dataSource: DataSource,
     @InjectRepository(Timeslip)
     private timeslipRepo: Repository<Timeslip>,
     @InjectRepository(TimeslipApproval)
@@ -33,10 +36,48 @@ export class TimeslipService {
     private attendanceSettingsRepo: Repository<AttendanceSettings>,
     private readonly messageGateway: MessageGateway,
     private readonly messageService: MessageService,
+    private readonly attendanceCalculation: AttendanceCalculationService,
   ) {}
 
-  /** When a timeslip is APPROVED, update the Attendance record with corrected times */
+  /**
+   * When a timeslip is APPROVED, update the Attendance record with corrected
+   * times and recalculate status using the AUTHORITATIVE attendance calculation.
+   *
+   * CONCURRENCY GUARANTEE:
+   * The entire ensure-row → lock → read-locked-state → merge → calculate →
+   * write sequence executes inside a single PostgreSQL transaction with
+   * SELECT FOR UPDATE on the attendance row. This serializes concurrent
+   * attendance writers (punch + timeslip) so that:
+   *
+   * - An approved IN correction is never overwritten by a raw punch that
+   *   read the timeslip before approval.
+   * - A real raw out_time is never erased by an IN-only timeslip that
+   *   read a stale null out_time.
+   * - working_minutes and status are always derived from the final merged
+   *   source fields, not from a stale snapshot.
+   *
+   * TIMELINE:
+   *   1. Immutable lookup (outside txn) — existence check, employee FK, date
+   *   2. Resolve shift config (outside txn — read-only, immutable)
+   *   3. BEGIN transaction
+   *   4. Ensure attendance row exists (atomic INSERT ON CONFLICT)
+   *   5. SELECT FOR UPDATE on attendance row — serializes all attendance writers
+   *   6. Read CURRENT timeslip state via manager.findOne (inside txn, after lock)
+   *   7. Apply corrections from the current timeslip (if still APPROVED)
+   *   8. Calculate derived fields via AttendanceCalculationService
+   *   9. UPDATE attendance row
+   *   10. COMMIT
+   *
+   * NOTE: The SELECT FOR UPDATE locks only the attendance row. The timeslip
+   * row is NOT pessimistically locked. Safety comes from reading the timeslip
+   * AFTER the attendance lock is held, which serializes this operation against
+   * concurrent attendance writers (logAttendance, other applyTimeslip calls).
+   */
   private async applyTimeslipToAttendance(timeslipId: string): Promise<void> {
+    // ── Step 1: Immutable lookup (outside transaction) ──────────────────
+    // Only reads fields that are immutable after creation: id, employee
+    // FK, attendance date. Mutable fields (status, corrected_in, corrected_out,
+    // missing_type) are re-read inside the transaction.
     const timeslip = await this.timeslipRepo.findOne({
       where: { id: timeslipId },
       relations: ['employee'],
@@ -44,86 +85,215 @@ export class TimeslipService {
 
     if (!timeslip || !timeslip.employee?.userId) return;
 
-    const { date, missing_type, corrected_in, corrected_out, employee } =
-      timeslip;
-
-    // `date` can arrive as a full ISO string (e.g. '2026-08-20T00:00:00.000Z'
-    // from the web app) while attendance.attendance_date is stored as
-    // 'YYYY-MM-DD'. Normalizing here prevents the lookup from missing the
-    // existing record and silently creating a duplicate attendance row.
+    const { date, employee } = timeslip;
     const normalizedDate = String(date).slice(0, 10);
+    const employeeUserId = employee.userId;
+    const employeeOrgId = employee.organizationId;
 
-    const existing = await this.attendanceRepo.findOne({
-      where: { user: { id: employee.userId }, attendanceDate: normalizedDate },
-    });
+    // ── Step 2: Resolve shift config (outside transaction) ──────────────
+    // Read-only, immutable config — no lock needed.
+    const shiftConfig = await this.resolveShiftConfigForEmployee(
+      employeeOrgId,
+      employeeUserId,
+    );
 
-    let inTime: Date | null = existing?.inTime ?? null;
-    let outTime: Date | null = existing?.outTime ?? null;
+    // ── Step 3-10: Transaction ──────────────────────────────────────────
+    await this.dataSource.transaction(async (manager) => {
+      // 4. Ensure the attendance row exists. The atomic ON CONFLICT prevents
+      //    the insert-if-not-exists race. We only overwrite processed_at on
+      //    conflict — all other fields are untouched.
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(Attendance)
+        .values({
+          user_id: employeeUserId,
+          organization_id: employeeOrgId,
+          attendance_date: normalizedDate,
+          status: 'pending',
+          processed_at: new Date(),
+        } as any)
+        .orUpdate({
+          conflict_target: ['user_id', 'attendance_date'],
+          overwrite: ['processed_at'],
+        })
+        .execute();
 
-    if ((missing_type === 'IN' || missing_type === 'BOTH') && corrected_in) {
-      inTime = new Date(corrected_in);
-    }
-    if ((missing_type === 'OUT' || missing_type === 'BOTH') && corrected_out) {
-      outTime = new Date(corrected_out);
-    }
-
-    let workingMinutes = existing?.workingMinutes ?? 0;
-    if (inTime && outTime) {
-      let diffMs = +outTime - +inTime;
-      if (diffMs < 0) {
-        diffMs += 24 * 60 * 60 * 1000;
-      }
-      workingMinutes = Math.max(0, Math.floor(diffMs / 60000));
-    }
-
-    // Compute thresholds from org attendance settings
-    const settings = await this.attendanceSettingsRepo.findOne({
-      where: { organizationId: employee.organizationId },
-    });
-    const workStart = settings?.workStartTime || '09:00:00';
-    const workEnd = settings?.workEndTime || '18:00:00';
-    const [startH, startM] = workStart.split(':').map(Number);
-    const [endH, endM] = workEnd.split(':').map(Number);
-    let fullShiftMinutes = endH * 60 + endM - (startH * 60 + startM);
-    if (fullShiftMinutes <= 0) fullShiftMinutes += 24 * 60;
-
-    const halfDayCutoff = settings?.halfDayCutoffTime || '14:00:00';
-    const [cutH, cutM] = halfDayCutoff.split(':').map(Number);
-    let halfDayThreshold = cutH * 60 + cutM - (startH * 60 + startM);
-    if (halfDayThreshold <= 0) halfDayThreshold += 24 * 60;
-    if (halfDayThreshold > fullShiftMinutes)
-      halfDayThreshold = Math.floor(fullShiftMinutes / 2);
-
-    const absentThreshold = Math.max(1, Math.floor(fullShiftMinutes * 0.25));
-
-    const status: Attendance['status'] =
-      workingMinutes < absentThreshold
-        ? 'absent'
-        : workingMinutes >= fullShiftMinutes
-          ? 'present'
-          : workingMinutes >= halfDayThreshold
-            ? 'half-day'
-            : 'absent';
-
-    const updateData: Partial<Attendance> = {
-      inTime: inTime ?? existing?.inTime,
-      outTime: outTime ?? existing?.outTime,
-      workingMinutes,
-      status,
-      processedAt: new Date(),
-    };
-
-    if (existing) {
-      await this.attendanceRepo.update(existing.id, updateData);
-    } else {
-      const newRecord = this.attendanceRepo.create({
-        user: { id: employee.userId },
-        organization: { id: employee.organizationId },
-        attendanceDate: normalizedDate,
-        ...updateData,
+      // 5. Lock the attendance row. SELECT FOR UPDATE blocks concurrent
+      //    attendance writers (logAttendance, other applyTimeslip calls) until
+      //    this transaction commits. This is the serialization point.
+      //    The timeslip row itself is NOT locked by this statement.
+      const existing = await manager.findOne(Attendance, {
+        where: {
+          user: { id: employeeUserId },
+          attendanceDate: normalizedDate,
+        },
+        lock: { mode: 'pessimistic_write' },
       });
-      await this.attendanceRepo.save(newRecord);
+
+      if (!existing) return;
+
+      // 6. Read CURRENT timeslip state inside the transaction, after the
+      //    attendance lock is held. This guarantees we see the latest committed
+      //    state of the timeslip — any concurrent approval that committed
+      //    before our lock was acquired is visible here.
+      const currentTimeslip = await manager.findOne(Timeslip, {
+        where: { id: timeslipId },
+      });
+
+      // If the timeslip no longer exists or is no longer approved, do not
+      // apply any correction. This prevents an outdated approval from being
+      // applied after the timeslip was cancelled/rejected.
+      if (
+        !currentTimeslip ||
+        (currentTimeslip as Timeslip).status !== 'APPROVED'
+      ) {
+        // Timeslip not approved (or cancelled) — nothing to apply.
+        // Still update processedAt to record that we checked.
+        await manager.update(Attendance, existing.id, {
+          processedAt: new Date(),
+        });
+        return;
+      }
+
+      const { missing_type, corrected_in, corrected_out } = currentTimeslip;
+
+      // 7. Resolve effective punch times from the LOCKED attendance state
+      //    plus the CURRENT approved timeslip corrections.
+      let effectiveIn: Date | null = existing.inTime ?? null;
+      let effectiveOut: Date | null = existing.outTime ?? null;
+
+      if ((missing_type === 'IN' || missing_type === 'BOTH') && corrected_in) {
+        effectiveIn = new Date(corrected_in);
+      }
+      if (
+        (missing_type === 'OUT' || missing_type === 'BOTH') &&
+        corrected_out
+      ) {
+        effectiveOut = new Date(corrected_out);
+      }
+
+      // 8. Determine hasClockOut from the FINAL source fields.
+      const hasClockOut =
+        effectiveOut !== null ||
+        missing_type === 'OUT' ||
+        missing_type === 'BOTH';
+
+      // 9. Calculate derived fields from the merged source fields.
+      const workingMinutes =
+        this.attendanceCalculation.calculateWorkingMinutes(
+          effectiveIn,
+          effectiveOut,
+        );
+
+      const status = this.attendanceCalculation.determineAttendanceStatus(
+        workingMinutes,
+        hasClockOut,
+        shiftConfig,
+        effectiveIn,
+      );
+
+      // 10. Write all fields in a single UPDATE inside the same transaction.
+      //     Because we hold the row lock, no other writer can modify the row
+      //     between our read (step 5) and this write.
+      await manager.update(Attendance, existing.id, {
+        inTime: effectiveIn,
+        outTime: effectiveOut,
+        workingMinutes: Math.max(0, workingMinutes),
+        status,
+        processedAt: new Date(),
+      });
+    });
+  }
+
+  /**
+   * Resolve the effective shift configuration for an employee.
+   *
+   * Mirrors the priority chain from AttendanceService.resolveShiftConfig:
+   * 1. Employee's assigned shift (if active)
+   * 2. Employee's assigned branch (if active)
+   * 3. Organization-level attendance settings
+   */
+  private async resolveShiftConfigForEmployee(
+    organizationId: string,
+    userId: string,
+  ) {
+    const employee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      relations: ['branch', 'shift'],
+    });
+
+    if (employee?.shiftId) {
+      const { AttendanceShift } = await import(
+        'src/modules/attendance/entities/attendance-shift.entity'
+      );
+      // Use the settings repo that's already injected
+      const shiftRepo = this.attendanceSettingsRepo.manager.getRepository(
+        AttendanceShift,
+      );
+      const shift = await shiftRepo.findOne({
+        where: { id: employee.shiftId, organizationId, isActive: true },
+      });
+      if (shift) {
+        const settings = employee.branchId
+          ? null
+          : await this.attendanceSettingsRepo.findOne({
+              where: { organizationId },
+            });
+        return {
+          workStartTime: shift.workStartTime,
+          workEndTime: shift.workEndTime,
+          graceMinutes: shift.graceMinutes,
+          lateThresholdMinutes: shift.lateThresholdMinutes,
+          halfDayCutoffTime: shift.halfDayCutoffTime,
+          workingDays: shift.workingDays,
+          weekdayOffRules: shift.weekdayOffRules,
+          timezone: settings?.timezone ?? 'Asia/Kolkata',
+        };
+      }
     }
+
+    if (employee?.branchId) {
+      const { Branch } = await import(
+        'src/modules/attendance/entities/branch.entity'
+      );
+      const branchRepo = this.attendanceSettingsRepo.manager.getRepository(
+        Branch,
+      );
+      const branch = await branchRepo.findOne({
+        where: { id: employee.branchId, organizationId, isActive: true },
+      });
+      if (branch) {
+        return {
+          workStartTime: branch.workStartTime,
+          workEndTime: branch.workEndTime,
+          graceMinutes: branch.graceMinutes,
+          lateThresholdMinutes: branch.lateThresholdMinutes,
+          halfDayCutoffTime: branch.halfDayCutoffTime,
+          workingDays: branch.workingDays,
+          weekdayOffRules: branch.weekdayOffRules,
+          timezone: (
+            await this.attendanceSettingsRepo.findOne({
+              where: { organizationId },
+            })
+          )?.timezone ?? 'Asia/Kolkata',
+        };
+      }
+    }
+
+    const settings = await this.attendanceSettingsRepo.findOne({
+      where: { organizationId },
+    });
+    return {
+      workStartTime: settings?.workStartTime || '09:00:00',
+      workEndTime: settings?.workEndTime || '18:00:00',
+      graceMinutes: settings?.graceMinutes ?? 15,
+      lateThresholdMinutes: settings?.lateThresholdMinutes ?? 30,
+      halfDayCutoffTime: settings?.halfDayCutoffTime || '14:00:00',
+      workingDays: settings?.workingDays ?? [1, 2, 3, 4, 5, 6],
+      weekdayOffRules: settings?.weekdayOffRules ?? {},
+      timezone: settings?.timezone ?? 'Asia/Kolkata',
+    };
   }
 
   private async notifyEmployeeOnFinalStatus(

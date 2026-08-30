@@ -16,6 +16,7 @@ import { AttendanceSettings } from '../attendance/entities/attendance-settings.e
 import { Timesheet } from './timesheet/entities/timesheet.entity';
 import { TimesheetController } from './timesheet/timesheet.controller';
 import { TimesheetService } from './timesheet/timesheet.service';
+import { AttendanceModule } from '../attendance/attendance.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -30,6 +31,7 @@ import { TimesheetService } from './timesheet/timesheet.service';
       Timesheet,
     ]),
     MessageModule,
+    AttendanceModule,
   ],
   controllers: [WorkflowController, TimeslipController, TimesheetController],
   providers: [WorkflowService, TimeslipService, TimesheetService],
