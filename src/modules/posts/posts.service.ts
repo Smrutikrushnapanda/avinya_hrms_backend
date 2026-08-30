@@ -2,16 +2,24 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Post, PostType } from './entities/post.entity';
 import { PostLike } from './entities/post-like.entity';
 import { PostComment } from './entities/post-comment.entity';
 import { Employee } from '../employee/entities/employee.entity';
+import { User } from '../auth-core/entities/user.entity';
+import { UserPushToken } from '../auth-core/entities/user-push-token.entity';
+import { MessageService } from '../message/message.service';
+import { MessageGateway } from '../message/message.gateway';
+import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
 export class PostsService {
+  private readonly logger = new Logger(PostsService.name);
+
   constructor(
     @InjectRepository(Post)
     private readonly postRepo: Repository<Post>,
@@ -21,6 +29,13 @@ export class PostsService {
     private readonly commentRepo: Repository<PostComment>,
     @InjectRepository(Employee)
     private readonly employeeRepo: Repository<Employee>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+    @InjectRepository(UserPushToken)
+    private readonly pushTokenRepo: Repository<UserPushToken>,
+    private readonly messageService: MessageService,
+    private readonly messageGateway: MessageGateway,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   /**
@@ -42,7 +57,89 @@ export class PostsService {
       organizationId: data.organizationId,
       isPinned: data.isPinned || false,
     });
-    return this.postRepo.save(post);
+    const saved = await this.postRepo.save(post);
+
+    // Fire-and-forget notification dispatch — don't block the response.
+    this.dispatchPostNotification(saved, data.authorId, data.organizationId).catch((err) =>
+      this.logger.warn(`Post notification failed: ${(err as Error).message}`),
+    );
+
+    return saved;
+  }
+
+  /**
+   * Notify every employee in the organization about a new post.
+   * 1. Create in-app message (DB)
+   * 2. Emit Socket.IO `message:new` event
+   * 3. Send FCM push notification
+   */
+  private async dispatchPostNotification(
+    post: Post,
+    authorId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const postTypeLabel =
+      post.postType === PostType.ANNOUNCEMENT
+        ? 'Announcement'
+        : post.postType === PostType.NEW_JOINER
+          ? 'New Joiner'
+          : post.postType === PostType.CELEBRATION
+            ? 'Celebration'
+            : post.postType === PostType.EVENT
+              ? 'Event'
+              : 'Post';
+
+    const title = `New ${postTypeLabel}`;
+    const body =
+      post.content.length > 120
+        ? `${post.content.substring(0, 120)}…`
+        : post.content;
+
+    // Get all users in the org except the author
+    const users = await this.userRepo.find({
+      where: { organizationId },
+      select: ['id'],
+    });
+    const recipientUserIds = users
+      .map((u) => u.id)
+      .filter((id) => id !== authorId);
+
+    if (recipientUserIds.length === 0) return;
+
+    // 1. In-app message (DB write)
+    const result = await this.messageService.createMessage(authorId, {
+      organizationId,
+      recipientUserIds,
+      title,
+      body,
+      type: 'post',
+    });
+
+    // 2. WebSocket real-time push
+    this.messageGateway.emitToUsers(recipientUserIds, {
+      message: result.message,
+    });
+
+    // 3. Firebase push notification (mobile + background)
+    try {
+      const pushTokens = await this.pushTokenRepo.find({
+        where: { userId: In(recipientUserIds) },
+        select: ['token'],
+      });
+      const tokens = pushTokens.map((t) => t.token);
+      if (tokens.length > 0) {
+        const { invalidTokens } = await this.firebaseService.sendToTokens(tokens, {
+          title,
+          body,
+          data: { type: 'post_notification', postId: post.id },
+        });
+        if (invalidTokens.length) {
+          await this.pushTokenRepo.delete({ token: In(invalidTokens) });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Push notification failed for post ${post.id}: ${(err as Error).message}`);
+    }
   }
 
   /**
