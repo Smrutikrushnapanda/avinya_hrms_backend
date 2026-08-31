@@ -140,16 +140,26 @@ export class TimeslipController {
     return this.timeslipService.update(id, dto, actor?.organizationId);
   }
 
-  /** ---- Delete a timeslip ---- */
+  /** ---- Delete/Withdraw a timeslip ---- */
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'HR')
-  @ApiOperation({ summary: 'Delete a timeslip' })
+  @ApiOperation({ summary: 'Delete a timeslip (admin/HR) or withdraw own pending timeslip (employee)' })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
-  @ApiOkResponse({ description: 'Timeslip deleted successfully.' })
+  @ApiOkResponse({ description: 'Timeslip deleted/withdrawn successfully.' })
   @ApiNotFoundResponse({ description: 'Timeslip not found.' })
-  remove(@Param('id') id: string, @GetUser() actor: any) {
-    return this.timeslipService.remove(id, actor?.organizationId);
+  async remove(@Param('id') id: string, @GetUser() actor: any) {
+    // Check if actor is admin/HR or employee
+    const isAdminOrHr = actor?.roles?.some(
+      (r: { roleName: string }) => ['ADMIN', 'HR'].includes(r.roleName),
+    );
+
+    if (isAdminOrHr) {
+      // Admin/HR can delete any timeslip
+      return this.timeslipService.remove(id, actor?.organizationId);
+    }
+
+    // Employee: find their employee record and pass it for ownership check
+    const employeeId = actor?.employeeId || actor?.id;
+    return this.timeslipService.remove(id, actor?.organizationId, employeeId);
   }
 
   /** ---- Approve / Reject timeslip ---- */

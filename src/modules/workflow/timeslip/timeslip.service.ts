@@ -396,42 +396,42 @@ export class TimeslipService {
     organizationId: string,
     employeeId: string,
   ): Promise<string> {
-    // Get employee's branch for branch-aware HR lookup
+    // 1) Employee's reporting manager (if set)
     const emp = await this.employeeRepo.findOne({
       where: { id: employeeId },
-      select: ['branchId'],
+      select: ['branchId', 'manager'],
+      relations: ['manager'],
     });
-    const branchId = emp?.branchId;
 
-    // Primary: find HR employee in same branch
-    if (branchId) {
-      const hrEmpSameBranch = await this.employeeRepo
-        .createQueryBuilder('emp')
-        .innerJoin('emp.designation', 'desig')
-        .where('emp.organizationId = :orgId', { orgId: organizationId })
-        .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
-        .andWhere('emp.branchId = :branchId', { branchId })
-        .andWhere('emp.id != :employeeId', { employeeId })
-        .select(['emp.id'])
-        .getOne();
-      if (hrEmpSameBranch?.id) return hrEmpSameBranch.id;
+    if (emp?.manager?.id) {
+      return emp.manager.id;
     }
 
-    // Secondary: any HR in the org
-    const hrEmp = await this.employeeRepo
-      .createQueryBuilder('emp')
-      .innerJoin('emp.designation', 'desig')
-      .where('emp.organizationId = :orgId', { orgId: organizationId })
-      .andWhere('LOWER(desig.name) = :name', { name: 'hr' })
-      .andWhere('emp.id != :employeeId', { employeeId })
-      .select(['emp.id'])
-      .getOne();
+    // 2) Any user with ADMIN or HR role in the same org
+    const adminHrUser = await this.dataSource.query(
+      `SELECT u.user_id
+       FROM users u
+       INNER JOIN user_roles ur ON ur.user_id = u.user_id
+       INNER JOIN roles r ON r.role_id = ur.role_id
+       INNER JOIN employees e ON e.user_id = u.user_id
+       WHERE u.organization_id = $1
+         AND e.id != $2
+         AND UPPER(r.role_name) IN ('ADMIN', 'HR')
+       ORDER BY u.created_at ASC
+       LIMIT 1`,
+      [organizationId, employeeId],
+    );
 
-    if (hrEmp?.id) {
-      return hrEmp.id;
+    if (adminHrUser?.[0]?.user_id) {
+      // Find the employee record for this user
+      const hrEmp = await this.employeeRepo.findOne({
+        where: { userId: adminHrUser[0].user_id },
+        select: ['id'],
+      });
+      if (hrEmp?.id) return hrEmp.id;
     }
 
-    // Last-resort: pick any other employee in org
+    // 3) Last-resort: pick any other employee in org
     const anyEmp = await this.employeeRepo
       .createQueryBuilder('emp')
       .where('emp.organizationId = :orgId', { orgId: organizationId })
@@ -626,8 +626,21 @@ export class TimeslipService {
   }
 
   /** ---- DELETE ---- */
-  async remove(id: string, organizationId?: string) {
+  async remove(id: string, organizationId?: string, actorEmployeeId?: string) {
     const timeslip = await this.assertTimeslipBelongsToOrg(id, organizationId);
+
+    // If actor is an employee (not admin/HR), they can only withdraw their own PENDING timeslip
+    if (actorEmployeeId) {
+      if (timeslip.employee?.id !== actorEmployeeId) {
+        throw new ForbiddenException('You can only withdraw your own timeslip');
+      }
+      if (timeslip.status !== 'PENDING') {
+        throw new BadRequestException('Only pending timeslips can be withdrawn');
+      }
+    }
+
+    // Remove associated approvals first
+    await this.approvalRepo.delete({ timeslip: { id } as any });
     await this.timeslipRepo.remove(timeslip);
     return { deleted: true };
   }
