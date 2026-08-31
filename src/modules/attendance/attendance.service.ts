@@ -587,12 +587,12 @@ export class AttendanceService {
         .insert()
         .into(Attendance)
         .values({
-          user_id: userId,
-          organization_id: organizationId,
-          attendance_date: attendanceDate,
-          status: 'pending',
-          processed_at: new Date(),
-        } as any)
+          user: { id: userId } as any,
+          organization: { id: organizationId } as any,
+          attendanceDate,
+          status: 'pending' as any,
+          processedAt: new Date(),
+        })
         .orUpdate({
           conflict_target: ['user_id', 'attendance_date'],
           overwrite: ['processed_at'],
@@ -1885,7 +1885,7 @@ export class AttendanceService {
 
     // Tenant isolation: scope anomaly logs to the organization context.
     if (organizationId) {
-      queryBuilder.andWhere('log.organizationId = :organizationId', {
+      queryBuilder.andWhere('log.organization.id = :organizationId', {
         organizationId,
       });
     }
@@ -2249,6 +2249,12 @@ export class AttendanceService {
       });
     }
 
+    // Resolve the canonical timezone from the organization's settings via
+    // OrganizationTimezoneService — the single source of truth. This must
+    // NOT fall back to a hardcoded literal.
+    const orgTimezone =
+      await this.timezoneService.getOrganizationTimezone(organizationId);
+
     if (employee?.shiftId) {
       const shift = await this.shiftRepo.findOne({
         where: {
@@ -2273,7 +2279,7 @@ export class AttendanceService {
           halfDayCutoffTime: shift.halfDayCutoffTime,
           workingDays: shift.workingDays,
           weekdayOffRules: shift.weekdayOffRules,
-          timezone: settings?.timezone ?? 'Asia/Kolkata',
+          timezone: orgTimezone,
           officeLatitude:
             activeBranch?.officeLatitude ?? settings?.officeLatitude ?? null,
           officeLongitude:
@@ -2299,7 +2305,7 @@ export class AttendanceService {
         halfDayCutoffTime: activeBranch.halfDayCutoffTime,
         workingDays: activeBranch.workingDays,
         weekdayOffRules: activeBranch.weekdayOffRules,
-        timezone: settings.timezone,
+        timezone: orgTimezone,
         officeLatitude: activeBranch.officeLatitude,
         officeLongitude: activeBranch.officeLongitude,
         allowedRadiusMeters: activeBranch.allowedRadiusMeters,
@@ -2318,7 +2324,7 @@ export class AttendanceService {
       halfDayCutoffTime: settings.halfDayCutoffTime,
       workingDays: settings.workingDays,
       weekdayOffRules: settings.weekdayOffRules,
-      timezone: settings.timezone,
+      timezone: orgTimezone,
       officeLatitude: settings.officeLatitude,
       officeLongitude: settings.officeLongitude,
       allowedRadiusMeters: settings.allowedRadiusMeters,
@@ -3382,11 +3388,7 @@ export class AttendanceService {
   }
 
   async resolveTimezone(organizationId: string): Promise<string> {
-    const settings = await this.attendanceSettingsRepo.findOne({
-      where: { organizationId },
-      select: ['timezone'],
-    });
-    return settings?.timezone ?? 'Asia/Kolkata';
+    return this.timezoneService.getOrganizationTimezone(organizationId);
   }
 
   private resolveWorkingDays(source?: WorkingDayRuleSource): number[] {
