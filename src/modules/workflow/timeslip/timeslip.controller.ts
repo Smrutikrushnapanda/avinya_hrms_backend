@@ -60,8 +60,6 @@ export class TimeslipController {
 
   /** ---- Create a new timeslip ---- */
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Create a new timeslip (employee correction request)',
   })
@@ -129,8 +127,6 @@ export class TimeslipController {
 
   /** ---- Update a timeslip (employee correction) ---- */
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'HR')
   @ApiOperation({ summary: 'Update a timeslip (employee update)' })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
   @ApiBody({ type: UpdateTimeslipDto })
@@ -146,7 +142,7 @@ export class TimeslipController {
 
   /** ---- Delete a timeslip ---- */
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'HR')
   @ApiOperation({ summary: 'Delete a timeslip' })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
@@ -158,7 +154,7 @@ export class TimeslipController {
 
   /** ---- Approve / Reject timeslip ---- */
   @Post(':id/approve')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Approve or reject a timeslip (action by approver)',
@@ -177,7 +173,7 @@ export class TimeslipController {
 
   //New Api
   @Post('batch-update-status')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Batch update statuses of multiple timeslips',
@@ -339,7 +335,7 @@ export class TimeslipController {
   }
 
   @Post('batch-approve-submissions')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'HR')
   @ApiOperation({
     summary: 'Batch approve/reject timeslip submissions',
