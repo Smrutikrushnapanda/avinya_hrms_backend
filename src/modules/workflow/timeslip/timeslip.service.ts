@@ -442,7 +442,7 @@ export class TimeslipService {
     // 1) Employee's reporting manager (if set)
     const emp = await this.employeeRepo.findOne({
       where: { id: employeeId },
-      select: ['branchId', 'manager'],
+      select: ['id'],
       relations: ['manager'],
     });
 

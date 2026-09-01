@@ -205,10 +205,7 @@ export class TimeslipController {
     description: 'Timeslip is not APPROVED, so no correction can be applied.',
   })
   @ApiNotFoundResponse({ description: 'Timeslip not found.' })
-  reapplyAttendance(
-    @Param('id') id: string,
-    @GetUser() actor: any,
-  ) {
+  reapplyAttendance(@Param('id') id: string, @GetUser() actor: any) {
     return this.timeslipService.reapplyAttendanceCorrection(
       id,
       actor?.organizationId,

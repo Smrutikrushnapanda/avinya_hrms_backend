@@ -36,29 +36,48 @@ describe('Timeslip → Attendance integration', () => {
   const DATE = '2026-09-01';
 
   const mockTimeslipRepo = {
-    find: jest.fn(), findOne: jest.fn(), findAndCount: jest.fn(),
-    create: jest.fn(), save: jest.fn(), update: jest.fn(),
-    delete: jest.fn(), remove: jest.fn(), createQueryBuilder: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    findAndCount: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+    remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
     count: jest.fn(),
   };
   const mockApprovalRepo = {
-    find: jest.fn(), findOne: jest.fn(), create: jest.fn(), save: jest.fn(),
-    update: jest.fn(), count: jest.fn(), createQueryBuilder: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
   const mockEmployeeRepo = {
-    find: jest.fn(), findOne: jest.fn(), createQueryBuilder: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
   const mockAttendanceRepo = {
-    find: jest.fn(), findOne: jest.fn(), save: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    save: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
   const mockAttendanceSettingsRepo = {
-    find: jest.fn(), findOne: jest.fn(), manager: { getRepository: jest.fn() },
+    find: jest.fn(),
+    findOne: jest.fn(),
+    manager: { getRepository: jest.fn() },
   };
 
   // Manager used inside the transaction callback
   const mockManager = {
-    createQueryBuilder: jest.fn(), findOne: jest.fn(), update: jest.fn(),
+    createQueryBuilder: jest.fn(),
+    findOne: jest.fn(),
+    update: jest.fn(),
   };
   const mockDataSource = {
     transaction: jest.fn(async (cb) => cb(mockManager)),
@@ -75,8 +94,11 @@ describe('Timeslip → Attendance integration', () => {
   };
 
   const employee = {
-    id: EMPLOYEE_ID, userId: USER_ID, organizationId: ORG_ID,
-    shiftId: null, branchId: null,
+    id: EMPLOYEE_ID,
+    userId: USER_ID,
+    organizationId: ORG_ID,
+    shiftId: null,
+    branchId: null,
   };
 
   const productionAttendance = {
@@ -91,15 +113,23 @@ describe('Timeslip → Attendance integration', () => {
 
   // Production-like shift: start 10:00 IST, grace 30 min
   const shiftConfig = {
-    workStartTime: '10:00:00', workEndTime: '19:00:00',
-    graceMinutes: 30, lateThresholdMinutes: 30,
-    timezone: 'Asia/Kolkata', requiredWorkingMinutes: 480,
+    workStartTime: '10:00:00',
+    workEndTime: '19:00:00',
+    graceMinutes: 30,
+    lateThresholdMinutes: 30,
+    timezone: 'Asia/Kolkata',
+    requiredWorkingMinutes: 480,
   };
 
   const approvedTimeslip = {
-    id: TIMESLIP_ID, date: DATE, missing_type: 'IN',
+    id: TIMESLIP_ID,
+    date: DATE,
+    missing_type: 'IN',
     corrected_in: new Date('2026-09-01T04:40:00.000Z'), // 10:10 IST
-    corrected_out: null, reason: 'T', status: 'APPROVED', employee,
+    corrected_out: null,
+    reason: 'T',
+    status: 'APPROVED',
+    employee,
   };
 
   beforeEach(async () => {
@@ -107,7 +137,9 @@ describe('Timeslip → Attendance integration', () => {
 
     mockManager.createQueryBuilder.mockReturnValue(insertChain);
     mockManager.update.mockResolvedValue(undefined);
-    mockDataSource.transaction.mockImplementation(async (cb) => cb(mockManager));
+    mockDataSource.transaction.mockImplementation(async (cb) =>
+      cb(mockManager),
+    );
 
     // resolveShiftConfigForEmployee: employee without shift/branch → org settings
     mockEmployeeRepo.findOne.mockImplementation(async ({ where }) => {
@@ -117,19 +149,31 @@ describe('Timeslip → Attendance integration', () => {
       return employee;
     });
     mockAttendanceSettingsRepo.findOne.mockResolvedValue({
-      workStartTime: '10:00:00', workEndTime: '19:00:00',
-      graceMinutes: 30, lateThresholdMinutes: 30,
-      timezone: 'Asia/Kolkata', requiredWorkingMinutes: 480,
+      workStartTime: '10:00:00',
+      workEndTime: '19:00:00',
+      graceMinutes: 30,
+      lateThresholdMinutes: 30,
+      timezone: 'Asia/Kolkata',
+      requiredWorkingMinutes: 480,
     });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TimeslipService,
         { provide: getRepositoryToken(Timeslip), useValue: mockTimeslipRepo },
-        { provide: getRepositoryToken(TimeslipApproval), useValue: mockApprovalRepo },
+        {
+          provide: getRepositoryToken(TimeslipApproval),
+          useValue: mockApprovalRepo,
+        },
         { provide: getRepositoryToken(Employee), useValue: mockEmployeeRepo },
-        { provide: getRepositoryToken(Attendance), useValue: mockAttendanceRepo },
-        { provide: getRepositoryToken(AttendanceSettings), useValue: mockAttendanceSettingsRepo },
+        {
+          provide: getRepositoryToken(Attendance),
+          useValue: mockAttendanceRepo,
+        },
+        {
+          provide: getRepositoryToken(AttendanceSettings),
+          useValue: mockAttendanceSettingsRepo,
+        },
         { provide: DataSource, useValue: mockDataSource },
         { provide: MessageGateway, useValue: mockMessageGateway },
         { provide: MessageService, useValue: mockMessageService },
@@ -182,12 +226,18 @@ describe('Timeslip → Attendance integration', () => {
     it('turns the original LATE punch (11:53 IST) into ON-TIME with corrected 10:10 IST', async () => {
       const calc = new AttendanceCalculationService();
       const oldResult = calc.determineAttendanceStatus(
-        0, false, shiftConfig, new Date('2026-09-01T06:23:26.020Z'),
+        0,
+        false,
+        shiftConfig,
+        new Date('2026-09-01T06:23:26.020Z'),
       );
       expect(oldResult.punctualityStatus).toBe('late');
 
       const correctedResult = calc.determineAttendanceStatus(
-        0, false, shiftConfig, new Date('2026-09-01T04:40:00.000Z'),
+        0,
+        false,
+        shiftConfig,
+        new Date('2026-09-01T04:40:00.000Z'),
       );
       expect(correctedResult.punctualityStatus).toBe('on-time');
       expect(correctedResult.status).toBe('present');
@@ -229,9 +279,8 @@ describe('Timeslip → Attendance integration', () => {
 
     it('is idempotent — calling twice updates the SAME row, never duplicates', async () => {
       mockTimeslipRepo.findOne.mockResolvedValue(approvedTimeslip);
-      mockManager.findOne.mockImplementation(
-        async (entity: any) =>
-          entity === Attendance ? productionAttendance : approvedTimeslip,
+      mockManager.findOne.mockImplementation(async (entity: any) =>
+        entity === Attendance ? productionAttendance : approvedTimeslip,
       );
 
       await service.reapplyAttendanceCorrection(TIMESLIP_ID);
@@ -360,4 +409,3 @@ describe('Timeslip → Attendance integration', () => {
     });
   });
 });
-

@@ -17,6 +17,9 @@ export class AttendanceLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
+  organizationId: string;
+
   @ManyToOne(() => Organization)
   @JoinColumn({ name: 'organization_id' })
   organization: Organization;
