@@ -817,13 +817,21 @@ export class TimeslipService {
           }
 
           // Update all pending approvals for this timeslip
-          const updateResult = await this.approvalRepo.update(
-            { timeslip: { id: timeslipId }, action: 'PENDING' },
-            {
+          // NOTE: Cannot use approvalRepo.update() with relation WHERE clause —
+          // TypeORM 0.3.x Repository.update() does not resolve nested relation
+          // objects (e.g. { timeslip: { id } }) the same way find*() methods do,
+          // resulting in affected: 0 even when pending approvals exist.
+          // QueryBuilder targeting the raw column is the reliable approach.
+          const qb = this.approvalRepo
+            .createQueryBuilder()
+            .update(TimeslipApproval)
+            .set({
               action: status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
               acted_at: new Date(),
-            },
-          );
+            })
+            .where('timeslip_id = :timeslipId', { timeslipId })
+            .andWhere('action = :action', { action: 'PENDING' });
+          const updateResult = await qb.execute();
 
           // Only proceed if we actually updated some approvals
           if (updateResult.affected && updateResult.affected > 0) {
