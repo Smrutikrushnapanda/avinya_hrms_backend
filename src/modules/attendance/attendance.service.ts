@@ -1927,7 +1927,7 @@ export class AttendanceService {
 
     // Tenant isolation: scope anomaly logs to the organization context.
     if (organizationId) {
-      queryBuilder.andWhere('log.organizationId = :organizationId', {
+      queryBuilder.andWhere('log."organization_id" = :organizationId', {
         organizationId,
       });
     }

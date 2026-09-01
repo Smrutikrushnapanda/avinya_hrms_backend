@@ -93,40 +93,40 @@ export class LogReportService {
 
     const qb = this.logRepo
       .createQueryBuilder('log')
-      .where('log.organizationId = :organizationId', { organizationId });
+      .where('log."organization_id" = :organizationId', { organizationId });
 
     if (from && to) {
       const fromDate = new Date(from);
       const toDate = new Date(to);
-      qb.andWhere('log.createdAt BETWEEN :fromDate AND :toDate', {
+      qb.andWhere('log."created_at" BETWEEN :fromDate AND :toDate', {
         fromDate,
         toDate,
       });
     } else if (from) {
       const fromDate = new Date(from);
-      qb.andWhere('log.createdAt >= :fromDate', { fromDate });
+      qb.andWhere('log."created_at" >= :fromDate', { fromDate });
     } else if (to) {
       const toDate = new Date(to);
-      qb.andWhere('log.createdAt <= :toDate', { toDate });
+      qb.andWhere('log."created_at" <= :toDate', { toDate });
     }
 
     if (userId) {
-      qb.andWhere('log.userId = :userId', { userId });
+      qb.andWhere('log."user_id" = :userId', { userId });
     }
 
     if (actionType) {
-      qb.andWhere('log.actionType ILIKE :actionType', {
+      qb.andWhere('log."action_type" ILIKE :actionType', {
         actionType: `%${actionType}%`,
       });
     }
 
     if (module) {
-      qb.andWhere('log.module ILIKE :module', { module: `%${module}%` });
+      qb.andWhere('log."module" ILIKE :module', { module: `%${module}%` });
     }
 
     if (search) {
       qb.andWhere(
-        '(log.userName ILIKE :search OR log.actionType ILIKE :search OR log.module ILIKE :search OR log.description ILIKE :search OR log.ipAddress ILIKE :search)',
+        '(log."user_name" ILIKE :search OR log."action_type" ILIKE :search OR log."module" ILIKE :search OR log."description" ILIKE :search OR log."ip_address" ILIKE :search)',
         { search: `%${search}%` },
       );
     }
