@@ -408,4 +408,112 @@ describe('Timeslip → Attendance integration', () => {
       expect(patch.inTime).toEqual(new Date('2026-09-01T04:40:00.000Z'));
     });
   });
+
+  describe('approve() — final approval path must apply the correction', () => {
+    it('calls applyTimeslipToAttendance when the last approver approves', async () => {
+      // approve() flow: assertTimeslipBelongsToOrg → findOne approval → save approval
+      // → count remaining pending → count rejected → save timeslip → applyTimeslipToAttendance
+      mockTimeslipRepo.findOne
+        .mockResolvedValueOnce(approvedTimeslip) // assertTimeslipBelongsToOrg
+        .mockResolvedValueOnce(approvedTimeslip) // findOne inside applyTimeslipToAttendance (step 1)
+        .mockResolvedValueOnce(approvedTimeslip); // findOne in reapplyAttendanceCorrection return
+
+      mockApprovalRepo.findOne.mockResolvedValue({
+        id: 'approval-1',
+        action: 'PENDING',
+        timeslip: approvedTimeslip,
+      });
+      mockApprovalRepo.save.mockResolvedValue(undefined);
+      mockApprovalRepo.count
+        .mockResolvedValueOnce(0) // remainingPending = 0
+        .mockResolvedValueOnce(0); // anyRejected = 0
+
+      mockTimeslipRepo.save.mockResolvedValue(undefined);
+
+      mockManager.findOne
+        .mockResolvedValueOnce(productionAttendance) // attendance row (locked)
+        .mockResolvedValueOnce(approvedTimeslip); // timeslip re-read in txn
+
+      await service.approve(TIMESLIP_ID, {
+        approverId: EMPLOYEE_ID,
+        action: 'APPROVED',
+      });
+
+      // applyTimeslipToAttendance must have updated the attendance row
+      expect(mockManager.update).toHaveBeenCalled();
+      const patch = mockManager.update.mock.calls[0][2];
+      expect(patch.inTime).toEqual(new Date('2026-09-01T04:40:00.000Z'));
+      expect(patch.outTime).toBeNull();
+      expect(patch.status).toBe('present');
+      expect(patch.punctualityStatus).toBe('on-time');
+      expect(patch.completionStatus).toBeNull();
+    });
+  });
+
+  describe('approve() — production regression: Sanjay Jena DP0048', () => {
+    it('turns 11:53 IST late punch into 10:10 IST on-time via final approval', async () => {
+      const calc = new AttendanceCalculationService();
+      const shiftCfg = {
+        workStartTime: '10:00:00',
+        workEndTime: '19:00:00',
+        graceMinutes: 30,
+        lateThresholdMinutes: 30,
+        timezone: 'Asia/Kolkata',
+        requiredWorkingMinutes: 480,
+      };
+
+      // Before correction: 11:53 IST is late
+      const beforeResult = calc.determineAttendanceStatus(
+        0,
+        false,
+        shiftCfg,
+        new Date('2026-09-01T06:23:26.020Z'),
+      );
+      expect(beforeResult.punctualityStatus).toBe('late');
+      expect(beforeResult.status).toBe('present');
+
+      // After correction: 10:10 IST is on-time
+      const afterResult = calc.determineAttendanceStatus(
+        0,
+        false,
+        shiftCfg,
+        new Date('2026-09-01T04:40:00.000Z'),
+      );
+      expect(afterResult.punctualityStatus).toBe('on-time');
+      expect(afterResult.status).toBe('present');
+      expect(afterResult.completionStatus).toBeNull();
+
+      // Verify the full approve → apply flow produces the corrected state
+      mockTimeslipRepo.findOne
+        .mockResolvedValueOnce(approvedTimeslip)
+        .mockResolvedValueOnce(approvedTimeslip)
+        .mockResolvedValueOnce(approvedTimeslip);
+
+      mockApprovalRepo.findOne.mockResolvedValue({
+        id: 'approval-regression',
+        action: 'PENDING',
+        timeslip: approvedTimeslip,
+      });
+      mockApprovalRepo.save.mockResolvedValue(undefined);
+      mockApprovalRepo.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+      mockTimeslipRepo.save.mockResolvedValue(undefined);
+
+      mockManager.findOne
+        .mockResolvedValueOnce(productionAttendance)
+        .mockResolvedValueOnce(approvedTimeslip);
+
+      await service.approve(TIMESLIP_ID, {
+        approverId: EMPLOYEE_ID,
+        action: 'APPROVED',
+      });
+
+      const patch = mockManager.update.mock.calls[0][2];
+      expect(patch.inTime).toEqual(new Date('2026-09-01T04:40:00.000Z'));
+      expect(patch.outTime).toBeNull();
+      expect(patch.workingMinutes).toBe(0);
+      expect(patch.status).toBe('present');
+      expect(patch.punctualityStatus).toBe('on-time');
+      expect(patch.completionStatus).toBeNull();
+    });
+  });
 });
