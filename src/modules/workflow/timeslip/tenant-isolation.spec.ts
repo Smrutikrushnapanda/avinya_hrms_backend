@@ -164,6 +164,118 @@ describe('Tenant Isolation — Timeslip Module', () => {
     });
   });
 
+  describe('batchUpdateStatuses — admin override bypasses approval records', () => {
+    it('should approve a timeslip even when NO approval records exist (admin override)', async () => {
+      // Simulate the exact scenario: timeslip has status PENDING but no approval rows
+      mockTimeslipRepo.findOne.mockResolvedValue({
+        id: TIMESLIP_A1,
+        status: 'PENDING',
+      });
+
+      // Organization isolation check passes
+      mockTimeslipRepo.createQueryBuilder.mockReturnValueOnce({
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+
+      // Existence check passes
+      mockTimeslipRepo.createQueryBuilder.mockReturnValueOnce({
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+
+      // Timeslip status update succeeds
+      mockTimeslipRepo.update.mockResolvedValue({ affected: 1 });
+
+      // Best-effort approval update via QueryBuilder
+      // Simulate 0 affected rows (no approval records exist) — should NOT block
+      const mockQbChain = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      mockApprovalRepo.createQueryBuilder.mockReturnValue(mockQbChain);
+
+      // applyTimeslipToAttendance — skip for this test (needs full setup)
+      mockTimeslipRepo.findOne
+        .mockResolvedValueOnce({
+          id: TIMESLIP_A1,
+          status: 'PENDING',
+        })
+        .mockResolvedValueOnce(null); // no attendance found
+
+      const dto = {
+        timeslipIds: [TIMESLIP_A1],
+        status: 'APPROVED' as const,
+      };
+
+      // Should succeed — no "No pending approvals found" error
+      const result = await service.batchUpdateStatuses(dto, undefined, ORG_A);
+      expect(result.updatedCount).toBe(1);
+
+      // Verify timeslip status was updated directly (admin override)
+      expect(mockTimeslipRepo.update).toHaveBeenCalledWith(TIMESLIP_A1, {
+        status: 'APPROVED',
+      });
+
+      // Verify QueryBuilder was used (not Repository.update) for approval records
+      expect(mockApprovalRepo.createQueryBuilder).toHaveBeenCalled();
+      expect(mockQbChain.where).toHaveBeenCalledWith(
+        'timeslip_id = :timeslipId',
+        { timeslipId: TIMESLIP_A1 },
+      );
+
+      // Verify Repository.update was NOT called on approvalRepo
+      // (the old broken pattern that caused the bug)
+      expect(mockApprovalRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject a timeslip even when NO approval records exist (admin override)', async () => {
+      mockTimeslipRepo.findOne.mockResolvedValue({
+        id: TIMESLIP_A1,
+        status: 'PENDING',
+      });
+
+      mockTimeslipRepo.createQueryBuilder.mockReturnValueOnce({
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+
+      mockTimeslipRepo.createQueryBuilder.mockReturnValueOnce({
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+
+      mockTimeslipRepo.update.mockResolvedValue({ affected: 1 });
+
+      const mockQbChain = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      mockApprovalRepo.createQueryBuilder.mockReturnValue(mockQbChain);
+
+      const dto = {
+        timeslipIds: [TIMESLIP_A1],
+        status: 'REJECTED' as const,
+      };
+
+      const result = await service.batchUpdateStatuses(dto, undefined, ORG_A);
+      expect(result.updatedCount).toBe(1);
+      expect(mockTimeslipRepo.update).toHaveBeenCalledWith(TIMESLIP_A1, {
+        status: 'REJECTED',
+      });
+    });
+  });
+
   describe('Service basic operations', () => {
     it('findAll should return paginated results', async () => {
       mockTimeslipRepo.findAndCount.mockResolvedValue([[], 0]);

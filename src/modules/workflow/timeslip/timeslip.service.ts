@@ -805,7 +805,9 @@ export class TimeslipService {
             );
           }
         } else {
-          // ✅ FIX 3: Admin override with validation
+          // ✅ FIX 3: Admin override — bypass approval workflow entirely
+          // Admins have authority to directly set status without approval records.
+          // This handles timeslips with no approval records, NULL timeslip_id, etc.
           if (
             timeslip.status === 'APPROVED' ||
             timeslip.status === 'REJECTED'
@@ -816,13 +818,12 @@ export class TimeslipService {
             continue;
           }
 
-          // Update all pending approvals for this timeslip
-          // NOTE: Cannot use approvalRepo.update() with relation WHERE clause —
-          // TypeORM 0.3.x Repository.update() does not resolve nested relation
-          // objects (e.g. { timeslip: { id } }) the same way find*() methods do,
-          // resulting in affected: 0 even when pending approvals exist.
-          // QueryBuilder targeting the raw column is the reliable approach.
-          const qb = this.approvalRepo
+          // 1) Update timeslip status directly (admin override, no approval record dependency)
+          await this.timeslipRepo.update(timeslipId, { status });
+
+          // 2) Best-effort: update any existing pending approval records for audit trail
+          //    Uses QueryBuilder targeting raw column — safe if no rows exist (0 affected is fine)
+          await this.approvalRepo
             .createQueryBuilder()
             .update(TimeslipApproval)
             .set({
@@ -830,27 +831,22 @@ export class TimeslipService {
               acted_at: new Date(),
             })
             .where('timeslip_id = :timeslipId', { timeslipId })
-            .andWhere('action = :action', { action: 'PENDING' });
-          const updateResult = await qb.execute();
+            .andWhere('action = :action', { action: 'PENDING' })
+            .execute()
+            .catch(() => {});
 
-          // Only proceed if we actually updated some approvals
-          if (updateResult.affected && updateResult.affected > 0) {
-            await this.timeslipRepo.update(timeslipId, { status });
-            if (status === 'APPROVED') {
-              await this.applyTimeslipToAttendance(timeslipId);
-            }
-            if (status === 'APPROVED' || status === 'REJECTED') {
-              await this.notifyEmployeeOnFinalStatus(
-                timeslipId,
-                status,
-                approverId,
-              );
-            }
-          } else {
-            errors.push(
-              `No pending approvals found for timeslip ${timeslipId}`,
+          // 3) Apply attendance correction if approved
+          if (status === 'APPROVED') {
+            await this.applyTimeslipToAttendance(timeslipId);
+          }
+
+          // 4) Notify employee of final status
+          if (status === 'APPROVED' || status === 'REJECTED') {
+            await this.notifyEmployeeOnFinalStatus(
+              timeslipId,
+              status,
+              approverId,
             );
-            continue;
           }
         }
         successCount++;
