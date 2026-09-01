@@ -167,12 +167,12 @@ export class TimeslipService {
         .insert()
         .into(Attendance)
         .values({
-          user_id: employeeUserId,
-          organization_id: employeeOrgId,
-          attendance_date: normalizedDate,
-          status: 'pending',
-          processed_at: new Date(),
-        } as any)
+          user: { id: employeeUserId } as any,
+          organization: { id: employeeOrgId } as any,
+          attendanceDate: normalizedDate,
+          status: 'pending' as any,
+          processedAt: new Date(),
+        })
         .orUpdate({
           conflict_target: ['user_id', 'attendance_date'],
           overwrite: ['processed_at'],
