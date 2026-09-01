@@ -184,6 +184,37 @@ export class TimeslipController {
     return this.timeslipService.approve(id, dto, actor?.organizationId);
   }
 
+  /**
+   * ✅ Safe re-apply endpoint for ALREADY-APPROVED timeslips whose attendance
+   * correction failed to apply (e.g. approved before a fix was deployed, or a
+   * transient failure during approval). Idempotent — safe to call multiple
+   * times. Does not modify the timeslip and does not create approval records.
+   */
+  @Post(':id/apply-attendance')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'HR')
+  @ApiOperation({
+    summary:
+      'Re-apply the attendance correction of an already-APPROVED timeslip (idempotent)',
+  })
+  @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
+  @ApiOkResponse({
+    description: 'Attendance correction re-applied successfully.',
+  })
+  @ApiBadRequestResponse({
+    description: 'Timeslip is not APPROVED, so no correction can be applied.',
+  })
+  @ApiNotFoundResponse({ description: 'Timeslip not found.' })
+  reapplyAttendance(
+    @Param('id') id: string,
+    @GetUser() actor: any,
+  ) {
+    return this.timeslipService.reapplyAttendanceCorrection(
+      id,
+      actor?.organizationId,
+    );
+  }
+
   //New Api
   @Post('batch-update-status')
   @UseGuards(RolesGuard)

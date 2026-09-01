@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -22,6 +23,8 @@ import { AttendanceCalculationService } from 'src/modules/attendance/attendance-
 
 @Injectable()
 export class TimeslipService {
+  private readonly logger = new Logger(TimeslipService.name);
+
   constructor(
     @InjectDataSource()
     private dataSource: DataSource,
@@ -125,12 +128,27 @@ export class TimeslipService {
       relations: ['employee'],
     });
 
-    if (!timeslip || !timeslip.employee?.userId) return;
+    if (!timeslip || !timeslip.employee?.userId) {
+      // ✅ Diagnostic: never silently swallow — this is exactly the class of
+      // silent failure that left approved corrections unapplied in production.
+      this.logger.warn(
+        `[applyTimeslipToAttendance] Skipping timeslip ${timeslipId}: ` +
+          `timeslipExists=${!!timeslip} employeeResolved=${!!timeslip?.employee} ` +
+          `employeeUserId=${timeslip?.employee?.userId ?? 'NULL'}`,
+      );
+      return;
+    }
 
     const { date, employee } = timeslip;
     const normalizedDate = String(date).slice(0, 10);
     const employeeUserId = employee.userId;
     const employeeOrgId = employee.organizationId;
+
+    this.logger.log(
+      `[applyTimeslipToAttendance] timeslipId=${timeslipId} ` +
+        `employeeId=${employee.id} resolvedUserId=${employeeUserId} ` +
+        `orgId=${employeeOrgId} attendanceDate=${normalizedDate}`,
+    );
 
     // ── Step 2: Resolve shift config (outside transaction) ──────────────
     // Read-only, immutable config — no lock needed.
@@ -173,7 +191,16 @@ export class TimeslipService {
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!existing) return;
+      if (!existing) {
+        // ✅ Diagnostic: no attendance row for (userId, date) — correction
+        // cannot be applied. Report loudly instead of returning silently.
+        this.logger.warn(
+          `[applyTimeslipToAttendance] No attendance row found for ` +
+            `userId=${employeeUserId} attendanceDate=${normalizedDate} ` +
+            `(timeslipId=${timeslipId}). Correction NOT applied.`,
+        );
+        return;
+      }
 
       // 6. Read CURRENT timeslip state inside the transaction, after the
       //    attendance lock is held. This guarantees we see the latest committed
@@ -243,6 +270,21 @@ export class TimeslipService {
         punctualityStatus: calcResult.punctualityStatus,
         processedAt: new Date(),
       });
+
+      // ✅ Diagnostic: full trace of what was merged and written.
+      this.logger.log(
+        `[applyTimeslipToAttendance] Applied correction for attendanceId=${existing.id} ` +
+          `timeslipId=${timeslipId} missingType=${missing_type} ` +
+          `existingIn=${existing.inTime?.toISOString() ?? 'NULL'} ` +
+          `existingOut=${existing.outTime?.toISOString() ?? 'NULL'} ` +
+          `correctedIn=${corrected_in ? new Date(corrected_in).toISOString() : 'NULL'} ` +
+          `correctedOut=${corrected_out ? new Date(corrected_out).toISOString() : 'NULL'} ` +
+          `effectiveIn=${effectiveIn?.toISOString() ?? 'NULL'} ` +
+          `effectiveOut=${effectiveOut?.toISOString() ?? 'NULL'} ` +
+          `workingMinutes=${workingMinutes} ` +
+          `status=${calcResult.status} completion=${calcResult.completionStatus} ` +
+          `punctuality=${calcResult.punctualityStatus}`,
+      );
     });
   }
 
@@ -623,7 +665,53 @@ export class TimeslipService {
       reason: dto.reason,
       status: dto.status,
     });
+
+    // ✅ FIX: If the update transitions/sets the timeslip to APPROVED, the
+    // attendance correction MUST be applied. Previously this path set the
+    // status directly without ever calling applyTimeslipToAttendance(),
+    // leaving the Attendance record stale (root cause of APPROVED timeslips
+    // whose corrected IN/OUT never reached attendance).
+    if (String(dto.status) === 'APPROVED') {
+      await this.applyTimeslipToAttendance(id);
+    }
+
     return this.findOne(id, organizationId);
+  }
+
+  /**
+   * ✅ Safe re-apply mechanism for ALREADY-APPROVED timeslips.
+   *
+   * Re-runs the attendance correction for a timeslip that is already APPROVED
+   * (e.g. approval happened before a fix/deploy, or the apply step failed
+   * transiently). Idempotent: applyTimeslipToAttendance recomputes the
+   * attendance row from the CURRENT timeslip state inside a transaction with
+   * a row lock, so calling it again never duplicates rows and never erases
+   * newer real punches that are merged via the lock/merge sequence.
+   *
+   * Only APPROVED timeslips can be re-applied. No approval records are
+   * created, and the timeslip status is not modified.
+   */
+  async reapplyAttendanceCorrection(
+    id: string,
+    organizationId?: string,
+  ): Promise<{ applied: boolean; message: string }> {
+    const timeslip = await this.assertTimeslipBelongsToOrg(id, organizationId);
+
+    if (timeslip.status !== 'APPROVED') {
+      throw new BadRequestException(
+        `Timeslip ${id} is ${timeslip.status}. Only APPROVED timeslips can have their attendance correction re-applied.`,
+      );
+    }
+
+    this.logger.log(
+      `Re-applying attendance correction for approved timeslip ${id}`,
+    );
+    await this.applyTimeslipToAttendance(id);
+
+    return {
+      applied: true,
+      message: `Attendance correction for timeslip ${id} re-applied successfully.`,
+    };
   }
 
   /** ---- DELETE ---- */
@@ -809,12 +897,27 @@ export class TimeslipService {
           // Admins have authority to directly set status without approval records.
           // This handles timeslips with no approval records, NULL timeslip_id, etc.
           if (
-            timeslip.status === 'APPROVED' ||
-            timeslip.status === 'REJECTED'
+            timeslip.status === 'REJECTED' ||
+            (timeslip.status === 'APPROVED' && status !== 'APPROVED')
           ) {
             errors.push(
               `Timeslip ${timeslipId} is already in ${timeslip.status} state`,
             );
+            continue;
+          }
+
+          if (timeslip.status === 'APPROVED' && status === 'APPROVED') {
+            // ✅ FIX: Idempotent re-apply. The timeslip is already APPROVED
+            // and APPROVED is requested again — re-run the attendance
+            // correction instead of erroring. This unblocks the retry
+            // deadlock where the timeslip was marked APPROVED but the
+            // attendance apply step failed (or ran on older code), leaving
+            // attendance permanently stale.
+            this.logger.log(
+              `[batchUpdateStatuses] Timeslip ${timeslipId} already APPROVED — re-applying attendance correction (idempotent).`,
+            );
+            await this.applyTimeslipToAttendance(timeslipId);
+            successCount++;
             continue;
           }
 
@@ -823,7 +926,7 @@ export class TimeslipService {
 
           // 2) Best-effort: update any existing pending approval records for audit trail
           //    Uses QueryBuilder targeting raw column — safe if no rows exist (0 affected is fine)
-          await this.approvalRepo
+          const auditResult = await this.approvalRepo
             .createQueryBuilder()
             .update(TimeslipApproval)
             .set({
@@ -833,7 +936,14 @@ export class TimeslipService {
             .where('timeslip_id = :timeslipId', { timeslipId })
             .andWhere('action = :action', { action: 'PENDING' })
             .execute()
-            .catch(() => {});
+            .catch((auditError: Error) => {
+              // ✅ FIX: no longer silently swallowed — log the failure.
+              this.logger.warn(
+                `[batchUpdateStatuses] Audit-trail approval update failed for timeslip ${timeslipId}: ${auditError?.message}`,
+              );
+              return null;
+            });
+          void auditResult;
 
           // 3) Apply attendance correction if approved
           if (status === 'APPROVED') {
