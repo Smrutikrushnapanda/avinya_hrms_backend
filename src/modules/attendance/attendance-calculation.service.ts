@@ -13,6 +13,20 @@ export type ShiftRuleSource = {
   graceMinutes?: number | null;
   lateThresholdMinutes?: number | null;
   timezone?: string;
+  requiredWorkingMinutes?: number | null;
+};
+
+/**
+ * Three-dimension attendance calculation result.
+ *
+ * Presence:  present | absent | half-day | on-leave | holiday | weekend | work-from-home | pending | anomaly
+ * Completion: complete | not-complete | incomplete-hours | null
+ * Punctuality: on-time | late | null
+ */
+export type AttendanceCalculationResult = {
+  status: Attendance['status'];
+  completionStatus: 'complete' | 'not-complete' | 'incomplete-hours' | null;
+  punctualityStatus: 'on-time' | 'late' | null;
 };
 
 /**
@@ -35,57 +49,138 @@ export class AttendanceCalculationService {
   /**
    * Determine attendance status from effective punch data and shift config.
    *
-   * Rules (in priority order):
-   * 1. No clock-out yet → 'present' (or 'late' if late check-in)
-   * 2. Worked >= full shift → 'present' (or 'late' if late check-in)
-   * 3. Worked >= half-day threshold → 'half-day'
-   * 4. Otherwise → 'absent'
+   * Three-dimension model:
+   *
+   * PUNCTUALITY (independent of completion):
+   *   arrivalTime > shiftStartTime + lateThresholdMinutes → late
+   *   otherwise → on-time
+   *
+   * COMPLETION (requires clock-out):
+   *   workingMinutes >= fullPresentThreshold → complete
+   *   workingMinutes >= halfDayThreshold → not-complete
+   *   workingMinutes >= 1 → incomplete-hours
+   *   no clock-out yet → null
+   *
+   * PRESENCE:
+   *   no clock-out yet → present (or late if late check-in)
+   *   workingMinutes >= fullPresentThreshold → present (or late if late check-in)
+   *   workingMinutes >= halfDayThreshold → present + not-complete
+   *   workingMinutes >= 1 → present + incomplete-hours
+   *   otherwise → absent
    */
   determineAttendanceStatus(
     workingMinutes: number,
     hasClockOut: boolean,
     config: ShiftRuleSource,
     inTime?: Date | null,
-  ): Attendance['status'] {
+  ): AttendanceCalculationResult {
     const isLateCheckIn = inTime
       ? this.isLatePunchIn(new Date(inTime), config)
       : false;
+    const punctualityStatus: 'on-time' | 'late' = isLateCheckIn
+      ? 'late'
+      : 'on-time';
 
     if (!hasClockOut) {
-      return isLateCheckIn ? 'late' : 'present';
+      return {
+        status: 'present',
+        completionStatus: null,
+        punctualityStatus,
+      };
     }
 
-    const fullShiftMinutes = this.calculateShiftDurationMinutes(
-      config.workStartTime,
-      config.workEndTime,
-    );
+    const fullPresentThreshold =
+      this.calculateFullPresentThresholdMinutes(config);
     const halfDayThreshold = this.calculateHalfDayThresholdMinutes(config);
 
-    if (workingMinutes >= fullShiftMinutes) {
-      return isLateCheckIn ? 'late' : 'present';
+    if (workingMinutes >= fullPresentThreshold) {
+      return {
+        status: 'present',
+        completionStatus: 'complete',
+        punctualityStatus,
+      };
     }
+
     if (workingMinutes >= halfDayThreshold) {
-      return 'half-day';
+      return {
+        status: 'present',
+        completionStatus: 'not-complete',
+        punctualityStatus,
+      };
     }
-    return 'absent';
+
+    if (workingMinutes >= 1) {
+      return {
+        status: 'present',
+        completionStatus: 'incomplete-hours',
+        punctualityStatus,
+      };
+    }
+
+    return {
+      status: 'absent',
+      completionStatus: null,
+      punctualityStatus: null,
+    };
   }
 
   /**
    * Fallback status determination when no shift config is available.
-   * Uses simple thresholds: 480 min = full day, 160 min = half day.
-   * Correctly handles the no-clock-out case (present/late).
+   * Uses admin-configured requiredWorkingMinutes if provided,
+   * otherwise defaults to 480 min = full day.
+   * Half-day threshold = (effectiveFullDay / 2) + 60.
    */
   determineAttendanceStatusFallback(
     workingMinutes: number,
     hasClockOut: boolean,
     inTime?: Date | null,
-  ): Attendance['status'] {
+    requiredWorkingMinutes?: number | null,
+  ): AttendanceCalculationResult {
+    const punctualityStatus: 'on-time' | 'late' = 'on-time';
+
     if (!hasClockOut) {
-      return 'present';
+      return {
+        status: 'present',
+        completionStatus: null,
+        punctualityStatus,
+      };
     }
-    if (workingMinutes >= 480) return 'present';
-    if (workingMinutes >= 160) return 'half-day';
-    return 'absent';
+
+    const fullPresentThreshold =
+      requiredWorkingMinutes != null && requiredWorkingMinutes > 0
+        ? requiredWorkingMinutes
+        : 480;
+    const halfDayThreshold = Math.floor(fullPresentThreshold / 2) + 60;
+
+    if (workingMinutes >= fullPresentThreshold) {
+      return {
+        status: 'present',
+        completionStatus: 'complete',
+        punctualityStatus,
+      };
+    }
+
+    if (workingMinutes >= halfDayThreshold) {
+      return {
+        status: 'present',
+        completionStatus: 'not-complete',
+        punctualityStatus,
+      };
+    }
+
+    if (workingMinutes >= 1) {
+      return {
+        status: 'present',
+        completionStatus: 'incomplete-hours',
+        punctualityStatus,
+      };
+    }
+
+    return {
+      status: 'absent',
+      completionStatus: null,
+      punctualityStatus: null,
+    };
   }
 
   // ── Effective punch resolution ────────────────────────────────────────
@@ -181,25 +276,35 @@ export class AttendanceCalculationService {
   }
 
   /**
-   * Minimum minutes to qualify as half-day (instead of absent).
-   * Derived from halfDayCutoffTime or defaults to half of full shift.
+   * Minimum minutes to qualify as Full Present.
+   * Uses the admin-configured `requiredWorkingMinutes` if set,
+   * otherwise falls back to the full shift duration.
    */
-  calculateHalfDayThresholdMinutes(config: ShiftRuleSource): number {
-    const fullShiftMinutes = this.calculateShiftDurationMinutes(
+  calculateFullPresentThresholdMinutes(config: ShiftRuleSource): number {
+    if (
+      config.requiredWorkingMinutes != null &&
+      config.requiredWorkingMinutes > 0
+    ) {
+      return config.requiredWorkingMinutes;
+    }
+    return this.calculateShiftDurationMinutes(
       config.workStartTime,
       config.workEndTime,
     );
-    const start = this.parseTimeToMinutes(config.workStartTime);
-    const cutoff =
-      typeof config.halfDayCutoffTime === 'string' &&
-      config.halfDayCutoffTime.trim()
-        ? this.parseTimeToMinutes(config.halfDayCutoffTime)
-        : start + Math.floor(fullShiftMinutes / 2);
+  }
 
-    let threshold = cutoff - start;
-    if (threshold <= 0) threshold += 24 * 60;
-    if (threshold > fullShiftMinutes) threshold = fullShiftMinutes;
-    return Math.max(1, threshold);
+  /**
+   * Half-day threshold: (effectiveFullDay / 2) + 60.
+   *
+   * effectiveFullDay = requiredWorkingMinutes if configured,
+   * otherwise full shift duration.
+   *
+   * This threshold distinguishes 'not-complete' from 'incomplete-hours'.
+   * It is NOT used to assign 'half-day' as a presence status for new records.
+   */
+  calculateHalfDayThresholdMinutes(config: ShiftRuleSource): number {
+    const effectiveFullDay = this.calculateFullPresentThresholdMinutes(config);
+    return Math.floor(effectiveFullDay / 2) + 60;
   }
 
   /**

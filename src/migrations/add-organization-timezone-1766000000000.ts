@@ -13,7 +13,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * timezone where one exists. Rows without an attendance_settings row remain
  * Asia/Kolkata (backward-compatible default).
  */
-export class AddOrganizationTimezone1766000000000 implements MigrationInterface {
+export class AddOrganizationTimezone1766000000000
+  implements MigrationInterface
+{
   name = 'AddOrganizationTimezone1766000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -35,6 +37,8 @@ export class AddOrganizationTimezone1766000000000 implements MigrationInterface 
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE organization_settings DROP COLUMN IF EXISTS timezone`);
+    await queryRunner.query(
+      `ALTER TABLE organization_settings DROP COLUMN IF EXISTS timezone`,
+    );
   }
 }

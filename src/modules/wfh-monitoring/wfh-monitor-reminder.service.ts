@@ -129,9 +129,7 @@ export class WfhMonitorReminderService {
     const startedKeys = new Set(
       startedLogs.map((r) => `${r.user_id}|${r.date}`),
     );
-    return candidates.filter(
-      (c) => !startedKeys.has(`${c.userId}|${c.today}`),
-    );
+    return candidates.filter((c) => !startedKeys.has(`${c.userId}|${c.today}`));
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

@@ -137,6 +137,17 @@ export class CreateAttendanceSettingsDto {
   enableCheckoutValidation?: boolean;
 
   @ApiPropertyOptional({
+    example: 480,
+    description:
+      'Minimum working minutes required for Full Present status (e.g. 480 = 8 hours). When null, the full shift duration is used.',
+  })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(720)
+  requiredWorkingMinutes?: number;
+
+  @ApiPropertyOptional({
     example: '14:00:00',
     description: 'Half day cutoff time',
   })

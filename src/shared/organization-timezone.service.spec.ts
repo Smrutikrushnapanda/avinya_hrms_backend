@@ -133,12 +133,12 @@ describe('OrganizationTimezoneService (timezone regression)', () => {
     it('toUtcISO converts business local time per org timezone', async () => {
       const svcKolkata = buildService({ timezone: 'Asia/Kolkata' }, null);
       const svcNewYork = buildService({ timezone: 'America/New_York' }, null);
-      await expect(svcKolkata.toUtcISO('org-a', '2026-08-28', '10:00')).resolves.toBe(
-        '2026-08-28T04:30:00.000Z',
-      );
-      await expect(svcNewYork.toUtcISO('org-b', '2026-08-28', '10:00')).resolves.toBe(
-        '2026-08-28T14:00:00.000Z',
-      );
+      await expect(
+        svcKolkata.toUtcISO('org-a', '2026-08-28', '10:00'),
+      ).resolves.toBe('2026-08-28T04:30:00.000Z');
+      await expect(
+        svcNewYork.toUtcISO('org-b', '2026-08-28', '10:00'),
+      ).resolves.toBe('2026-08-28T14:00:00.000Z');
     });
   });
 

@@ -82,6 +82,10 @@ export class AttendanceSettings {
   })
   enableCheckoutValidation!: boolean;
 
+  // Minimum working minutes required for Full Present status
+  @Column({ name: 'required_working_minutes', type: 'int', nullable: true })
+  requiredWorkingMinutes!: number | null;
+
   // Half Day Configuration
   @Column({ name: 'half_day_cutoff_time', type: 'time', default: '14:00:00' })
   halfDayCutoffTime!: string;

@@ -131,6 +131,7 @@ export class TimesheetService {
     start: Date,
     end: Date,
     excludeId?: string,
+    timezone?: string,
   ): Promise<void> {
     const qb = this.timesheetRepo
       .createQueryBuilder('ts')
@@ -145,8 +146,20 @@ export class TimesheetService {
 
     const conflict = await qb.getOne();
     if (conflict) {
+      const tz = timezone || 'Asia/Kolkata';
+      const fmtOpts: Intl.DateTimeFormatOptions = {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: tz,
+      };
+      const startTimeStr = conflict.startTime.toLocaleTimeString(
+        'en-IN',
+        fmtOpts,
+      );
+      const endTimeStr = conflict.endTime.toLocaleTimeString('en-IN', fmtOpts);
       throw new BadRequestException(
-        `This time range overlaps with an existing entry (${conflict.startTime.toISOString()} - ${conflict.endTime.toISOString()})`,
+        `This time range overlaps with an existing entry (${startTimeStr} - ${endTimeStr})`,
       );
     }
   }
@@ -190,7 +203,17 @@ export class TimesheetService {
     const { start, end } = this.parseEntryTimes(dto, 'Entry');
     const dateOnly = this.formatDateLocal(this.parseDateOnly(dto.date));
 
-    await this.assertNoOverlap(dto.employeeId, dateOnly, start, end);
+    const tz = await this.timezoneService.getOrganizationTimezone(
+      dto.organizationId,
+    );
+    await this.assertNoOverlap(
+      dto.employeeId,
+      dateOnly,
+      start,
+      end,
+      undefined,
+      tz,
+    );
 
     const timesheet = this.buildEntry(
       {
@@ -235,7 +258,17 @@ export class TimesheetService {
     }
 
     for (const { start, end } of parsed) {
-      await this.assertNoOverlap(dto.employeeId, dateOnly, start, end);
+      const tz = await this.timezoneService.getOrganizationTimezone(
+        dto.organizationId,
+      );
+      await this.assertNoOverlap(
+        dto.employeeId,
+        dateOnly,
+        start,
+        end,
+        undefined,
+        tz,
+      );
     }
 
     const queryRunner =
@@ -302,6 +335,7 @@ export class TimesheetService {
       start,
       end,
       entry.id,
+      await this.timezoneService.getOrganizationTimezone(entry.organizationId),
     );
 
     entry.startTime = start;

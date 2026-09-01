@@ -142,14 +142,17 @@ export class TimeslipController {
 
   /** ---- Delete/Withdraw a timeslip ---- */
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a timeslip (admin/HR) or withdraw own pending timeslip (employee)' })
+  @ApiOperation({
+    summary:
+      'Delete a timeslip (admin/HR) or withdraw own pending timeslip (employee)',
+  })
   @ApiParam({ name: 'id', description: 'Timeslip id (UUID)' })
   @ApiOkResponse({ description: 'Timeslip deleted/withdrawn successfully.' })
   @ApiNotFoundResponse({ description: 'Timeslip not found.' })
   async remove(@Param('id') id: string, @GetUser() actor: any) {
     // Check if actor is admin/HR or employee
-    const isAdminOrHr = actor?.roles?.some(
-      (r: { roleName: string }) => ['ADMIN', 'HR'].includes(r.roleName),
+    const isAdminOrHr = actor?.roles?.some((r: { roleName: string }) =>
+      ['ADMIN', 'HR'].includes(r.roleName),
     );
 
     if (isAdminOrHr) {

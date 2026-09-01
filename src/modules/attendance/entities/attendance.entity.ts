@@ -48,7 +48,14 @@ export class Attendance {
     | 'on-leave'
     | 'holiday'
     | 'weekend'
-    | 'work-from-home';
+    | 'work-from-home'
+    | 'pending';
+
+  @Column({ name: 'completion_status', type: 'varchar', nullable: true })
+  completionStatus: 'complete' | 'not-complete' | 'incomplete-hours' | null;
+
+  @Column({ name: 'punctuality_status', type: 'varchar', nullable: true })
+  punctualityStatus: 'on-time' | 'late' | null;
 
   @Column({ name: 'in_photo_url', nullable: true })
   inPhotoUrl: string;

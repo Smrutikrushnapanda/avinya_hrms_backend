@@ -679,7 +679,7 @@ export class AttendanceService {
 
         const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
 
-        const status = this.attendanceCalculation.determineAttendanceStatus(
+        const calcResult = this.attendanceCalculation.determineAttendanceStatus(
           workingMinutes,
           hasClockOut,
           shiftConfig,
@@ -691,7 +691,9 @@ export class AttendanceService {
           inTime: effectiveIn,
           outTime: effectiveOut,
           workingMinutes: Math.max(0, workingMinutes),
-          status,
+          status: calcResult.status,
+          completionStatus: calcResult.completionStatus,
+          punctualityStatus: calcResult.punctualityStatus,
           inPhotoUrl: inLog.photoUrl ?? undefined,
           inLatitude: inLog.latitude,
           inLongitude: inLog.longitude,
@@ -721,6 +723,27 @@ export class AttendanceService {
           tripType: tripLog?.tripType ?? null,
           processedAt: new Date(),
         });
+      } else {
+        // All logs for this day are anomalous (or no valid logs).
+        // Check if there ARE any attendance_logs (anomalous or not) for this day.
+        const anyLogsExist = await manager.findOne(AttendanceLog, {
+          where: {
+            user: { id: userId },
+            organization: { id: organizationId },
+            timestamp: Between(logsWindowStart, logsWindowEnd),
+          },
+        });
+
+        if (anyLogsExist) {
+          // There ARE logs but all are anomalous — mark attendance as anomalous
+          await manager.update(Attendance, existingAttendance.id, {
+            status: 'absent' as any,
+            anomalyFlag: true,
+            anomalyReason: 'All attendance logs flagged as anomalous',
+            processedAt: new Date(),
+          });
+        }
+        // If no logs at all, leave as 'pending' (truly no data)
       }
     });
 
@@ -825,10 +848,6 @@ export class AttendanceService {
 
     const results = await Promise.all(
       records.map(async (att) => {
-        const hasBothPunches = Boolean(att.inTime) && Boolean(att.outTime);
-        const workedMinutes = att.workingMinutes ?? 0;
-        const isIncompleteHours =
-          att.status === 'absent' && hasBothPunches && workedMinutes > 0;
         const rawRow = rawMap.get(att.id) ?? {};
         const profileImageKey =
           (rawRow.passportPhotoUrl as string | null) ??
@@ -866,6 +885,27 @@ export class AttendanceService {
               .filter(Boolean)
               .join(' ');
 
+        // Use stored completionStatus for the virtual 'incomplete-hours' display.
+        // Legacy records without completionStatus fall back to the old heuristic.
+        const hasBothPunches = Boolean(att.inTime) && Boolean(att.outTime);
+        const workedMinutes = att.workingMinutes ?? 0;
+        const isAnomalyPending =
+          (att.status as string) === 'pending' && att.anomalyFlag === true;
+        const legacyIncompleteHours =
+          !att.completionStatus &&
+          (att.status === 'absent' || att.status === 'half-day') &&
+          hasBothPunches &&
+          workedMinutes > 0 &&
+          workedMinutes < 60;
+
+        const displayStatus = isAnomalyPending
+          ? 'incomplete-hours'
+          : att.completionStatus === 'incomplete-hours'
+            ? 'incomplete-hours'
+            : legacyIncompleteHours
+              ? 'incomplete-hours'
+              : att.status;
+
         return {
           userId: att.user?.id ?? null,
           userName,
@@ -875,8 +915,10 @@ export class AttendanceService {
           profileImage: profileImageKey,
           profileImageSigned,
 
-          status: isIncompleteHours ? 'incomplete-hours' : att.status,
+          status: displayStatus,
           rawStatus: att.status,
+          completionStatus: att.completionStatus ?? null,
+          punctualityStatus: att.punctualityStatus ?? null,
           workingMinutes: workedMinutes,
 
           inTime: formatTime(att.inTime),
@@ -2184,21 +2226,9 @@ export class AttendanceService {
   }
 
   private calculateHalfDayThresholdMinutes(config: ShiftRuleSource): number {
-    const fullShiftMinutes = this.calculateShiftDurationMinutes(
-      config.workStartTime,
-      config.workEndTime,
-    );
-    const start = this.parseTimeToMinutes(config.workStartTime);
-    const cutoff =
-      typeof config.halfDayCutoffTime === 'string' &&
-      config.halfDayCutoffTime.trim()
-        ? this.parseTimeToMinutes(config.halfDayCutoffTime)
-        : start + Math.floor(fullShiftMinutes / 2);
-
-    let threshold = cutoff - start;
-    if (threshold <= 0) threshold += 24 * 60;
-    if (threshold > fullShiftMinutes) threshold = fullShiftMinutes;
-    return Math.max(1, threshold);
+    const effectiveFullDay =
+      this.attendanceCalculation.calculateFullPresentThresholdMinutes(config);
+    return Math.floor(effectiveFullDay / 2) + 60;
   }
 
   /**
@@ -2210,7 +2240,7 @@ export class AttendanceService {
     hasClockOut: boolean,
     config: ShiftRuleSource,
     inTime?: Date | null,
-  ): Attendance['status'] {
+  ) {
     return this.attendanceCalculation.determineAttendanceStatus(
       workingMinutes,
       hasClockOut,
@@ -2265,9 +2295,9 @@ export class AttendanceService {
       });
 
       if (shift) {
-        const settings = activeBranch
-          ? null
-          : await this.getOrCreateAttendanceSettings(organizationId);
+        // requiredWorkingMinutes is an org-level setting, always fetch it
+        const orgSettings =
+          await this.getOrCreateAttendanceSettings(organizationId);
 
         return {
           shiftId: shift.id,
@@ -2280,13 +2310,16 @@ export class AttendanceService {
           workingDays: shift.workingDays,
           weekdayOffRules: shift.weekdayOffRules,
           timezone: orgTimezone,
+          requiredWorkingMinutes: orgSettings.requiredWorkingMinutes ?? null,
           officeLatitude:
-            activeBranch?.officeLatitude ?? settings?.officeLatitude ?? null,
+            activeBranch?.officeLatitude ?? orgSettings.officeLatitude ?? null,
           officeLongitude:
-            activeBranch?.officeLongitude ?? settings?.officeLongitude ?? null,
+            activeBranch?.officeLongitude ??
+            orgSettings.officeLongitude ??
+            null,
           allowedRadiusMeters:
             activeBranch?.allowedRadiusMeters ??
-            settings?.allowedRadiusMeters ??
+            orgSettings.allowedRadiusMeters ??
             100,
           altLocations: activeBranch?.altLocations ?? [],
         };
@@ -2306,6 +2339,7 @@ export class AttendanceService {
         workingDays: activeBranch.workingDays,
         weekdayOffRules: activeBranch.weekdayOffRules,
         timezone: orgTimezone,
+        requiredWorkingMinutes: settings.requiredWorkingMinutes ?? null,
         officeLatitude: activeBranch.officeLatitude,
         officeLongitude: activeBranch.officeLongitude,
         allowedRadiusMeters: activeBranch.allowedRadiusMeters,
@@ -2325,6 +2359,7 @@ export class AttendanceService {
       workingDays: settings.workingDays,
       weekdayOffRules: settings.weekdayOffRules,
       timezone: orgTimezone,
+      requiredWorkingMinutes: settings.requiredWorkingMinutes ?? null,
       officeLatitude: settings.officeLatitude,
       officeLongitude: settings.officeLongitude,
       allowedRadiusMeters: settings.allowedRadiusMeters,
@@ -2606,22 +2641,27 @@ export class AttendanceService {
             effectiveOut,
           );
 
+        const calcResult = shiftConfig
+          ? this.attendanceCalculation.determineAttendanceStatus(
+              workingMinutes,
+              hasClockOut,
+              shiftConfig,
+              effectiveIn,
+            )
+          : this.attendanceCalculation.determineAttendanceStatusFallback(
+              workingMinutes,
+              hasClockOut,
+              effectiveIn,
+              shiftConfig?.requiredWorkingMinutes,
+            );
+
         Object.assign(baseData, {
           inTime: effectiveIn,
           outTime: effectiveOut,
           workingMinutes,
-          status: shiftConfig
-            ? this.attendanceCalculation.determineAttendanceStatus(
-                workingMinutes,
-                hasClockOut,
-                shiftConfig,
-                effectiveIn,
-              )
-            : this.attendanceCalculation.determineAttendanceStatusFallback(
-                workingMinutes,
-                hasClockOut,
-                effectiveIn,
-              ),
+          status: calcResult.status,
+          completionStatus: calcResult.completionStatus,
+          punctualityStatus: calcResult.punctualityStatus,
           inPhotoUrl: inLog.photoUrl,
           inLatitude: inLog.latitude,
           inLongitude: inLog.longitude,

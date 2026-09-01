@@ -54,9 +54,8 @@ export class PollsService {
 
   async createPoll(dto: CreatePollDto, organizationId: string) {
     // Step 1: Save Poll — interpret business times in the org's timezone
-    const timeZone = await this.timezoneService.getOrganizationTimezone(
-      organizationId,
-    );
+    const timeZone =
+      await this.timezoneService.getOrganizationTimezone(organizationId);
     const poll = this.pollRepo.create({
       title: dto.title,
       description: dto.description,
@@ -119,17 +118,15 @@ export class PollsService {
     if (updateData.isAnonymous !== undefined)
       poll.is_anonymous = updateData.isAnonymous;
     if (updateData.startTime !== undefined) {
-      const tz = await this.timezoneService.getOrganizationTimezone(
-        organizationId,
-      );
+      const tz =
+        await this.timezoneService.getOrganizationTimezone(organizationId);
       poll.start_time = DateTime.fromISO(updateData.startTime, { zone: tz })
         .toUTC()
         .toJSDate();
     }
     if (updateData.endTime !== undefined) {
-      const tz = await this.timezoneService.getOrganizationTimezone(
-        organizationId,
-      );
+      const tz =
+        await this.timezoneService.getOrganizationTimezone(organizationId);
       poll.end_time = DateTime.fromISO(updateData.endTime, { zone: tz })
         .toUTC()
         .toJSDate();

@@ -495,12 +495,7 @@ export class EmployeeService {
 
     // FK isolation: validate departmentId, branchId, shiftId, reportingTo
     // belong to the same organization as the employee being updated
-    if (
-      dto.departmentId ||
-      dto.branchId ||
-      dto.shiftId ||
-      dto.reportingTo
-    ) {
+    if (dto.departmentId || dto.branchId || dto.shiftId || dto.reportingTo) {
       const existingEmployee = await this.findOne(id);
       const orgId = existingEmployee.organizationId;
 

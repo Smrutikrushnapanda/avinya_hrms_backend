@@ -224,7 +224,7 @@ export class TimeslipService {
         effectiveOut,
       );
 
-      const status = this.attendanceCalculation.determineAttendanceStatus(
+      const calcResult = this.attendanceCalculation.determineAttendanceStatus(
         workingMinutes,
         hasClockOut,
         shiftConfig,
@@ -238,7 +238,9 @@ export class TimeslipService {
         inTime: effectiveIn,
         outTime: effectiveOut,
         workingMinutes: Math.max(0, workingMinutes),
-        status,
+        status: calcResult.status,
+        completionStatus: calcResult.completionStatus,
+        punctualityStatus: calcResult.punctualityStatus,
         processedAt: new Date(),
       });
     });
@@ -272,11 +274,9 @@ export class TimeslipService {
         where: { id: employee.shiftId, organizationId, isActive: true },
       });
       if (shift) {
-        const settings = employee.branchId
-          ? null
-          : await this.attendanceSettingsRepo.findOne({
-              where: { organizationId },
-            });
+        const settings = await this.attendanceSettingsRepo.findOne({
+          where: { organizationId },
+        });
         return {
           workStartTime: shift.workStartTime,
           workEndTime: shift.workEndTime,
@@ -286,6 +286,7 @@ export class TimeslipService {
           workingDays: shift.workingDays,
           weekdayOffRules: shift.weekdayOffRules,
           timezone: settings?.timezone ?? 'Asia/Kolkata',
+          requiredWorkingMinutes: settings?.requiredWorkingMinutes ?? null,
         };
       }
     }
@@ -300,6 +301,9 @@ export class TimeslipService {
         where: { id: employee.branchId, organizationId, isActive: true },
       });
       if (branch) {
+        const settings = await this.attendanceSettingsRepo.findOne({
+          where: { organizationId },
+        });
         return {
           workStartTime: branch.workStartTime,
           workEndTime: branch.workEndTime,
@@ -308,12 +312,8 @@ export class TimeslipService {
           halfDayCutoffTime: branch.halfDayCutoffTime,
           workingDays: branch.workingDays,
           weekdayOffRules: branch.weekdayOffRules,
-          timezone:
-            (
-              await this.attendanceSettingsRepo.findOne({
-                where: { organizationId },
-              })
-            )?.timezone ?? 'Asia/Kolkata',
+          timezone: settings?.timezone ?? 'Asia/Kolkata',
+          requiredWorkingMinutes: settings?.requiredWorkingMinutes ?? null,
         };
       }
     }
@@ -330,6 +330,7 @@ export class TimeslipService {
       workingDays: settings?.workingDays ?? [1, 2, 3, 4, 5, 6],
       weekdayOffRules: settings?.weekdayOffRules ?? {},
       timezone: settings?.timezone ?? 'Asia/Kolkata',
+      requiredWorkingMinutes: settings?.requiredWorkingMinutes ?? null,
     };
   }
 
@@ -635,7 +636,9 @@ export class TimeslipService {
         throw new ForbiddenException('You can only withdraw your own timeslip');
       }
       if (timeslip.status !== 'PENDING') {
-        throw new BadRequestException('Only pending timeslips can be withdrawn');
+        throw new BadRequestException(
+          'Only pending timeslips can be withdrawn',
+        );
       }
     }
 
@@ -848,6 +851,13 @@ export class TimeslipService {
           `Error processing timeslip ${timeslipId}: ${error.message}`,
         );
       }
+    }
+
+    if (successCount === 0 && errors.length > 0) {
+      throw new BadRequestException({
+        message: `Failed to update any timeslips: ${errors.join('; ')}`,
+        errors,
+      });
     }
 
     return {

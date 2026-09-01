@@ -391,9 +391,10 @@ export class OrganizationService {
     // Canonical organization timezone (IANA identifier). Stored on
     // organization_settings — the single source of truth for business timezone.
     if (data.timezone !== undefined) {
-      settings.timezone = data.timezone && data.timezone.trim()
-        ? data.timezone.trim()
-        : 'Asia/Kolkata';
+      settings.timezone =
+        data.timezone && data.timezone.trim()
+          ? data.timezone.trim()
+          : 'Asia/Kolkata';
     }
 
     if (data.sessionStartMonth !== undefined) {
