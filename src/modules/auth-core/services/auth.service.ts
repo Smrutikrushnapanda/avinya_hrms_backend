@@ -113,9 +113,15 @@ export class AuthService {
         leaveApprovalAssignment,
         wfhApprovalAssignment,
       ] = await Promise.all([
-        this.timeslipApprovalRepository.findOne({
-          where: { approver_id: employee.id },
-        }),
+        // NOTE: exclude approvals for the employee's OWN timeslips — the
+        // timeslip creation flow can self-assign as a last-resort fallback,
+        // which must not make the submitter look like an approver.
+        this.timeslipApprovalRepository
+          .createQueryBuilder('ta')
+          .innerJoin('ta.timeslip', 'ts')
+          .where('ta.approver_id = :employeeId', { employeeId: employee.id })
+          .andWhere('ts.employee_id != :employeeId', { employeeId: employee.id })
+          .getOne(),
         this.employeeRepository.findOne({
           where: { reportingTo: employee.id },
           select: ['id'],
