@@ -120,7 +120,9 @@ export class AuthService {
           .createQueryBuilder('ta')
           .innerJoin('ta.timeslip', 'ts')
           .where('ta.approver_id = :employeeId', { employeeId: employee.id })
-          .andWhere('ts.employee_id != :employeeId', { employeeId: employee.id })
+          .andWhere('ts.employee_id != :employeeId', {
+            employeeId: employee.id,
+          })
           .getOne(),
         this.employeeRepository.findOne({
           where: { reportingTo: employee.id },

@@ -14,7 +14,13 @@ import { OrganizationTimezoneService } from 'src/shared/organization-timezone.se
 describe('TimesheetService – midnight edit/delete lock', () => {
   let service: TimesheetService;
   let timezoneMock: { getToday: jest.Mock; getOrganizationTimezone: jest.Mock };
-  let timesheetRepoMock: { findOne: jest.Mock; save: jest.Mock; remove: jest.Mock; create: jest.Mock; createQueryBuilder: jest.Mock };
+  let timesheetRepoMock: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    remove: jest.Mock;
+    create: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
 
   const organizationId = 'org-1';
   const employeeId = 'emp-1';
@@ -26,7 +32,9 @@ describe('TimesheetService – midnight edit/delete lock', () => {
   const yesterday = '2026-08-31';
   const today = '2026-09-01';
 
-  const makeEntry = (overrides: Partial<Timesheet> = {}): Partial<Timesheet> => ({
+  const makeEntry = (
+    overrides: Partial<Timesheet> = {},
+  ): Partial<Timesheet> => ({
     id: entryId,
     organizationId,
     employeeId,
@@ -74,16 +82,22 @@ describe('TimesheetService – midnight edit/delete lock', () => {
 
     // No-op overlap query (mocked QB above returns no conflict).
     await expect(
-      service.updateTimesheet(entryId, employeeId, { workDescription: 'Updated' }),
+      service.updateTimesheet(entryId, employeeId, {
+        workDescription: 'Updated',
+      }),
     ).resolves.toBeDefined();
-    await expect(service.deleteTimesheet(entryId, employeeId)).resolves.toEqual({ success: true });
+    await expect(service.deleteTimesheet(entryId, employeeId)).resolves.toEqual(
+      { success: true },
+    );
   });
 
   it('SEP 1 12:00 AM: yesterday-dated entries can no longer be edited (403)', async () => {
     timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: yesterday }));
 
     await expect(
-      service.updateTimesheet(entryId, employeeId, { workDescription: 'Attempted after midnight' }),
+      service.updateTimesheet(entryId, employeeId, {
+        workDescription: 'Attempted after midnight',
+      }),
     ).rejects.toThrow(ForbiddenException);
     expect(timesheetRepoMock.save).not.toHaveBeenCalled();
   });
@@ -91,28 +105,42 @@ describe('TimesheetService – midnight edit/delete lock', () => {
   it('SEP 1 12:00 AM: yesterday-dated entries can no longer be deleted (403)', async () => {
     timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: yesterday }));
 
-    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(ForbiddenException);
+    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(
+      ForbiddenException,
+    );
     expect(timesheetRepoMock.remove).not.toHaveBeenCalled();
   });
 
   it('rejects editing another employee’s entry regardless of date', async () => {
-    timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ employeeId: otherEmployeeId, date: today }));
+    timesheetRepoMock.findOne.mockResolvedValue(
+      makeEntry({ employeeId: otherEmployeeId, date: today }),
+    );
 
     await expect(
-      service.updateTimesheet(entryId, employeeId, { workDescription: 'Not mine' }),
+      service.updateTimesheet(entryId, employeeId, {
+        workDescription: 'Not mine',
+      }),
     ).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects deleting another employee’s entry regardless of date', async () => {
-    timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ employeeId: otherEmployeeId, date: today }));
+    timesheetRepoMock.findOne.mockResolvedValue(
+      makeEntry({ employeeId: otherEmployeeId, date: today }),
+    );
 
-    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(ForbiddenException);
+    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('rejects edit/delete for a missing entry', async () => {
     timesheetRepoMock.findOne.mockResolvedValue(null);
 
-    await expect(service.updateTimesheet(entryId, employeeId, {})).rejects.toThrow(NotFoundException);
-    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(NotFoundException);
+    await expect(
+      service.updateTimesheet(entryId, employeeId, {}),
+    ).rejects.toThrow(NotFoundException);
+    await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

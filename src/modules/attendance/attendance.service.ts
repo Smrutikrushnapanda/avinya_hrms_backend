@@ -301,6 +301,69 @@ export class AttendanceService {
     return true;
   }
 
+  /**
+   * Finds an approved WFH request covering this punch, which should
+   * cause GPS/Wi-Fi/geofence validation to be skipped — mirroring the
+   * approved-office-trip exemption logic.
+   *
+   * Only APPROVED status requests bypass validation — PENDING/REJECTED/CANCELLED
+   * do NOT grant location exemption.
+   *
+   * Employee/organization isolation enforced: only the authenticated employee's
+   * own requests in the same organization are considered.
+   *
+   * WFH requests use date-range (date + endDate); no time-of-day granularity.
+   * The request covers the attendance date if: date <= attendanceDate <= endDate.
+   * Organization is derived from the user's organization membership.
+   */
+  private async findActiveWfhRequest(
+    organizationId: string,
+    userId: string,
+    attendanceDate: string,
+    /* timezone: string, */ // WFH is date-only; no timezone needed for coverage check
+  ): Promise<WfhRequest | null> {
+    // Query WFH requests for this user with APPROVED status and date range match.
+    // Organization scoping is enforced after fetching by verifying the user's
+    // organization matches the requested organizationId.
+    const candidates = await this.wfhRequestRepo.find({
+      where: {
+        user: { id: userId },
+        status: 'APPROVED',
+        date: LessThanOrEqual(attendanceDate),
+        endDate: MoreThanOrEqual(attendanceDate),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (candidates.length === 0) return null;
+
+    // Verify the user belongs to the requested organization via the employee table.
+    const employee = await this.employeeRepo.findOne({
+      where: { userId },
+      relations: ['organization'],
+    });
+    if (!employee || employee.organizationId !== organizationId) {
+      // User either has no employee record or belongs to a different organization.
+      return null;
+    }
+
+    // All remaining candidates cover the date and belong to the correct organization.
+    return candidates[0];
+  }
+
+  /**
+   * WFH date coverage check.
+   * WFH requests are date-only (no startTime/endTime like office trips).
+   * Returns true if the attendanceDate falls within [date, endDate].
+   */
+  private wfhCoversDate(wfh: WfhRequest, attendanceDate: string): boolean {
+    // attendanceDate is 'YYYY-MM-DD' format from the attendance record
+    // wfh.date and wfh.endDate are also 'YYYY-MM-DD' from the entity
+    return (
+      wfh.date <= attendanceDate &&
+      attendanceDate <= (wfh.endDate || attendanceDate)
+    );
+  }
+
   async logAttendance(
     dto: CreateAttendanceLogDto,
     photoFile?: Express.Multer.File,
@@ -371,6 +434,15 @@ export class AttendanceService {
       shiftTz,
     );
 
+    // An approved WFH request covering this date similarly bypasses
+    // GPS/Wi-Fi/geofence checks so the employee can punch from home.
+    // WFH is date-only; no timezone needed for the coverage check.
+    const activeWfh = await this.findActiveWfhRequest(
+      organizationId,
+      userId,
+      attendanceDate,
+    );
+
     // 1️⃣ Determine punch type (with pessimistic lock to prevent race conditions)
     let type: 'check-in' | 'check-out' | 'break-start' | 'break-end' =
       'check-in';
@@ -429,7 +501,10 @@ export class AttendanceService {
     const anomalyReasons: string[] = [];
 
     // 3a. Wi-Fi + GPS
-    if (enableWifiValidation && !activeTrip) {
+    const locationExempt = !!activeTrip || !!activeWfh;
+
+    // 3a. Wi-Fi + GPS
+    if (enableWifiValidation && !locationExempt) {
       if (!wifiBssid) {
         // Required but not supplied (e.g. a web client, which has no way
         // to read the connected network's BSSID) — fail closed rather
@@ -477,7 +552,7 @@ export class AttendanceService {
     }
 
     // 3c. GPS-only validation against office/branch geofence (primary + alternates)
-    if (enableGPSValidation && !activeTrip) {
+    if (enableGPSValidation && !locationExempt) {
       if (latitude == null || longitude == null) {
         anomalyFlag = true;
         anomalyReasons.push('GPS location required but not provided');

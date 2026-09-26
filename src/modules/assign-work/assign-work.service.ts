@@ -160,6 +160,15 @@ export class AssignWorkService {
       throw new BadRequestException('Assign the work to at least one employee');
     }
 
+    // Prevent employee from assigning work to themselves
+    const assignerUserId = assignedByUserId;
+    const selfAssignments = assigneeIds.filter((id) => id === assignerUserId);
+    if (selfAssignments.length) {
+      throw new BadRequestException(
+        `Work cannot be assigned to the assigner (user ID: ${assignerUserId})`,
+      );
+    }
+
     const employees = await this.employeeRepo.find({
       where: { userId: In(assigneeIds), organizationId },
       select: ['id', 'userId'],
