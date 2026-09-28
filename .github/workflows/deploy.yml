@@ -20,10 +20,10 @@ jobs:
 
       - name: Deploy to EC2
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@13.201.129.53 << 'EOF'
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/avinya_hrms_backend
             git pull origin main
-            npm install
+            npm ci
             npm run build
             pm2 restart backend
           EOF
