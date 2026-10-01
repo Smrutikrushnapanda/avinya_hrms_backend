@@ -452,6 +452,7 @@ export class UsersService {
     if (
       !isSuperadmin &&
       !isSelf &&
+      actor?.organizationId &&
       user.organizationId !== actor?.organizationId
     ) {
       throw new ForbiddenException(
@@ -589,6 +590,7 @@ export class UsersService {
     if (
       !isSuperadmin &&
       !isSelf &&
+      actor?.organizationId &&
       user.organizationId !== actor?.organizationId
     ) {
       throw new ForbiddenException(

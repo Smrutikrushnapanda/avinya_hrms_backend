@@ -21,9 +21,11 @@ jobs:
       - name: Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
             cd ~/avinya_hrms_backend
-            git pull origin main
-            npm ci
-            npm run build
-            pm2 restart backend
+            git fetch origin main
+            git reset --hard origin/main
+            npm install
+            NODE_OPTIONS="--max-old-space-size=2048" npm run build
+            pm2 restart backend || pm2 restart all
           EOF
