@@ -397,7 +397,11 @@ export class UsersService {
       where: { id: userId },
     });
     if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
-    if (!isSuperadmin && user.organizationId !== organizationId) {
+    if (
+      !isSuperadmin &&
+      organizationId &&
+      user.organizationId !== organizationId
+    ) {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
     return user;
