@@ -634,11 +634,34 @@ export class ProjectService implements OnModuleInit {
     return employeesWithInfo;
   }
 
+  private async isProjectManagerOrLead(
+    project: Project,
+    userId: string,
+    organizationId: string,
+  ): Promise<boolean> {
+    if (project.createdByUserId === userId) return true;
+    const member = await this.findMembershipByIdentity(
+      project.id,
+      userId,
+      organizationId,
+    );
+    if (
+      member?.role &&
+      ['manager', 'lead', 'project_manager', 'admin'].includes(
+        member.role.trim().toLowerCase(),
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   async assignEmployees(
     projectId: string,
     assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
+    isAdminOrManager = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
@@ -648,6 +671,19 @@ export class ProjectService implements OnModuleInit {
       throw new ForbiddenException(
         'You cannot assign employees to this project',
       );
+    }
+
+    if (!isAdminOrManager) {
+      const canManage = await this.isProjectManagerOrLead(
+        project,
+        requestingUserId,
+        organizationId,
+      );
+      if (!canManage) {
+        throw new ForbiddenException(
+          'Only project managers or admins can assign employees',
+        );
+      }
     }
 
     const normalizedAssignmentsRaw = (
@@ -768,12 +804,25 @@ export class ProjectService implements OnModuleInit {
     if (!project) throw new NotFoundException('Project not found');
 
     if (requestingUserId && organizationId) {
-      await this.ensureProjectAccess(
-        projectId,
-        requestingUserId,
-        organizationId,
-        isAdminOrManager,
-      );
+      if (!isAdminOrManager) {
+        const canManage = await this.isProjectManagerOrLead(
+          project,
+          requestingUserId,
+          organizationId,
+        );
+        if (!canManage) {
+          throw new ForbiddenException(
+            'Only project managers or admins can remove employees',
+          );
+        }
+      } else {
+        await this.ensureProjectAccess(
+          projectId,
+          requestingUserId,
+          organizationId,
+          isAdminOrManager,
+        );
+      }
     }
 
     if (requestingUserId && userId === requestingUserId && isAdminOrManager) {
@@ -797,7 +846,9 @@ export class ProjectService implements OnModuleInit {
     projectId: string,
     userId: string,
     role: string,
+    requestingUserId: string,
     organizationId: string,
+    isAdminOrManager = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
@@ -807,6 +858,19 @@ export class ProjectService implements OnModuleInit {
       throw new ForbiddenException(
         'Project does not belong to your organization',
       );
+    }
+
+    if (!isAdminOrManager) {
+      const canManage = await this.isProjectManagerOrLead(
+        project,
+        requestingUserId,
+        organizationId,
+      );
+      if (!canManage) {
+        throw new ForbiddenException(
+          'Only project managers or admins can update member roles',
+        );
+      }
     }
 
     const member = await this.findMembershipByIdentity(

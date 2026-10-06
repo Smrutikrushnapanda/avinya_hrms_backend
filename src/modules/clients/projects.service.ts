@@ -437,20 +437,62 @@ export class ProjectsService implements OnModuleInit {
     return merged;
   }
 
+  async isProjectManagerOrLead(
+    project: ClientProject,
+    userId: string,
+    organizationId: string,
+  ): Promise<boolean> {
+    const actorEmployee = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['id'],
+    });
+    if (actorEmployee?.id && project.managerId === actorEmployee.id) {
+      return true;
+    }
+    const member = await this.memberRepo.findOne({
+      where: { projectId: project.id, userId },
+      select: ['id', 'role'],
+    });
+    if (
+      member?.role &&
+      ['manager', 'lead', 'project_manager', 'admin'].includes(
+        member.role.trim().toLowerCase(),
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   async assignEmployees(
     projectId: string,
     assignmentsOrUserIds: AssignEmployeeInput[] | string[],
     requestingUserId: string,
     organizationId: string,
+    isAdminOrManager = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
+      relations: ['manager'],
     });
     if (!project) throw new NotFoundException('Project not found');
     if (project.organizationId !== organizationId) {
       throw new ForbiddenException(
         'You cannot assign employees to this project',
       );
+    }
+
+    if (!isAdminOrManager) {
+      const canManage = await this.isProjectManagerOrLead(
+        project,
+        requestingUserId,
+        organizationId,
+      );
+      if (!canManage) {
+        throw new ForbiddenException(
+          'Only project managers or admins can assign employees',
+        );
+      }
     }
 
     const normalizedAssignmentsRaw = (
@@ -551,16 +593,32 @@ export class ProjectsService implements OnModuleInit {
   async removeEmployee(
     projectId: string,
     userId: string,
+    requestingUserId?: string,
     organizationId?: string,
+    isAdminOrManager = false,
   ) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
-      select: ['id', 'organizationId'],
+      select: ['id', 'organizationId', 'managerId'],
     });
     if (!project) throw new NotFoundException('Project not found');
     if (organizationId && project.organizationId !== organizationId) {
       throw new ForbiddenException('Access denied');
     }
+
+    if (!isAdminOrManager && requestingUserId && organizationId) {
+      const canManage = await this.isProjectManagerOrLead(
+        project,
+        requestingUserId,
+        organizationId,
+      );
+      if (!canManage) {
+        throw new ForbiddenException(
+          'Only project managers or admins can remove employees',
+        );
+      }
+    }
+
     const member = await this.memberRepo.findOne({
       where: { projectId, userId },
     });
@@ -622,11 +680,7 @@ export class ProjectsService implements OnModuleInit {
     isAdminOrManager = false,
   ) {
     if (isAdminOrManager) return true;
-    const actorEmployee = await this.employeeRepo.findOne({
-      where: { userId, organizationId },
-      select: ['id'],
-    });
-    return Boolean(actorEmployee?.id && project.managerId === actorEmployee.id);
+    return this.isProjectManagerOrLead(project, userId, organizationId);
   }
 
   async listDocuments(
@@ -923,15 +977,10 @@ export class ProjectsService implements OnModuleInit {
     });
     if (!project) throw new NotFoundException('Project not found');
 
-    const actingEmployee = await this.employeeRepo.findOne({
-      where: {
-        userId: data.assignedByUserId,
-        organizationId: data.organizationId,
-      },
-      select: ['id'],
-    });
-    const isProjectManager = Boolean(
-      actingEmployee && project.managerId === actingEmployee.id,
+    const isProjectManager = await this.isProjectManagerOrLead(
+      project,
+      data.assignedByUserId,
+      data.organizationId,
     );
     const isAdmin = data.createdByAdmin ?? false;
     if (!isProjectManager && !isAdmin) {

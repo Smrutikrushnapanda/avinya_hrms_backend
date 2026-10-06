@@ -171,8 +171,6 @@ export class ProjectController {
       assignments?: { userId: string; role?: string }[];
     },
   ) {
-    if (!this.isAdminOrManager(user))
-      throw new ForbiddenException('Access denied');
     const assignments =
       body?.assignments && Array.isArray(body.assignments)
         ? body.assignments
@@ -182,6 +180,7 @@ export class ProjectController {
       assignments,
       user.userId,
       user.organizationId,
+      this.isAdminOrManager(user),
     );
   }
 
@@ -191,8 +190,6 @@ export class ProjectController {
     @Param('id') id: string,
     @Param('userId') userId: string,
   ) {
-    if (!this.isAdminOrManager(user))
-      throw new ForbiddenException('Access denied');
     return this.service.removeEmployee(
       id,
       userId,
@@ -209,13 +206,13 @@ export class ProjectController {
     @Param('userId') userId: string,
     @Body() dto: UpdateProjectMemberRoleDto,
   ) {
-    if (!this.isAdminOrManager(user))
-      throw new ForbiddenException('Access denied');
     return this.service.updateMemberRole(
       id,
       userId,
       dto.role,
+      user.userId,
       user.organizationId,
+      this.isAdminOrManager(user),
     );
   }
 
