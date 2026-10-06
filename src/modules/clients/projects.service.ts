@@ -506,20 +506,6 @@ export class ProjectsService implements OnModuleInit {
       // Ignore if table not yet initialized
     }
 
-    const userWithRoles = await this.userRepo.findOne({
-      where: { id: userId },
-      relations: ['roles'],
-    });
-    if (
-      userWithRoles?.roles?.some((r) =>
-        ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN', 'MANAGER'].includes(
-          r.roleName?.toUpperCase(),
-        ),
-      )
-    ) {
-      return true;
-    }
-
     return false;
   }
 
