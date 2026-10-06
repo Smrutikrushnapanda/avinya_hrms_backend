@@ -41,6 +41,10 @@ import { ProjectMember } from '../project/entities/project-member.entity';
 import { ClientProjectMember } from '../clients/entities/client-project-member.entity';
 import { EmployeeAsset, AssetStatus } from './entities/employee-asset.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
+import {
+  EmployeeDocumentTemplate,
+  DocumentTemplateType,
+} from './entities/employee-document-template.entity';
 import { EmployeeSettlement, SettlementStatus } from './entities/employee-settlement.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
@@ -48,6 +52,11 @@ import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
 import { LeaveBalance } from '../leave/entities/leave-balance.entity';
 import { CreateEmployeeAssetDto, UpdateEmployeeAssetDto, ReturnAssetDto } from './dto/employee-asset.dto';
 import { CreateEmployeeDocumentDto } from './dto/employee-document.dto';
+import {
+  CreateDocumentTemplateDto,
+  UpdateDocumentTemplateDto,
+  PreviewLetterDto,
+} from './dto/employee-document-template.dto';
 import { SaveSettlementDto, AssignManagerDto } from './dto/employee-settlement.dto';
 import * as puppeteer from 'puppeteer';
 
@@ -114,6 +123,9 @@ export class EmployeeService implements OnModuleInit {
 
     @InjectRepository(EmployeeDocument)
     private readonly documentRepository: Repository<EmployeeDocument>,
+
+    @InjectRepository(EmployeeDocumentTemplate)
+    private readonly templateRepository: Repository<EmployeeDocumentTemplate>,
 
     @InjectRepository(EmployeeSettlement)
     private readonly settlementRepository: Repository<EmployeeSettlement>,
@@ -251,6 +263,41 @@ export class EmployeeService implements OnModuleInit {
           "created_at" timestamptz NOT NULL DEFAULT now(),
           "updated_at" timestamptz NOT NULL DEFAULT now()
         );
+      `);
+
+      // Employee Document Templates table
+      await this.employeeRepository.query(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."employee_document_templates" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "organization_id" uuid NOT NULL,
+          "template_type" varchar(50) NOT NULL,
+          "template_name" varchar(255) NOT NULL,
+          "content" text NOT NULL,
+          "is_active" boolean NOT NULL DEFAULT true,
+          "created_by" uuid NULL,
+          "updated_by" uuid NULL,
+          "created_at" timestamptz NOT NULL DEFAULT now(),
+          "updated_at" timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS "idx_emp_doc_templates_org_type" ON "${schema}"."employee_document_templates" ("organization_id", "template_type");
+      `);
+
+      // Allow nulls for unconfigured numeric values in employee_settlements
+      await this.employeeRepository.query(`
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "salary_due" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "pending_salary" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_days" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "bonus_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "incentive_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_payable_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_earnings" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "notice_period_recovery_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "loan_recovery_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "asset_deduction_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_deductions_amount" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_deductions" DROP NOT NULL;
+        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "net_settlement_amount" DROP NOT NULL;
       `);
     } catch (e) {
       console.error('Failed to initialize schema extensions:', e);
@@ -2599,38 +2646,42 @@ export class EmployeeService implements OnModuleInit {
       ? Number(salaryStructure.grossSalary || salaryStructure.basic || 0)
       : 0;
     const dailyRate = monthlyGross > 0 ? monthlyGross / 30 : 0;
-    const encashmentAmount = Math.round(totalLeaveDays * dailyRate);
+    const encashmentAmount = totalLeaveDays > 0 && dailyRate > 0 ? Math.round(totalLeaveDays * dailyRate) : null;
     const resignationDate = resignationReq?.createdAt
       ? DateTime.fromJSDate(new Date(resignationReq.createdAt)).toISODate()
-      : undefined;
+      : null;
 
-    const lastWorkingDate = resignationReq?.approvedLastWorkingDay || resignationReq?.proposedLastWorkingDay || undefined;
+    const lastWorkingDate =
+      resignationReq?.approvedLastWorkingDay ||
+      resignationReq?.proposedLastWorkingDay ||
+      (employee.dateOfExit
+        ? DateTime.fromJSDate(new Date(employee.dateOfExit)).toISODate()
+        : null);
 
     const noticeDays = 30;
 
     if (!existingSettlement) {
       const defaultEarnings = {
-        salaryDue: 0,
-        pendingSalary: 0,
-        leaveEncashmentDays: totalLeaveDays,
+        salaryDue: null as number | null,
+        pendingSalary: null as number | null,
+        leaveEncashmentDays: totalLeaveDays > 0 ? totalLeaveDays : null,
         leaveEncashmentAmount: encashmentAmount,
-        bonusAmount: 0,
-        incentiveAmount: 0,
-        otherPayableAmount: 0,
+        bonusAmount: null as number | null,
+        incentiveAmount: null as number | null,
+        otherPayableAmount: null as number | null,
         totalEarnings: encashmentAmount,
       };
 
       const defaultDeductions = {
-        noticePeriodRecoveryAmount: 0,
-        loanRecoveryAmount: 0,
-        assetDeductionAmount: 0,
-        otherDeductionsAmount: 0,
+        noticePeriodRecoveryAmount: null as number | null,
+        loanRecoveryAmount: null as number | null,
+        assetDeductionAmount: null as number | null,
+        otherDeductionsAmount: null as number | null,
         deductionsRemarks: null as string | null,
-        totalDeductions: 0,
+        totalDeductions: null as number | null,
       };
 
-      const netSettlementAmount =
-        defaultEarnings.totalEarnings - defaultDeductions.totalDeductions;
+      const netSettlementAmount = encashmentAmount;
 
       return {
         isSaved: false,
@@ -2640,9 +2691,9 @@ export class EmployeeService implements OnModuleInit {
           organizationId,
           employeeId,
           resignationRequestId: resignationReq?.id || null,
-          resignationDate: resignationDate || null,
+          resignationDate,
           noticePeriodDays: noticeDays,
-          lastWorkingDate: lastWorkingDate || null,
+          lastWorkingDate,
           reasonForLeaving: resignationReq?.message || null,
           ...defaultEarnings,
           ...defaultDeductions,
@@ -2665,7 +2716,11 @@ export class EmployeeService implements OnModuleInit {
       clearance,
       settlement: {
         ...existingSettlement,
-        netSettlementAmount: Number(existingSettlement.finalSettlementAmount || 0),
+        netSettlementAmount:
+          existingSettlement.finalSettlementAmount !== null &&
+          existingSettlement.finalSettlementAmount !== undefined
+            ? Number(existingSettlement.finalSettlementAmount)
+            : null,
       },
     };
   }
@@ -2699,35 +2754,11 @@ export class EmployeeService implements OnModuleInit {
       }
     }
 
-    const salaryDue = Number(dto.salaryDue || 0);
-    const pendingSalary = Number(dto.pendingSalary || 0);
-    const leaveEncashmentAmount = Number(dto.leaveEncashmentAmount || 0);
-    const bonusAmount = Number(dto.bonusAmount || 0);
-    const incentiveAmount = Number(dto.incentiveAmount || 0);
-    const otherPayableAmount = Number(dto.otherPayableAmount || 0);
-
-    const totalEarnings =
-      salaryDue +
-      pendingSalary +
-      leaveEncashmentAmount +
-      bonusAmount +
-      incentiveAmount +
-      otherPayableAmount;
-
-    const noticePeriodRecoveryAmount = Number(
-      dto.noticePeriodRecoveryAmount || 0,
-    );
-    const loanRecoveryAmount = Number(dto.loanRecoveryAmount || 0);
-    const assetDeductionAmount = Number(dto.assetDeductionAmount || 0);
-    const otherDeductionsAmount = Number(dto.otherDeductionsAmount || 0);
-
-    const totalDeductions =
-      noticePeriodRecoveryAmount +
-      loanRecoveryAmount +
-      assetDeductionAmount +
-      otherDeductionsAmount;
-
-    const netSettlementAmount = totalEarnings - totalDeductions;
+    const parseNullableNumber = (val: any): number | null => {
+      if (val === null || val === undefined || val === '') return null;
+      const num = Number(val);
+      return isNaN(num) ? null : num;
+    };
 
     let settlement = await this.settlementRepository.findOne({
       where: { organizationId, employeeId },
@@ -2744,27 +2775,62 @@ export class EmployeeService implements OnModuleInit {
     if (dto.resignationDate !== undefined)
       settlement.resignationDate = dto.resignationDate || null;
     if (dto.noticePeriodDays !== undefined)
-      settlement.noticePeriodDays = dto.noticePeriodDays;
+      settlement.noticePeriodDays = dto.noticePeriodDays !== null && dto.noticePeriodDays !== undefined ? Number(dto.noticePeriodDays) : 0;
     if (dto.lastWorkingDate !== undefined)
       settlement.lastWorkingDate = dto.lastWorkingDate || null;
     if (dto.reasonForLeaving !== undefined)
       settlement.reasonForLeaving = dto.reasonForLeaving || null;
 
-    settlement.salaryDue = salaryDue;
-    settlement.pendingSalary = pendingSalary;
-    settlement.leaveEncashmentDays = Number(dto.leaveEncashmentDays || 0);
-    settlement.leaveEncashmentAmount = leaveEncashmentAmount;
-    settlement.bonusAmount = bonusAmount;
-    settlement.incentiveAmount = incentiveAmount;
-    settlement.otherPayableAmount = otherPayableAmount;
-    settlement.totalEarnings = totalEarnings;
+    if (dto.salaryDue !== undefined) settlement.salaryDue = parseNullableNumber(dto.salaryDue);
+    if (dto.pendingSalary !== undefined) settlement.pendingSalary = parseNullableNumber(dto.pendingSalary);
+    if (dto.leaveEncashmentDays !== undefined) settlement.leaveEncashmentDays = parseNullableNumber(dto.leaveEncashmentDays);
+    if (dto.leaveEncashmentAmount !== undefined) settlement.leaveEncashmentAmount = parseNullableNumber(dto.leaveEncashmentAmount);
+    if (dto.bonusAmount !== undefined) settlement.bonusAmount = parseNullableNumber(dto.bonusAmount);
+    if (dto.incentiveAmount !== undefined) settlement.incentiveAmount = parseNullableNumber(dto.incentiveAmount);
+    if (dto.otherPayableAmount !== undefined) settlement.otherPayableAmount = parseNullableNumber(dto.otherPayableAmount);
 
-    settlement.noticePeriodRecoveryAmount = noticePeriodRecoveryAmount;
-    settlement.loanRecoveryAmount = loanRecoveryAmount;
-    settlement.assetDeductionAmount = assetDeductionAmount;
-    settlement.otherDeductionsAmount = otherDeductionsAmount;
-    settlement.totalDeductions = totalDeductions;
-    settlement.finalSettlementAmount = netSettlementAmount;
+    const earningsArray = [
+      settlement.salaryDue,
+      settlement.pendingSalary,
+      settlement.leaveEncashmentAmount,
+      settlement.bonusAmount,
+      settlement.incentiveAmount,
+      settlement.otherPayableAmount,
+    ].filter((v) => v !== null && v !== undefined) as number[];
+
+    settlement.totalEarnings =
+      earningsArray.length > 0
+        ? earningsArray.reduce((acc, curr) => acc + Number(curr), 0)
+        : null;
+
+    if (dto.noticePeriodRecoveryAmount !== undefined)
+      settlement.noticePeriodRecoveryAmount = parseNullableNumber(dto.noticePeriodRecoveryAmount);
+    if (dto.loanRecoveryAmount !== undefined)
+      settlement.loanRecoveryAmount = parseNullableNumber(dto.loanRecoveryAmount);
+    if (dto.assetDeductionAmount !== undefined)
+      settlement.assetDeductionAmount = parseNullableNumber(dto.assetDeductionAmount);
+    if (dto.otherDeductionsAmount !== undefined)
+      settlement.otherDeductionsAmount = parseNullableNumber(dto.otherDeductionsAmount);
+
+    const deductionsArray = [
+      settlement.noticePeriodRecoveryAmount,
+      settlement.loanRecoveryAmount,
+      settlement.assetDeductionAmount,
+      settlement.otherDeductionsAmount,
+    ].filter((v) => v !== null && v !== undefined) as number[];
+
+    settlement.totalDeductions =
+      deductionsArray.length > 0
+        ? deductionsArray.reduce((acc, curr) => acc + Number(curr), 0)
+        : null;
+
+    if (settlement.totalEarnings !== null || settlement.totalDeductions !== null) {
+      settlement.finalSettlementAmount =
+        (settlement.totalEarnings ?? 0) - (settlement.totalDeductions ?? 0);
+    } else {
+      settlement.finalSettlementAmount = null;
+    }
+
     settlement.deductionsRemarks = dto.deductionsRemarks || null;
 
     if (dto.status) settlement.status = dto.status;
@@ -2813,8 +2879,10 @@ export class EmployeeService implements OnModuleInit {
     const s: any = settlementData.settlement;
     const assets = clearance.assets || [];
 
-    const formatCurrency = (val: number | string | undefined | null) => {
-      const num = Number(val || 0);
+    const formatNullableCurrency = (val: number | string | undefined | null) => {
+      if (val === null || val === undefined || val === '') return '';
+      const num = Number(val);
+      if (isNaN(num)) return '';
       return (
         '₹ ' +
         num.toLocaleString('en-IN', {
@@ -2824,8 +2892,8 @@ export class EmployeeService implements OnModuleInit {
       );
     };
 
-    const formatDate = (val: any) => {
-      if (!val) return '—';
+    const formatNullableDate = (val: any) => {
+      if (!val) return '';
       try {
         return DateTime.fromJSDate(new Date(val)).toFormat('dd LLL yyyy');
       } catch (e) {
@@ -2840,7 +2908,12 @@ export class EmployeeService implements OnModuleInit {
 
     const managerName = employee.manager
       ? `${employee.manager.firstName} ${employee.manager.lastName || ''}`.trim()
-      : '—';
+      : '';
+
+    const clearanceLabel =
+      assets.length === 0
+        ? '✓ NO ASSETS PENDING'
+        : '✓ ALL ASSETS RETURNED';
 
     const html = `
       <!DOCTYPE html>
@@ -3064,23 +3137,23 @@ export class EmployeeService implements OnModuleInit {
             <div class="card-title">Employee Information</div>
             <table class="info-table">
               <tr><td class="label">Employee Name:</td><td class="value">${employee.firstName} ${employee.lastName || ''}</td></tr>
-              <tr><td class="label">Employee Code / ID:</td><td class="value">${employee.employeeCode || '—'}</td></tr>
-              <tr><td class="label">Designation:</td><td class="value">${employee.designation?.name || '—'}</td></tr>
-              <tr><td class="label">Department:</td><td class="value">${employee.department?.name || '—'}</td></tr>
+              <tr><td class="label">Employee Code / ID:</td><td class="value">${employee.employeeCode || ''}</td></tr>
+              <tr><td class="label">Designation:</td><td class="value">${employee.designation?.name || ''}</td></tr>
+              <tr><td class="label">Department:</td><td class="value">${employee.department?.name || ''}</td></tr>
               <tr><td class="label">Reporting Manager:</td><td class="value">${managerName}</td></tr>
-              <tr><td class="label">Employment Status:</td><td class="value">${employee.status?.toUpperCase() || 'EXITED'}</td></tr>
+              <tr><td class="label">Employment Status:</td><td class="value">${employee.status ? employee.status.toUpperCase() : ''}</td></tr>
             </table>
           </div>
 
           <div class="card">
             <div class="card-title">Service & Exit Details</div>
             <table class="info-table">
-              <tr><td class="label">Date of Joining:</td><td class="value">${formatDate(employee.dateOfJoining)}</td></tr>
-              <tr><td class="label">Resignation Date:</td><td class="value">${formatDate(s.resignationDate)}</td></tr>
-              <tr><td class="label">Notice Period:</td><td class="value">${s.noticePeriodDays || 0} Days</td></tr>
-              <tr><td class="label">Last Working Date:</td><td class="value">${formatDate(s.lastWorkingDate)}</td></tr>
-              <tr><td class="label">Settlement Status:</td><td class="value">${s.status || 'FINALIZED'}</td></tr>
-              <tr><td class="label">Clearance Status:</td><td class="value"><span class="badge-cleared">✓ ALL ASSETS RETURNED</span></td></tr>
+              <tr><td class="label">Date of Joining:</td><td class="value">${formatNullableDate(employee.dateOfJoining)}</td></tr>
+              <tr><td class="label">Resignation Date:</td><td class="value">${formatNullableDate(s.resignationDate)}</td></tr>
+              <tr><td class="label">Notice Period:</td><td class="value">${s.noticePeriodDays !== null && s.noticePeriodDays !== undefined && s.noticePeriodDays !== '' ? s.noticePeriodDays + ' Days' : ''}</td></tr>
+              <tr><td class="label">Last Working Date:</td><td class="value">${formatNullableDate(s.lastWorkingDate)}</td></tr>
+              <tr><td class="label">Settlement Status:</td><td class="value">${s.status || ''}</td></tr>
+              <tr><td class="label">Clearance Status:</td><td class="value"><span class="badge-cleared">${clearanceLabel}</span></td></tr>
             </table>
           </div>
         </div>
@@ -3094,15 +3167,15 @@ export class EmployeeService implements OnModuleInit {
                 <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
               </thead>
               <tbody>
-                <tr><td>Salary Due for Worked Days</td><td class="text-right">${formatCurrency(s.salaryDue)}</td></tr>
-                <tr><td>Pending Salary / Arrears</td><td class="text-right">${formatCurrency(s.pendingSalary)}</td></tr>
-                <tr><td>Leave Encashment (${s.leaveEncashmentDays || 0} days)</td><td class="text-right">${formatCurrency(s.leaveEncashmentAmount)}</td></tr>
-                <tr><td>Performance Incentive</td><td class="text-right">${formatCurrency(s.incentiveAmount)}</td></tr>
-                <tr><td>Bonus / Ex-Gratia</td><td class="text-right">${formatCurrency(s.bonusAmount)}</td></tr>
-                <tr><td>Other Payables / Reimbursements</td><td class="text-right">${formatCurrency(s.otherPayableAmount)}</td></tr>
+                <tr><td>Salary Due for Worked Days</td><td class="text-right">${formatNullableCurrency(s.salaryDue)}</td></tr>
+                <tr><td>Pending Salary / Arrears</td><td class="text-right">${formatNullableCurrency(s.pendingSalary)}</td></tr>
+                <tr><td>Leave Encashment ${s.leaveEncashmentDays !== null && s.leaveEncashmentDays !== undefined ? `(${s.leaveEncashmentDays} days)` : ''}</td><td class="text-right">${formatNullableCurrency(s.leaveEncashmentAmount)}</td></tr>
+                <tr><td>Performance Incentive</td><td class="text-right">${formatNullableCurrency(s.incentiveAmount)}</td></tr>
+                <tr><td>Bonus / Ex-Gratia</td><td class="text-right">${formatNullableCurrency(s.bonusAmount)}</td></tr>
+                <tr><td>Other Payables / Reimbursements</td><td class="text-right">${formatNullableCurrency(s.otherPayableAmount)}</td></tr>
                 <tr style="background:#f1f5f9; font-weight:700;">
                   <td>Total Gross Earnings (A)</td>
-                  <td class="text-right">${formatCurrency(s.totalEarnings)}</td>
+                  <td class="text-right">${formatNullableCurrency(s.totalEarnings)}</td>
                 </tr>
               </tbody>
             </table>
@@ -3115,14 +3188,14 @@ export class EmployeeService implements OnModuleInit {
                 <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
               </thead>
               <tbody>
-                <tr><td>Notice Period Shortfall Recovery</td><td class="text-right">${formatCurrency(s.noticePeriodRecoveryAmount)}</td></tr>
-                <tr><td>Loan / Advance Balance Recovery</td><td class="text-right">${formatCurrency(s.loanRecoveryAmount)}</td></tr>
-                <tr><td>Company Asset Loss / Damage</td><td class="text-right">${formatCurrency(s.assetDeductionAmount)}</td></tr>
-                <tr><td>Other Statutory / Non-Statutory Deductions</td><td class="text-right">${formatCurrency(s.otherDeductionsAmount)}</td></tr>
-                <tr style="height: 38px;"><td><span style="color:#64748b; font-size:9.5px;">${s.deductionsRemarks ? 'Note: ' + s.deductionsRemarks : '—'}</span></td><td></td></tr>
+                <tr><td>Notice Period Shortfall Recovery</td><td class="text-right">${formatNullableCurrency(s.noticePeriodRecoveryAmount)}</td></tr>
+                <tr><td>Loan / Advance Balance Recovery</td><td class="text-right">${formatNullableCurrency(s.loanRecoveryAmount)}</td></tr>
+                <tr><td>Company Asset Loss / Damage</td><td class="text-right">${formatNullableCurrency(s.assetDeductionAmount)}</td></tr>
+                <tr><td>Other Statutory / Non-Statutory Deductions</td><td class="text-right">${formatNullableCurrency(s.otherDeductionsAmount)}</td></tr>
+                <tr style="height: 38px;"><td><span style="color:#64748b; font-size:9.5px;">${s.deductionsRemarks ? 'Note: ' + s.deductionsRemarks : ''}</span></td><td></td></tr>
                 <tr style="background:#f1f5f9; font-weight:700;">
                   <td>Total Deductions (B)</td>
-                  <td class="text-right">${formatCurrency(s.totalDeductions)}</td>
+                  <td class="text-right">${formatNullableCurrency(s.totalDeductions)}</td>
                 </tr>
               </tbody>
             </table>
@@ -3132,7 +3205,7 @@ export class EmployeeService implements OnModuleInit {
         <!-- NET PAYABLE BANNER -->
         <div class="net-amount-banner">
           <div class="label">NET FULL & FINAL SETTLEMENT AMOUNT (A - B)</div>
-          <div class="amount">${formatCurrency(s.netSettlementAmount)}</div>
+          <div class="amount">${formatNullableCurrency(s.finalSettlementAmount ?? s.netSettlementAmount)}</div>
         </div>
 
         <!-- COMPANY ASSETS / CLEARANCE SUMMARY -->
@@ -3150,15 +3223,15 @@ export class EmployeeService implements OnModuleInit {
           <tbody>
             ${
               assets.length === 0
-                ? '<tr><td colspan="5" class="text-center" style="color:#64748b;">No physical company assets were issued to this employee.</td></tr>'
+                ? '<tr><td colspan="5" class="text-center" style="color:#64748b;">No physical company assets were assigned to this employee.</td></tr>'
                 : assets
                     .map(
                       (a) => `
                 <tr>
                   <td><strong>${a.assetName}</strong> (${a.assetType})</td>
-                  <td>${a.assetId || a.serialNumber || '—'}</td>
-                  <td>${formatDate(a.issueDate)}</td>
-                  <td>${formatDate(a.actualReturnDate)}</td>
+                  <td>${a.assetId || a.serialNumber || ''}</td>
+                  <td>${formatNullableDate(a.issueDate)}</td>
+                  <td>${formatNullableDate(a.actualReturnDate)}</td>
                   <td class="text-center"><span class="badge-cleared">✓ RETURNED & CLEARED</span></td>
                 </tr>
               `,
@@ -3221,6 +3294,580 @@ export class EmployeeService implements OnModuleInit {
       return Buffer.from(pdf);
     } catch (error) {
       console.error('Failed to generate full settlement PDF:', error);
+      throw error;
+    } finally {
+      if (browser) await browser.close();
+    }
+  }
+
+  // --- DOCUMENT TEMPLATES & LETTERS ---
+  getDefaultTemplateContent(type: DocumentTemplateType): string {
+    if (type === DocumentTemplateType.EXPERIENCE_LETTER) {
+      return `<p><strong>TO WHOM IT MAY CONCERN</strong></p>
+<p><br></p>
+<p>This is to certify that <strong>{{employee_name}}</strong> (Employee ID: <strong>{{employee_id}}</strong>) was employed with <strong>{{organization_name}}</strong> as <strong>{{designation}}</strong> in the <strong>{{department}}</strong> department from <strong>{{joining_date}}</strong> to <strong>{{last_working_date}}</strong>.</p>
+<p><br></p>
+<p>During the period of employment spanning <strong>{{experience_duration}}</strong>, {{employee_name}} worked diligently and handled their duties and professional responsibilities with sincere commitment and integrity.</p>
+<p><br></p>
+<p>During their tenure, we found them to be hard-working, punctual, and professional in all interactions. Their character and conduct were found to be exemplary throughout their service with us.</p>
+<p><br></p>
+<p>We wish <strong>{{employee_name}}</strong> the very best in all future career endeavors and personal pursuits.</p>
+<p><br></p>
+<p>Sincerely,</p>
+<p><strong>Authorized Signatory</strong><br>{{organization_name}}</p>`;
+    }
+
+    return `<p><strong>RELIEVING LETTER</strong></p>
+<p><br></p>
+<p>Date: <strong>{{current_date}}</strong></p>
+<p><br></p>
+<p>Dear <strong>{{employee_name}}</strong>,</p>
+<p><br></p>
+<p>This letter is to formally confirm that you have been relieved from your services and duties as <strong>{{designation}}</strong> in the <strong>{{department}}</strong> department at <strong>{{organization_name}}</strong>, effective after the close of business hours on <strong>{{last_working_date}}</strong>.</p>
+<p><br></p>
+<p><strong>Employee Details:</strong></p>
+<ul>
+  <li><strong>Employee Name:</strong> {{employee_name}}</li>
+  <li><strong>Employee ID:</strong> {{employee_id}}</li>
+  <li><strong>Designation:</strong> {{designation}}</li>
+  <li><strong>Department:</strong> {{department}}</li>
+  <li><strong>Date of Joining:</strong> {{joining_date}}</li>
+  <li><strong>Date of Relieving:</strong> {{last_working_date}}</li>
+  <li><strong>Total Experience:</strong> {{experience_duration}}</li>
+</ul>
+<p><br></p>
+<p>We confirm that you have returned all company property and completed all handover and exit formalities in a satisfactory manner. The management appreciates your contributions and dedication during your tenure with the organization.</p>
+<p><br></p>
+<p>We wish you all the best and continued success in your future career endeavors.</p>
+<p><br></p>
+<p>Sincerely,</p>
+<p><strong>Authorized Signatory</strong><br>{{organization_name}}</p>`;
+  }
+
+  async getDocumentTemplates(organizationId: string) {
+    const templates = await this.templateRepository.find({
+      where: { organizationId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const types = [
+      DocumentTemplateType.EXPERIENCE_LETTER,
+      DocumentTemplateType.RELIEVING_LETTER,
+    ];
+
+    const result = [];
+    for (const type of types) {
+      let existing = templates.find((t) => t.templateType === type);
+      if (!existing) {
+        existing = this.templateRepository.create({
+          organizationId,
+          templateType: type,
+          templateName:
+            type === DocumentTemplateType.EXPERIENCE_LETTER
+              ? 'Default Experience Letter'
+              : 'Default Relieving Letter',
+          content: this.getDefaultTemplateContent(type),
+          isActive: true,
+        });
+        existing = await this.templateRepository.save(existing);
+      }
+      result.push(existing);
+    }
+
+    return result;
+  }
+
+  async getDocumentTemplateByType(
+    organizationId: string,
+    type: DocumentTemplateType,
+  ) {
+    let template = await this.templateRepository.findOne({
+      where: { organizationId, templateType: type },
+    });
+
+    if (!template) {
+      template = this.templateRepository.create({
+        organizationId,
+        templateType: type,
+        templateName:
+          type === DocumentTemplateType.EXPERIENCE_LETTER
+            ? 'Default Experience Letter'
+            : 'Default Relieving Letter',
+        content: this.getDefaultTemplateContent(type),
+        isActive: true,
+      });
+      template = await this.templateRepository.save(template);
+    }
+
+    return template;
+  }
+
+  async saveDocumentTemplate(
+    organizationId: string,
+    dto: CreateDocumentTemplateDto,
+    userId?: string,
+  ) {
+    let template = await this.templateRepository.findOne({
+      where: { organizationId, templateType: dto.templateType },
+    });
+
+    if (template) {
+      template.templateName = dto.templateName;
+      template.content = dto.content;
+      if (dto.isActive !== undefined) template.isActive = dto.isActive;
+      template.updatedBy = userId || null;
+    } else {
+      template = this.templateRepository.create({
+        organizationId,
+        templateType: dto.templateType,
+        templateName: dto.templateName,
+        content: dto.content,
+        isActive: dto.isActive !== undefined ? dto.isActive : true,
+        createdBy: userId || null,
+        updatedBy: userId || null,
+      });
+    }
+
+    return this.templateRepository.save(template);
+  }
+
+  async updateDocumentTemplate(
+    organizationId: string,
+    id: string,
+    dto: UpdateDocumentTemplateDto,
+    userId?: string,
+  ) {
+    const template = await this.templateRepository.findOne({
+      where: { id, organizationId },
+    });
+    if (!template) {
+      throw new NotFoundException(`Template with ID ${id} not found`);
+    }
+
+    if (dto.templateName !== undefined) template.templateName = dto.templateName;
+    if (dto.content !== undefined) template.content = dto.content;
+    if (dto.isActive !== undefined) template.isActive = dto.isActive;
+    template.updatedBy = userId || null;
+
+    return this.templateRepository.save(template);
+  }
+
+  async resetDocumentTemplate(
+    organizationId: string,
+    type: DocumentTemplateType,
+    userId?: string,
+  ) {
+    let template = await this.templateRepository.findOne({
+      where: { organizationId, templateType: type },
+    });
+
+    const defaultContent = this.getDefaultTemplateContent(type);
+    const defaultName =
+      type === DocumentTemplateType.EXPERIENCE_LETTER
+        ? 'Default Experience Letter'
+        : 'Default Relieving Letter';
+
+    if (template) {
+      template.templateName = defaultName;
+      template.content = defaultContent;
+      template.isActive = true;
+      template.updatedBy = userId || null;
+    } else {
+      template = this.templateRepository.create({
+        organizationId,
+        templateType: type,
+        templateName: defaultName,
+        content: defaultContent,
+        isActive: true,
+        createdBy: userId || null,
+      });
+    }
+
+    return this.templateRepository.save(template);
+  }
+
+  calculateExperience(
+    joiningDate?: Date | string | null,
+    lastWorkingDate?: Date | string | null,
+  ) {
+    if (!joiningDate) {
+      return {
+        experienceDuration: '',
+        experienceYears: '',
+        experienceMonths: '',
+        experienceDays: '',
+        experience: '',
+      };
+    }
+
+    const start = DateTime.fromJSDate(new Date(joiningDate));
+    const end = lastWorkingDate
+      ? DateTime.fromJSDate(new Date(lastWorkingDate))
+      : DateTime.now();
+
+    if (!start.isValid || !end.isValid || end < start) {
+      return {
+        experienceDuration: '',
+        experienceYears: '',
+        experienceMonths: '',
+        experienceDays: '',
+        experience: '',
+      };
+    }
+
+    const diff = end.diff(start, ['years', 'months', 'days']).toObject();
+    const years = Math.max(0, Math.floor(diff.years || 0));
+    const months = Math.max(0, Math.floor(diff.months || 0));
+    const days = Math.max(0, Math.floor(diff.days || 0));
+
+    const parts: string[] = [];
+    if (years > 0) parts.push(`${years} ${years === 1 ? 'Year' : 'Years'}`);
+    if (months > 0) parts.push(`${months} ${months === 1 ? 'Month' : 'Months'}`);
+    if (days > 0 || parts.length === 0)
+      parts.push(`${days} ${days === 1 ? 'Day' : 'Days'}`);
+
+    const duration = parts.join(' ');
+
+    return {
+      experienceDuration: duration,
+      experience: duration,
+      experienceYears: years > 0 ? `${years} ${years === 1 ? 'Year' : 'Years'}` : '',
+      experienceMonths: months > 0 ? `${months} ${months === 1 ? 'Month' : 'Months'}` : '',
+      experienceDays: days > 0 ? `${days} ${days === 1 ? 'Day' : 'Days'}` : '',
+    };
+  }
+
+  resolveTemplateVariables(
+    content: string,
+    employee: any,
+    org: any,
+    orgSettings: any,
+    settlementData?: any,
+  ): string {
+    const s = settlementData?.settlement || {};
+    const formatNullableCurrency = (val: any) => {
+      if (val === null || val === undefined || val === '') return '';
+      const num = Number(val);
+      if (isNaN(num)) return '';
+      return '₹ ' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const formatDate = (val: any) => {
+      if (!val) return '';
+      try {
+        return DateTime.fromJSDate(new Date(val)).toFormat('dd LLL yyyy');
+      } catch (e) {
+        return String(val);
+      }
+    };
+
+    const lastWorkDate = s.lastWorkingDate || employee.dateOfExit || null;
+    const exp = this.calculateExperience(employee.dateOfJoining, lastWorkDate);
+
+    const managerName = employee.manager
+      ? `${employee.manager.firstName} ${employee.manager.lastName || ''}`.trim()
+      : '';
+
+    const orgName = org?.organizationName || 'Avinya HRMS Organization';
+    const orgAddress = org?.address || (orgSettings as any)?.address || '';
+    const orgPhone = org?.phone || '';
+    const orgEmail = org?.email || org?.hrMail || '';
+    const orgLogo = org?.logoUrl || '';
+
+    const variables: Record<string, string> = {
+      // Employee variables
+      '{{employee_name}}': `${employee.firstName} ${employee.lastName || ''}`.trim(),
+      '{{employee_id}}': employee.employeeCode || '',
+      '{{employee_code}}': employee.employeeCode || '',
+      '{{designation}}': employee.designation?.name || '',
+      '{{department}}': employee.department?.name || '',
+      '{{email}}': employee.workEmail || employee.personalEmail || employee.user?.email || '',
+      '{{phone}}': employee.contactNumber || employee.user?.mobileNumber || '',
+      '{{joining_date}}': formatDate(employee.dateOfJoining),
+      '{{last_working_date}}': formatDate(lastWorkDate),
+      '{{resignation_date}}': formatDate(s.resignationDate),
+      '{{reporting_manager}}': managerName,
+      '{{primary_manager}}': managerName,
+
+      // Experience variables
+      '{{experience}}': exp.experience,
+      '{{experience_duration}}': exp.experienceDuration,
+      '{{experience_years}}': exp.experienceYears,
+      '{{experience_months}}': exp.experienceMonths,
+      '{{experience_days}}': exp.experienceDays,
+
+      // Organization variables
+      '{{organization_name}}': orgName,
+      '{{organization_address}}': orgAddress,
+      '{{organization_phone}}': orgPhone,
+      '{{organization_email}}': orgEmail,
+      '{{organization_logo}}': orgLogo ? `<img src="${orgLogo}" alt="${orgName}" style="max-height:50px;" />` : '',
+
+      // Settlement variables
+      '{{salary_due}}': formatNullableCurrency(s.salaryDue),
+      '{{pending_salary}}': formatNullableCurrency(s.pendingSalary),
+      '{{leave_encashment}}': formatNullableCurrency(s.leaveEncashmentAmount),
+      '{{bonus}}': formatNullableCurrency(s.bonusAmount),
+      '{{performance_incentive}}': formatNullableCurrency(s.incentiveAmount),
+      '{{other_payables}}': formatNullableCurrency(s.otherPayableAmount),
+      '{{total_earnings}}': formatNullableCurrency(s.totalEarnings),
+      '{{notice_period_recovery}}': formatNullableCurrency(s.noticePeriodRecoveryAmount),
+      '{{loan_recovery}}': formatNullableCurrency(s.loanRecoveryAmount),
+      '{{asset_deduction}}': formatNullableCurrency(s.assetDeductionAmount),
+      '{{other_deductions}}': formatNullableCurrency(s.otherDeductionsAmount),
+      '{{total_deductions}}': formatNullableCurrency(s.totalDeductions),
+      '{{final_settlement_amount}}': formatNullableCurrency(s.finalSettlementAmount ?? s.netSettlementAmount),
+
+      // Date variables
+      '{{current_date}}': DateTime.now().toFormat('dd LLL yyyy'),
+      '{{generation_date}}': DateTime.now().toFormat('dd LLL yyyy'),
+    };
+
+    let result = content;
+    for (const [key, value] of Object.entries(variables)) {
+      const regex = new RegExp(key.replace(/([{}])/g, '\\$1'), 'g');
+      result = result.replace(regex, value);
+    }
+
+    return result;
+  }
+
+  async previewLetter(
+    organizationId: string,
+    employeeId: string,
+    dto: PreviewLetterDto,
+  ) {
+    const [employee, org, orgSettings, settlementData] = await Promise.all([
+      this.employeeRepository.findOne({
+        where: { id: employeeId, organizationId },
+        relations: ['department', 'designation', 'manager'],
+      }),
+      this.organizationRepository.findOne({ where: { id: organizationId } }),
+      this.orgSettingsRepository.findOne({ where: { organizationId } }),
+      this.getEmployeeSettlement(organizationId, employeeId),
+    ]);
+
+    if (!employee) throw new NotFoundException('Employee not found');
+
+    let rawContent = dto.customContent;
+    let templateName = '';
+
+    if (!rawContent) {
+      let template: EmployeeDocumentTemplate | null = null;
+      if (dto.templateId) {
+        template = await this.templateRepository.findOne({
+          where: { id: dto.templateId, organizationId },
+        });
+      }
+      if (!template) {
+        template = await this.getDocumentTemplateByType(
+          organizationId,
+          dto.templateType,
+        );
+      }
+      rawContent = template?.content || this.getDefaultTemplateContent(dto.templateType);
+      templateName = template?.templateName || '';
+    }
+
+    const renderedHtml = this.resolveTemplateVariables(
+      rawContent,
+      employee,
+      org,
+      orgSettings,
+      settlementData,
+    );
+
+    const exp = this.calculateExperience(
+      employee.dateOfJoining,
+      settlementData?.settlement?.lastWorkingDate || employee.dateOfExit,
+    );
+
+    return {
+      templateType: dto.templateType,
+      templateName,
+      renderedHtml,
+      employee: {
+        id: employee.id,
+        name: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+        employeeCode: employee.employeeCode,
+        designation: employee.designation?.name || '',
+        department: employee.department?.name || '',
+        dateOfJoining: employee.dateOfJoining,
+        lastWorkingDate:
+          settlementData?.settlement?.lastWorkingDate || employee.dateOfExit || null,
+        experienceDuration: exp.experienceDuration,
+      },
+      organization: {
+        name: org?.organizationName || 'Avinya HRMS Organization',
+        address: org?.address || (orgSettings as any)?.address || '',
+        logoUrl: org?.logoUrl || '',
+      },
+    };
+  }
+
+  async generateLetterPdf(
+    organizationId: string,
+    employeeId: string,
+    type: DocumentTemplateType,
+    customContent?: string,
+  ): Promise<Buffer> {
+    const preview = await this.previewLetter(organizationId, employeeId, {
+      templateType: type,
+      customContent,
+    });
+
+    const org = preview.organization;
+    const emp = preview.employee;
+
+    const fullHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${type === DocumentTemplateType.EXPERIENCE_LETTER ? 'Experience Certificate' : 'Relieving Letter'} - ${emp.name}</title>
+        <style>
+          @page {
+            size: A4;
+            margin: 20mm 18mm 20mm 18mm;
+          }
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+            font-size: 12.5px;
+            line-height: 1.65;
+          }
+          .letterhead {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 14px;
+            margin-bottom: 26px;
+          }
+          .org-info h1 {
+            margin: 0 0 4px 0;
+            font-size: 19px;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .org-info p {
+            margin: 0;
+            color: #64748b;
+            font-size: 10.5px;
+            line-height: 1.4;
+          }
+          .org-logo {
+            max-height: 60px;
+            max-width: 150px;
+            object-fit: contain;
+          }
+          .letter-content {
+            min-height: 480px;
+            font-size: 12.5px;
+            color: #1e293b;
+          }
+          .letter-content p {
+            margin-bottom: 12px;
+          }
+          .letter-content ul {
+            margin: 10px 0 16px 20px;
+            padding: 0;
+          }
+          .letter-content li {
+            margin-bottom: 4px;
+          }
+          .signatures-container {
+            margin-top: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+          }
+          .signature-block {
+            font-size: 11px;
+            line-height: 1.5;
+          }
+          .signature-line {
+            width: 180px;
+            border-bottom: 1px solid #94a3b8;
+            margin-bottom: 8px;
+            height: 40px;
+          }
+          .stamp-box {
+            width: 130px;
+            height: 85px;
+            border: 2px dashed #94a3b8;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+          .footer-note {
+            margin-top: 40px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+            font-size: 9px;
+            color: #94a3b8;
+            text-align: center;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="letterhead">
+          <div class="org-info">
+            <h1>${org.name}</h1>
+            ${org.address ? `<p>${org.address}</p>` : ''}
+          </div>
+          ${org.logoUrl ? `<img src="${org.logoUrl}" class="org-logo" alt="Logo" />` : ''}
+        </div>
+
+        <div class="letter-content">
+          ${preview.renderedHtml}
+        </div>
+
+        <div class="signatures-container">
+          <div class="signature-block">
+            <div class="signature-line"></div>
+            <strong>Authorized Signatory</strong><br/>
+            ${org.name}
+          </div>
+          <div class="stamp-box">
+            OFFICIAL STAMP
+          </div>
+        </div>
+
+        <div class="footer-note">
+          This document is system-generated on ${DateTime.now().toFormat('dd LLL yyyy')} by ${org.name}.
+        </div>
+      </body>
+      </html>
+    `;
+
+    let browser: puppeteer.Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      await page.setContent(fullHtml, {
+        waitUntil: 'domcontentloaded',
+        timeout: 25000,
+      });
+      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      return Buffer.from(pdf);
+    } catch (error) {
+      console.error(`Failed to generate ${type} PDF:`, error);
       throw error;
     } finally {
       if (browser) await browser.close();

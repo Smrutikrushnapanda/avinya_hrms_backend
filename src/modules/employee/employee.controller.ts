@@ -25,6 +25,12 @@ import {
 } from './dto/employee-asset.dto';
 import { CreateEmployeeDocumentDto } from './dto/employee-document.dto';
 import {
+  CreateDocumentTemplateDto,
+  UpdateDocumentTemplateDto,
+  PreviewLetterDto,
+} from './dto/employee-document-template.dto';
+import { DocumentTemplateType } from './entities/employee-document-template.entity';
+import {
   SaveSettlementDto,
   AssignManagerDto,
 } from './dto/employee-settlement.dto';
@@ -213,6 +219,72 @@ export class EmployeeController {
       designationId,
       limit: limit ? Number(limit) : 50,
     });
+  }
+
+  // --- DOCUMENT TEMPLATES ---
+  @Get('document-templates')
+  @ApiOperation({ summary: 'Get all document templates for organization' })
+  async getDocumentTemplates(@GetUser() actor: User) {
+    return this.employeeService.getDocumentTemplates(actor.organizationId);
+  }
+
+  @Get('document-templates/:type')
+  @ApiOperation({ summary: 'Get document template by type for organization' })
+  async getDocumentTemplateByType(
+    @Param('type') type: DocumentTemplateType,
+    @GetUser() actor: User,
+  ) {
+    return this.employeeService.getDocumentTemplateByType(
+      actor.organizationId,
+      type,
+    );
+  }
+
+  @Post('document-templates')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Create or save document template' })
+  async saveDocumentTemplate(
+    @Body() dto: CreateDocumentTemplateDto,
+    @GetUser() actor: User,
+  ) {
+    return this.employeeService.saveDocumentTemplate(
+      actor.organizationId,
+      dto,
+      actor.id,
+    );
+  }
+
+  @Put('document-templates/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Update document template' })
+  async updateDocumentTemplate(
+    @Param('id') id: string,
+    @Body() dto: UpdateDocumentTemplateDto,
+    @GetUser() actor: User,
+  ) {
+    return this.employeeService.updateDocumentTemplate(
+      actor.organizationId,
+      id,
+      dto,
+      actor.id,
+    );
+  }
+
+  @Post('document-templates/reset-default')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Reset document template to system default' })
+  async resetDocumentTemplate(
+    @Body('templateType') type: DocumentTemplateType,
+    @GetUser() actor: User,
+  ) {
+    return this.employeeService.resetDocumentTemplate(
+      actor.organizationId,
+      type,
+      actor.id,
+    );
   }
 
   // --- PROJECT ASSIGNMENTS & MANAGERS ---
@@ -648,6 +720,52 @@ export class EmployeeController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Settlement-Statement-${employee.employeeCode || employee.id}.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+    return res.end(pdfBuffer);
+  }
+
+  // --- EMPLOYEE LETTERS (EXPERIENCE & RELIEVING) ---
+  @Post(':id/letters/preview')
+  @ApiOperation({ summary: 'Preview experience or relieving letter for employee' })
+  async previewLetter(
+    @Param('id') id: string,
+    @Body() dto: PreviewLetterDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.previewLetter(
+      employee.organizationId,
+      id,
+      dto,
+    );
+  }
+
+  @Get(':id/letters/:type/pdf')
+  @ApiOperation({ summary: 'Download experience or relieving letter PDF for employee' })
+  async downloadLetterPdf(
+    @Param('id') id: string,
+    @Param('type') type: DocumentTemplateType,
+    @Query('customContent') customContent: string,
+    @GetUser() actor: User,
+    @Res() res: any,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    const pdfBuffer = await this.employeeService.generateLetterPdf(
+      employee.organizationId,
+      id,
+      type,
+      customContent,
+    );
+    const docName =
+      type === DocumentTemplateType.EXPERIENCE_LETTER
+        ? 'Experience-Certificate'
+        : 'Relieving-Letter';
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${docName}-${employee.employeeCode || employee.id}.pdf"`,
       'Content-Length': pdfBuffer.length,
     });
     return res.end(pdfBuffer);

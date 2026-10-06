@@ -29,6 +29,7 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
 import { EmployeeAsset } from './entities/employee-asset.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
+import { EmployeeDocumentTemplate } from './entities/employee-document-template.entity';
 import { EmployeeSettlement } from './entities/employee-settlement.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
@@ -62,6 +63,7 @@ import { ClientProjectMember } from '../clients/entities/client-project-member.e
       EmployeeProjectAssignment,
       EmployeeAsset,
       EmployeeDocument,
+      EmployeeDocumentTemplate,
       EmployeeSettlement,
       Organization,
       OrganizationSettings,

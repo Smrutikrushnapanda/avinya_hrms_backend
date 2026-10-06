@@ -54,72 +54,80 @@ export class EmployeeSettlement {
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  salaryDue: number;
+  salaryDue: number | null;
 
   @Column({
     name: 'pending_salary',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  pendingSalary: number;
+  pendingSalary: number | null;
 
   @Column({
     name: 'leave_encashment_days',
     type: 'numeric',
     precision: 5,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  leaveEncashmentDays: number;
+  leaveEncashmentDays: number | null;
 
   @Column({
     name: 'leave_encashment_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  leaveEncashmentAmount: number;
+  leaveEncashmentAmount: number | null;
 
   @Column({
     name: 'bonus_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  bonusAmount: number;
+  bonusAmount: number | null;
 
   @Column({
     name: 'incentive_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  incentiveAmount: number;
+  incentiveAmount: number | null;
 
   @Column({
     name: 'other_payable_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  otherPayableAmount: number;
+  otherPayableAmount: number | null;
 
   @Column({
     name: 'total_earnings',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  totalEarnings: number;
+  totalEarnings: number | null;
 
   // Deductions
   @Column({
@@ -127,36 +135,40 @@ export class EmployeeSettlement {
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  noticePeriodRecoveryAmount: number;
+  noticePeriodRecoveryAmount: number | null;
 
   @Column({
     name: 'loan_recovery_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  loanRecoveryAmount: number;
+  loanRecoveryAmount: number | null;
 
   @Column({
     name: 'asset_deduction_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  assetDeductionAmount: number;
+  assetDeductionAmount: number | null;
 
   @Column({
     name: 'other_deductions_amount',
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  otherDeductionsAmount: number;
+  otherDeductionsAmount: number | null;
 
   @Column({ name: 'deductions_remarks', type: 'text', nullable: true })
   deductionsRemarks: string | null;
@@ -166,9 +178,10 @@ export class EmployeeSettlement {
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  totalDeductions: number;
+  totalDeductions: number | null;
 
   // Net Final Settlement
   @Column({
@@ -176,9 +189,10 @@ export class EmployeeSettlement {
     type: 'numeric',
     precision: 12,
     scale: 2,
-    default: 0,
+    nullable: true,
+    default: null,
   })
-  finalSettlementAmount: number;
+  finalSettlementAmount: number | null;
 
   @Column({
     name: 'status',
