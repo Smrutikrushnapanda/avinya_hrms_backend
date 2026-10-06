@@ -59,6 +59,7 @@ import {
 } from './dto/employee-document-template.dto';
 import { SaveSettlementDto, AssignManagerDto } from './dto/employee-settlement.dto';
 import * as puppeteer from 'puppeteer';
+import * as fs from 'fs';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -282,23 +283,35 @@ export class EmployeeService implements OnModuleInit {
         CREATE INDEX IF NOT EXISTS "idx_emp_doc_templates_org_type" ON "${schema}"."employee_document_templates" ("organization_id", "template_type");
       `);
 
-      // Allow nulls for unconfigured numeric values in employee_settlements
-      await this.employeeRepository.query(`
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "salary_due" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "pending_salary" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_days" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "bonus_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "incentive_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_payable_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_earnings" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "notice_period_recovery_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "loan_recovery_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "asset_deduction_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_deductions_amount" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_deductions" DROP NOT NULL;
-        ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "net_settlement_amount" DROP NOT NULL;
-      `);
+      // Ensure columns and allow nulls for unconfigured numeric values in employee_settlements
+      const settlementAlterQueries = [
+        `ALTER TABLE "${schema}"."employee_settlements" ADD COLUMN IF NOT EXISTS "final_settlement_amount" decimal(12,2) NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ADD COLUMN IF NOT EXISTS "net_settlement_amount" decimal(12,2) NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ADD COLUMN IF NOT EXISTS "gratuity_amount" decimal(12,2) NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "salary_due" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "pending_salary" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_days" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "leave_encashment_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "bonus_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "incentive_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_payable_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_earnings" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "notice_period_recovery_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "loan_recovery_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "asset_deduction_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "other_deductions_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "total_deductions" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "net_settlement_amount" DROP NOT NULL;`,
+        `ALTER TABLE "${schema}"."employee_settlements" ALTER COLUMN "final_settlement_amount" DROP NOT NULL;`,
+      ];
+
+      for (const q of settlementAlterQueries) {
+        try {
+          await this.employeeRepository.query(q);
+        } catch (alterErr) {
+          // ignore already-altered column errors
+        }
+      }
     } catch (e) {
       console.error('Failed to initialize schema extensions:', e);
     }
@@ -2773,11 +2786,16 @@ export class EmployeeService implements OnModuleInit {
 
     settlement.resignationRequestId = dto.resignationRequestId || null;
     if (dto.resignationDate !== undefined)
-      settlement.resignationDate = dto.resignationDate || null;
+      settlement.resignationDate = dto.resignationDate ? String(dto.resignationDate).slice(0, 10) : null;
     if (dto.noticePeriodDays !== undefined)
-      settlement.noticePeriodDays = dto.noticePeriodDays !== null && dto.noticePeriodDays !== undefined ? Number(dto.noticePeriodDays) : 0;
+      settlement.noticePeriodDays =
+        dto.noticePeriodDays !== null &&
+        dto.noticePeriodDays !== undefined &&
+        (dto.noticePeriodDays as any) !== ''
+          ? Number(dto.noticePeriodDays)
+          : 0;
     if (dto.lastWorkingDate !== undefined)
-      settlement.lastWorkingDate = dto.lastWorkingDate || null;
+      settlement.lastWorkingDate = dto.lastWorkingDate ? String(dto.lastWorkingDate).slice(0, 10) : null;
     if (dto.reasonForLeaving !== undefined)
       settlement.reasonForLeaving = dto.reasonForLeaving || null;
 
@@ -2830,21 +2848,141 @@ export class EmployeeService implements OnModuleInit {
     } else {
       settlement.finalSettlementAmount = null;
     }
+    settlement.netSettlementAmount = settlement.finalSettlementAmount;
 
     settlement.deductionsRemarks = dto.deductionsRemarks || null;
 
-    if (dto.status) settlement.status = dto.status;
+    if (dto.status) settlement.status = dto.status as SettlementStatus;
     if (dto.preparedBy !== undefined) settlement.preparedBy = dto.preparedBy || null;
     if (dto.hrApprovalName !== undefined) settlement.hrApprovalName = dto.hrApprovalName || null;
     if (dto.financeApprovalName !== undefined)
       settlement.financeApprovalName = dto.financeApprovalName || null;
-    if (dto.approvalDate !== undefined) settlement.approvalDate = dto.approvalDate || null;
+    if (dto.approvalDate !== undefined)
+      settlement.approvalDate = dto.approvalDate ? String(dto.approvalDate).slice(0, 10) : null;
     if (dto.employeeDeclarationAcknowledged !== undefined)
       settlement.employeeDeclarationAcknowledged =
-        dto.employeeDeclarationAcknowledged;
+        Boolean(dto.employeeDeclarationAcknowledged);
     if (dto.remarks !== undefined) settlement.remarks = dto.remarks || null;
 
     return this.settlementRepository.save(settlement);
+  }
+
+  private async launchPuppeteerBrowser(): Promise<puppeteer.Browser> {
+    const candidatePaths = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/snap/bin/chromium',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    ].filter((p): p is string => !!p && fs.existsSync(p));
+
+    const executablePath = candidatePaths.length > 0 ? candidatePaths[0] : undefined;
+
+    const args = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+    ];
+
+    return puppeteer.launch({
+      headless: true,
+      executablePath,
+      args,
+    });
+  }
+
+  private stripHtmlToLines(html: string): string[] {
+    return html
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*[\/]?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/h[1-6]>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<\/tr>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  }
+
+  private createFallbackPdfBuffer(
+    title: string,
+    sections: { title?: string; lines: string[] }[],
+  ): Buffer {
+    const streamContent: string[] = [];
+    let y = 780;
+
+    const cleanTitle = title.replace(/[\(\)\\]/g, '\\$&');
+    streamContent.push(`BT /F1 15 Tf 50 ${y} Td (${cleanTitle}) Tj ET`);
+    y -= 25;
+
+    streamContent.push(`0.5 w 50 ${y} m 545 ${y} l S`);
+    y -= 20;
+
+    for (const sec of sections) {
+      if (y < 80) break;
+      if (sec.title) {
+        const secTitle = sec.title.replace(/[\(\)\\]/g, '\\$&');
+        streamContent.push(`BT /F1 11 Tf 50 ${y} Td (${secTitle}) Tj ET`);
+        y -= 16;
+      }
+      for (const line of sec.lines) {
+        if (y < 80) break;
+        const escaped = line.replace(/[\(\)\\]/g, '\\$&');
+        streamContent.push(`BT /F2 9.5 Tf 50 ${y} Td (${escaped}) Tj ET`);
+        y -= 14;
+      }
+      y -= 10;
+    }
+
+    const streamData = streamContent.join('\n');
+    const streamLength = Buffer.byteLength(streamData);
+
+    const objects: string[] = [];
+    objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj');
+    objects.push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj');
+    objects.push(
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj',
+    );
+    objects.push(
+      `4 0 obj\n<< /Length ${streamLength} >>\nstream\n${streamData}\nendstream\nendobj`,
+    );
+    objects.push(
+      '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj',
+    );
+    objects.push(
+      '6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj',
+    );
+
+    let pdf = '%PDF-1.4\n';
+    const xrefOffsets: number[] = [0];
+
+    for (const obj of objects) {
+      xrefOffsets.push(Buffer.byteLength(pdf));
+      pdf += obj + '\n';
+    }
+
+    const startXref = Buffer.byteLength(pdf);
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let i = 1; i <= objects.length; i++) {
+      pdf += `${String(xrefOffsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF`;
+
+    return Buffer.from(pdf, 'utf-8');
   }
 
   async generateSettlementPdf(
@@ -3281,10 +3419,7 @@ export class EmployeeService implements OnModuleInit {
 
     let browser: puppeteer.Browser | null = null;
     try {
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      browser = await this.launchPuppeteerBrowser();
       const page = await browser.newPage();
       await page.setContent(html, {
         waitUntil: 'domcontentloaded',
@@ -3293,10 +3428,40 @@ export class EmployeeService implements OnModuleInit {
       const pdf = await page.pdf({ format: 'A4', printBackground: true });
       return Buffer.from(pdf);
     } catch (error) {
-      console.error('Failed to generate full settlement PDF:', error);
-      throw error;
+      console.error('Failed to generate full settlement PDF via Puppeteer, falling back to native PDF:', error);
+      const sections = [
+        {
+          title: 'Employee Information',
+          lines: [
+            `Employee Name: ${employee.firstName} ${employee.lastName || ''}`,
+            `Employee ID: ${employee.employeeCode || ''}`,
+            `Designation: ${employee.designation?.name || ''}`,
+            `Department: ${employee.department?.name || ''}`,
+            `Date of Joining: ${formatNullableDate(employee.dateOfJoining)}`,
+            `Last Working Date: ${formatNullableDate(s.lastWorkingDate)}`,
+          ],
+        },
+        {
+          title: 'Settlement Dues & Deductions',
+          lines: [
+            `Total Gross Earnings: ${formatNullableCurrency(s.totalEarnings)}`,
+            `Total Deductions: ${formatNullableCurrency(s.totalDeductions)}`,
+            `Net Settlement Amount: ${formatNullableCurrency(s.finalSettlementAmount ?? s.netSettlementAmount)}`,
+            `Settlement Status: ${s.status || 'DRAFT'}`,
+            `Clearance Status: ${clearanceLabel}`,
+          ],
+        },
+      ];
+      return this.createFallbackPdfBuffer(
+        `FULL & FINAL SETTLEMENT - ${orgName.toUpperCase()}`,
+        sections,
+      );
     } finally {
-      if (browser) await browser.close();
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (_) {}
+      }
     }
   }
 
@@ -3855,10 +4020,7 @@ export class EmployeeService implements OnModuleInit {
 
     let browser: puppeteer.Browser | null = null;
     try {
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      browser = await this.launchPuppeteerBrowser();
       const page = await browser.newPage();
       await page.setContent(fullHtml, {
         waitUntil: 'domcontentloaded',
@@ -3867,10 +4029,21 @@ export class EmployeeService implements OnModuleInit {
       const pdf = await page.pdf({ format: 'A4', printBackground: true });
       return Buffer.from(pdf);
     } catch (error) {
-      console.error(`Failed to generate ${type} PDF:`, error);
-      throw error;
+      console.error(`Failed to generate ${type} PDF via Puppeteer, falling back to native PDF:`, error);
+      const docTitle =
+        type === DocumentTemplateType.EXPERIENCE_LETTER
+          ? 'EXPERIENCE CERTIFICATE'
+          : 'RELIEVING LETTER';
+      const lines = this.stripHtmlToLines(preview.renderedHtml);
+      return this.createFallbackPdfBuffer(`${org.name} - ${docTitle}`, [
+        { lines },
+      ]);
     } finally {
-      if (browser) await browser.close();
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (_) {}
+      }
     }
   }
 

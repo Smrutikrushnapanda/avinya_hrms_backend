@@ -1,114 +1,137 @@
 import {
   IsBoolean,
   IsDateString,
-  IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
 } from 'class-validator';
-import { SettlementStatus } from '../entities/employee-settlement.entity';
 
 export class SaveSettlementDto {
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsString()
-  @IsOptional()
-  resignationRequestId?: string;
+  resignationRequestId?: string | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsDateString()
-  @IsOptional()
-  resignationDate?: string;
+  resignationDate?: string | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsNumber()
-  @IsOptional()
   @Min(0)
-  noticePeriodDays?: number;
+  noticePeriodDays?: number | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsDateString()
-  @IsOptional()
-  lastWorkingDate?: string;
+  lastWorkingDate?: string | null;
 
-  @IsString()
   @IsOptional()
-  reasonForLeaving?: string;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsString()
+  reasonForLeaving?: string | null;
 
   // Earnings
-  @IsNumber()
   @IsOptional()
-  salaryDue?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  salaryDue?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  pendingSalary?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  pendingSalary?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  leaveEncashmentDays?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  leaveEncashmentDays?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  leaveEncashmentAmount?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  leaveEncashmentAmount?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  bonusAmount?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  bonusAmount?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  incentiveAmount?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  incentiveAmount?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  otherPayableAmount?: number;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsNumber()
+  otherPayableAmount?: number | null;
 
   // Deductions
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsNumber()
-  @IsOptional()
-  noticePeriodRecoveryAmount?: number;
+  noticePeriodRecoveryAmount?: number | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsNumber()
-  @IsOptional()
-  loanRecoveryAmount?: number;
+  loanRecoveryAmount?: number | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsNumber()
-  @IsOptional()
-  assetDeductionAmount?: number;
+  assetDeductionAmount?: number | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsNumber()
-  @IsOptional()
-  otherDeductionsAmount?: number;
+  otherDeductionsAmount?: number | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsString()
-  @IsOptional()
-  deductionsRemarks?: string;
+  deductionsRemarks?: string | null;
 
-  @IsEnum(SettlementStatus)
   @IsOptional()
-  status?: SettlementStatus;
-
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsString()
-  @IsOptional()
-  preparedBy?: string;
+  status?: string;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsString()
-  @IsOptional()
-  hrApprovalName?: string;
+  preparedBy?: string | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsString()
-  @IsOptional()
-  financeApprovalName?: string;
+  hrApprovalName?: string | null;
 
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsString()
+  financeApprovalName?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
   @IsDateString()
-  @IsOptional()
-  approvalDate?: string;
+  approvalDate?: string | null;
 
-  @IsBoolean()
   @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined)
+  @IsBoolean()
   employeeDeclarationAcknowledged?: boolean;
 
-  @IsString()
   @IsOptional()
-  remarks?: string;
+  @ValidateIf((_, val) => val !== null && val !== undefined && val !== '')
+  @IsString()
+  remarks?: string | null;
 }
 
 export class AssignManagerDto {

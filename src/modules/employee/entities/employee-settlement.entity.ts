@@ -14,9 +14,11 @@ import { ResignationRequest } from 'src/modules/resignation/entities/resignation
 
 export enum SettlementStatus {
   DRAFT = 'DRAFT',
+  UNDER_REVIEW = 'UNDER_REVIEW',
   SUBMITTED = 'SUBMITTED',
   FINALIZED = 'FINALIZED',
   APPROVED = 'APPROVED',
+  PAID = 'PAID',
   PROCESSED = 'PROCESSED',
   LOCKED = 'LOCKED',
 }
@@ -193,6 +195,16 @@ export class EmployeeSettlement {
     default: null,
   })
   finalSettlementAmount: number | null;
+
+  @Column({
+    name: 'net_settlement_amount',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+    default: null,
+  })
+  netSettlementAmount: number | null;
 
   @Column({
     name: 'status',
