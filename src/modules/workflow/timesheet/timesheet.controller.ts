@@ -3,6 +3,7 @@ import {
   Controller,
   DefaultValuePipe,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   ParseIntPipe,
@@ -39,11 +40,31 @@ function isAdminOrHr(user: JwtPayload): boolean {
 export class TimesheetController {
   constructor(private readonly timesheetService: TimesheetService) {}
 
+  @Get('current-week')
+  @ApiOperation({
+    summary: 'Get active weekly timesheet metadata and Saturday deadline',
+  })
+  async getCurrentWeek(@GetUser() user: JwtPayload) {
+    return this.timesheetService.getCurrentWeek(user.organizationId);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a single timesheet work-log entry' })
   @ApiBadRequestResponse({ description: 'Invalid timesheet payload' })
-  create(@Body() dto: CreateTimesheetDto, @GetUser() user: JwtPayload) {
+  async create(@Body() dto: CreateTimesheetDto, @GetUser() user: JwtPayload) {
     dto.organizationId = user.organizationId;
+    const actingEmpId = await this.timesheetService.resolveEmployeeId(
+      user.userId,
+      user.organizationId,
+    );
+    if (!isAdminOrHr(user) && dto.employeeId && dto.employeeId !== actingEmpId) {
+      throw new ForbiddenException(
+        'You can only create timesheets for yourself',
+      );
+    }
+    if (!dto.employeeId) {
+      dto.employeeId = actingEmpId;
+    }
     return this.timesheetService.createTimesheet(dto);
   }
 
@@ -54,11 +75,23 @@ export class TimesheetController {
   @ApiBadRequestResponse({
     description: 'Invalid timesheet payload or overlapping entries',
   })
-  createBatch(
+  async createBatch(
     @Body() dto: CreateTimesheetBatchDto,
     @GetUser() user: JwtPayload,
   ) {
     dto.organizationId = user.organizationId;
+    const actingEmpId = await this.timesheetService.resolveEmployeeId(
+      user.userId,
+      user.organizationId,
+    );
+    if (!isAdminOrHr(user) && dto.employeeId && dto.employeeId !== actingEmpId) {
+      throw new ForbiddenException(
+        'You can only create timesheets for yourself',
+      );
+    }
+    if (!dto.employeeId) {
+      dto.employeeId = actingEmpId;
+    }
     return this.timesheetService.createTimesheetBatch(dto);
   }
 

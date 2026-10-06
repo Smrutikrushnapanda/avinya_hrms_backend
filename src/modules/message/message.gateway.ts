@@ -14,25 +14,14 @@ import { ChatConversation } from '../chat/entities/chat-conversation.entity';
 
 @WebSocketGateway({
   cors: {
-    origin: (
-      origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      if (
-        !origin ||
-        [
-          'https://avinyahrms.duckdns.org',
-          'http://avinyahrms.duckdns.org',
-          'https://avinya-hrms.vercel.app',
-          'http://localhost:3000',
-          'http://127.0.0.1:3000',
-        ].includes(origin)
-      ) {
-        callback(null, true);
-      } else {
-        callback(null, false);
-      }
-    },
+    origin: [
+      'https://avinyahrms.duckdns.org',
+      'http://avinyahrms.duckdns.org',
+      'https://avinya-hrms.vercel.app',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+    ],
+    methods: ['GET', 'POST'],
     credentials: true,
   },
 })

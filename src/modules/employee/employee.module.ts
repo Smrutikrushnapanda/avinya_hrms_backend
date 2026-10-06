@@ -27,6 +27,13 @@ import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 
 import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
+import { EmployeeAsset } from './entities/employee-asset.entity';
+import { EmployeeDocument } from './entities/employee-document.entity';
+import { EmployeeSettlement } from './entities/employee-settlement.entity';
+import { Organization } from '../auth-core/entities/organization.entity';
+import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
+import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
+import { LeaveBalance } from '../leave/entities/leave-balance.entity';
 import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
 import { ProjectMember } from '../project/entities/project-member.entity';
@@ -53,6 +60,13 @@ import { ClientProjectMember } from '../clients/entities/client-project-member.e
       Timesheet,
       Timeslip,
       EmployeeProjectAssignment,
+      EmployeeAsset,
+      EmployeeDocument,
+      EmployeeSettlement,
+      Organization,
+      OrganizationSettings,
+      SalaryStructure,
+      LeaveBalance,
       Project,
       ClientProject,
       ProjectMember,

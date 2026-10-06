@@ -86,24 +86,81 @@ export class TimesheetService {
     return employee.id;
   }
 
-  private async assertDateWithinRange(dateStr: string, organizationId: string) {
+  async getActiveWeekInfo(organizationId: string) {
+    const tz =
+      await this.timezoneService.getOrganizationTimezone(organizationId);
+    const now = await this.timezoneService.getNow(organizationId);
+    const weekday = now.weekday; // 1 = Monday ... 6 = Saturday, 7 = Sunday
+    const todayStr = now.toFormat('yyyy-MM-dd');
+
+    let activeMondayDt = now.minus({ days: weekday - 1 }).startOf('day');
+    let activeSaturdayDt = now.plus({ days: 6 - weekday }).endOf('day');
+
+    if (weekday === 7) {
+      // Sunday is the transition/reset day: previous week (ended Saturday) is closed.
+      // Active week is the upcoming Monday through Saturday.
+      activeMondayDt = now.plus({ days: 1 }).startOf('day');
+      activeSaturdayDt = now.plus({ days: 6 }).endOf('day');
+    }
+
+    const activeMonday = activeMondayDt.toFormat('yyyy-MM-dd');
+    const activeSaturday = activeSaturdayDt.toFormat('yyyy-MM-dd');
+
+    return {
+      activeMonday,
+      activeSaturday,
+      saturdayDeadline: activeSaturdayDt,
+      todayStr,
+      isSaturday: weekday === 6,
+      timezone: tz,
+    };
+  }
+
+  async getCurrentWeek(organizationId: string) {
+    const info = await this.getActiveWeekInfo(organizationId);
+    const now = await this.timezoneService.getNow(organizationId);
+    return {
+      activeMonday: info.activeMonday,
+      activeSaturday: info.activeSaturday,
+      today: info.todayStr,
+      isSaturday: info.isSaturday,
+      saturdayDeadlineUtc: info.saturdayDeadline.toUTC().toISO(),
+      serverTimeUtc: now.toUTC().toISO(),
+      timezone: info.timezone,
+    };
+  }
+
+  async assertEditableDate(
+    dateStr: string,
+    organizationId: string,
+  ): Promise<void> {
     const dateOnly = this.parseDateOnly(dateStr);
+    const formattedDate = this.formatDateLocal(dateOnly);
 
-    const today = new Date(
-      `${await this.timezoneService.getToday(organizationId)}T00:00:00Z`,
-    );
-    today.setUTCHours(0, 0, 0, 0);
+    const activeWeek = await this.getActiveWeekInfo(organizationId);
+    const now = await this.timezoneService.getNow(organizationId);
 
-    const diffMs = today.getTime() - dateOnly.getTime();
-    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+    // 1. Date belongs to a previous / closed week
+    if (formattedDate < activeWeek.activeMonday) {
+      throw new ForbiddenException(
+        'Timesheet editing is closed for this week. The deadline was Saturday.',
+      );
+    }
 
-    if (dateOnly.getTime() > today.getTime()) {
+    // 2. Date belongs to a future week
+    if (formattedDate > activeWeek.activeSaturday) {
       throw new BadRequestException('Timesheet date cannot be in the future');
     }
 
-    if (diffDays > this.maxBackdatedDays) {
-      throw new BadRequestException(
-        `Timesheet date can only be backdated up to ${this.maxBackdatedDays} days`,
+    // 3. Date is in the future relative to today
+    if (formattedDate > activeWeek.todayStr) {
+      throw new BadRequestException('Timesheet date cannot be in the future');
+    }
+
+    // 4. Current time has passed the Saturday deadline
+    if (now > activeWeek.saturdayDeadline) {
+      throw new ForbiddenException(
+        'Timesheet editing is closed for this week. The deadline was Saturday.',
       );
     }
   }
@@ -191,7 +248,7 @@ export class TimesheetService {
   }
 
   async createTimesheet(dto: CreateTimesheetDto) {
-    await this.assertDateWithinRange(dto.date, dto.organizationId);
+    await this.assertEditableDate(dto.date, dto.organizationId);
 
     const employee = await this.employeeRepo.findOne({
       where: { id: dto.employeeId, organizationId: dto.organizationId },
@@ -229,7 +286,7 @@ export class TimesheetService {
   }
 
   async createTimesheetBatch(dto: CreateTimesheetBatchDto) {
-    await this.assertDateWithinRange(dto.date, dto.organizationId);
+    await this.assertEditableDate(dto.date, dto.organizationId);
 
     const employee = await this.employeeRepo.findOne({
       where: { id: dto.employeeId, organizationId: dto.organizationId },
@@ -314,12 +371,7 @@ export class TimesheetService {
         'You can only edit your own timesheet entries',
       );
     }
-    const entryOrgToday = await this.today(entry.organizationId);
-    if (entry.date !== entryOrgToday) {
-      throw new ForbiddenException(
-        "Only today's timesheet entries can be edited",
-      );
-    }
+    await this.assertEditableDate(entry.date, entry.organizationId);
 
     const start = dto.startTime ? new Date(dto.startTime) : entry.startTime;
     const end = dto.endTime ? new Date(dto.endTime) : entry.endTime;
@@ -367,12 +419,7 @@ export class TimesheetService {
         'You can only delete your own timesheet entries',
       );
     }
-    const entryOrgToday = await this.today(entry.organizationId);
-    if (entry.date !== entryOrgToday) {
-      throw new ForbiddenException(
-        "Only today's timesheet entries can be deleted",
-      );
-    }
+    await this.assertEditableDate(entry.date, entry.organizationId);
 
     await this.timesheetRepo.remove(entry);
     return { success: true };

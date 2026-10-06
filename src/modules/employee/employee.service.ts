@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Inject,
   OnModuleInit,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -38,6 +39,17 @@ import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
 import { ProjectMember } from '../project/entities/project-member.entity';
 import { ClientProjectMember } from '../clients/entities/client-project-member.entity';
+import { EmployeeAsset, AssetStatus } from './entities/employee-asset.entity';
+import { EmployeeDocument } from './entities/employee-document.entity';
+import { EmployeeSettlement, SettlementStatus } from './entities/employee-settlement.entity';
+import { Organization } from '../auth-core/entities/organization.entity';
+import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
+import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
+import { LeaveBalance } from '../leave/entities/leave-balance.entity';
+import { CreateEmployeeAssetDto, UpdateEmployeeAssetDto, ReturnAssetDto } from './dto/employee-asset.dto';
+import { CreateEmployeeDocumentDto } from './dto/employee-document.dto';
+import { SaveSettlementDto, AssignManagerDto } from './dto/employee-settlement.dto';
+import * as puppeteer from 'puppeteer';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -97,6 +109,27 @@ export class EmployeeService implements OnModuleInit {
     @InjectRepository(ClientProjectMember)
     private readonly clientProjectMemberRepository: Repository<ClientProjectMember>,
 
+    @InjectRepository(EmployeeAsset)
+    private readonly assetRepository: Repository<EmployeeAsset>,
+
+    @InjectRepository(EmployeeDocument)
+    private readonly documentRepository: Repository<EmployeeDocument>,
+
+    @InjectRepository(EmployeeSettlement)
+    private readonly settlementRepository: Repository<EmployeeSettlement>,
+
+    @InjectRepository(Organization)
+    private readonly organizationRepository: Repository<Organization>,
+
+    @InjectRepository(OrganizationSettings)
+    private readonly orgSettingsRepository: Repository<OrganizationSettings>,
+
+    @InjectRepository(SalaryStructure)
+    private readonly salaryStructureRepository: Repository<SalaryStructure>,
+
+    @InjectRepository(LeaveBalance)
+    private readonly leaveBalanceRepository: Repository<LeaveBalance>,
+
     @Inject(CACHE_MANAGER)
     private readonly cacheManager: Cache,
 
@@ -122,17 +155,105 @@ export class EmployeeService implements OnModuleInit {
           "project_id" uuid NOT NULL,
           "project_source" varchar(20) NOT NULL DEFAULT 'internal',
           "manager_id" uuid NULL,
+          "manager_type" varchar(20) NOT NULL DEFAULT 'SECONDARY',
           "role" varchar(50) NOT NULL DEFAULT 'member',
           "created_at" timestamptz NOT NULL DEFAULT now(),
           "updated_at" timestamptz NOT NULL DEFAULT now()
-        )
+        );
+      `);
+      await this.employeeRepository.query(`
+        ALTER TABLE "${schema}"."employee_project_assignments"
+        ADD COLUMN IF NOT EXISTS "manager_type" varchar(20) NOT NULL DEFAULT 'SECONDARY';
       `);
       await this.employeeRepository.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS "idx_employee_project_assignments_unique"
-        ON "${schema}"."employee_project_assignments" ("organization_id", "employee_id", "project_id", "project_source")
+        ON "${schema}"."employee_project_assignments" ("organization_id", "employee_id", "project_id", "project_source");
+      `);
+
+      // Employee Assets table
+      await this.employeeRepository.query(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."employee_assets" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "organization_id" uuid NOT NULL,
+          "employee_id" uuid NOT NULL,
+          "asset_type" varchar(100) NOT NULL,
+          "asset_name" varchar(255) NOT NULL,
+          "asset_id" varchar(100) NOT NULL,
+          "serial_number" varchar(100) NULL,
+          "brand" varchar(100) NULL,
+          "model" varchar(100) NULL,
+          "condition" varchar(100) NULL,
+          "issue_date" date NOT NULL,
+          "expected_return_date" date NULL,
+          "actual_return_date" date NULL,
+          "status" varchar(50) NOT NULL DEFAULT 'ASSIGNED',
+          "is_return_required" boolean NOT NULL DEFAULT true,
+          "notes" text NULL,
+          "created_by" uuid NULL,
+          "created_at" timestamptz NOT NULL DEFAULT now(),
+          "updated_at" timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+
+      // Employee Documents table
+      await this.employeeRepository.query(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."employee_documents" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "organization_id" uuid NOT NULL,
+          "employee_id" uuid NOT NULL,
+          "document_name" varchar(255) NOT NULL,
+          "document_category" varchar(100) NOT NULL DEFAULT 'Other',
+          "file_url" text NOT NULL,
+          "file_size" varchar(50) NULL,
+          "mime_type" varchar(100) NULL,
+          "remarks" text NULL,
+          "uploaded_by" uuid NULL,
+          "created_at" timestamptz NOT NULL DEFAULT now(),
+          "updated_at" timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+
+      // Employee Settlements table
+      await this.employeeRepository.query(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."employee_settlements" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "organization_id" uuid NOT NULL,
+          "employee_id" uuid NOT NULL,
+          "resignation_request_id" uuid NULL,
+          "resignation_date" date NULL,
+          "notice_period_days" int NOT NULL DEFAULT 0,
+          "last_working_date" date NULL,
+          "reason_for_leaving" text NULL,
+          "salary_due" decimal(12,2) NOT NULL DEFAULT 0,
+          "pending_salary" decimal(12,2) NOT NULL DEFAULT 0,
+          "leave_encashment_days" decimal(6,2) NOT NULL DEFAULT 0,
+          "leave_encashment_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "bonus_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "incentive_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "gratuity_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "other_payable_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "total_earnings" decimal(12,2) NOT NULL DEFAULT 0,
+          "notice_period_recovery_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "loan_recovery_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "asset_deduction_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "other_deductions_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "total_deductions" decimal(12,2) NOT NULL DEFAULT 0,
+          "net_settlement_amount" decimal(12,2) NOT NULL DEFAULT 0,
+          "deductions_remarks" text NULL,
+          "status" varchar(50) NOT NULL DEFAULT 'DRAFT',
+          "prepared_by" varchar(255) NULL,
+          "hr_approval_name" varchar(255) NULL,
+          "finance_approval_name" varchar(255) NULL,
+          "approval_date" date NULL,
+          "employee_declaration_acknowledged" boolean NOT NULL DEFAULT false,
+          "remarks" text NULL,
+          "created_by" uuid NULL,
+          "created_at" timestamptz NOT NULL DEFAULT now(),
+          "updated_at" timestamptz NOT NULL DEFAULT now()
+        );
       `);
     } catch (e) {
-      console.error('Failed to initialize employee_project_assignments schema:', e);
+      console.error('Failed to initialize schema extensions:', e);
     }
   }
 
@@ -1881,6 +2002,7 @@ export class EmployeeService implements OnModuleInit {
         projectId: a.projectId,
         projectSource: a.projectSource || 'internal',
         managerId: a.managerId,
+        managerType: a.managerType || 'SECONDARY',
         role: a.role || 'member',
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
@@ -1897,47 +2019,1211 @@ export class EmployeeService implements OnModuleInit {
       const empAssignments = assignmentsByEmp.get(emp.id) || [];
       emp.projectAssignments = empAssignments;
 
-      // Build consolidated managers list
-      const managersList: any[] = [];
-      const seenManagerProjectKey = new Set<string>();
+      // Group managers by manager.id and aggregate their projects
+      const managerDict = new Map<string, any>();
 
+      // 1. First add legacy primary manager if present
+      const primaryMgrId = emp.reportingTo;
+      if (primaryMgrId && managerMap.has(primaryMgrId)) {
+        const mgrData = managerMap.get(primaryMgrId);
+        managerDict.set(primaryMgrId, {
+          ...mgrData,
+          managerType: 'PRIMARY',
+          projects: [],
+        });
+      } else if (emp.manager) {
+        managerDict.set(emp.manager.id, {
+          id: emp.manager.id,
+          firstName: emp.manager.firstName,
+          lastName: emp.manager.lastName,
+          workEmail: emp.manager.workEmail,
+          employeeCode: emp.manager.employeeCode,
+          photoUrl: emp.manager.photoUrl || null,
+          status: emp.manager.status || 'active',
+          isActive: (emp.manager.status || 'active') === 'active',
+          managerType: 'PRIMARY',
+          projects: [],
+        });
+      }
+
+      // 2. Attach managers from project assignments
       for (const a of empAssignments) {
         if (a.manager) {
-          const key = `${a.manager.id}:${a.project?.id}`;
-          if (!seenManagerProjectKey.has(key)) {
-            seenManagerProjectKey.add(key);
-            managersList.push({
+          const mId = a.manager.id;
+          const isPrimary = mId === primaryMgrId || a.managerType === 'PRIMARY';
+          const existing = managerDict.get(mId);
+
+          const projectItem = {
+            id: a.project?.id,
+            name: a.project?.name || 'Project',
+            code: a.project?.code,
+            source: a.projectSource,
+            assignmentId: a.id,
+            role: a.role,
+            managerType: isPrimary ? 'PRIMARY' : (a.managerType || 'SECONDARY'),
+          };
+
+          if (existing) {
+            if (isPrimary) existing.managerType = 'PRIMARY';
+            const hasProj = existing.projects.some((p: any) => p.id === projectItem.id);
+            if (!hasProj) {
+              existing.projects.push(projectItem);
+            }
+          } else {
+            managerDict.set(mId, {
               ...a.manager,
-              projectId: a.project?.id,
-              projectName: a.project?.name,
-              projectSource: a.projectSource,
-              assignmentId: a.id,
-              role: a.role,
+              managerType: isPrimary ? 'PRIMARY' : (a.managerType || 'SECONDARY'),
+              projects: [projectItem],
             });
           }
         }
       }
 
-      // If no project assignment managers exist, fallback to legacy reportingTo / manager
-      if (managersList.length === 0 && (emp.manager || emp.reportingTo)) {
-        const legacyMgr =
-          emp.manager || (emp.reportingTo ? managerMap.get(emp.reportingTo) : null);
-        if (legacyMgr) {
-          managersList.push({
-            id: legacyMgr.id,
-            firstName: legacyMgr.firstName,
-            lastName: legacyMgr.lastName,
-            workEmail: legacyMgr.workEmail,
-            photoUrl: legacyMgr.photoUrl || null,
-            status: legacyMgr.status || 'active',
-            isActive: (legacyMgr.status || 'active') === 'active',
-            projectName: 'General',
-            projectSource: 'general',
+      // If primary manager has no projects assigned, assign 'General'
+      for (const [, mgr] of managerDict) {
+        if (mgr.projects.length === 0) {
+          mgr.projects.push({
+            id: 'general',
+            name: 'General',
+            source: 'general',
+            role: 'Reporting Manager',
+            managerType: mgr.managerType,
           });
         }
       }
 
+      // Sort: PRIMARY first, then SECONDARY
+      const managersList = Array.from(managerDict.values()).sort((a, b) => {
+        if (a.managerType === 'PRIMARY' && b.managerType !== 'PRIMARY') return -1;
+        if (b.managerType === 'PRIMARY' && a.managerType !== 'PRIMARY') return 1;
+        return 0;
+      });
+
       emp.managers = managersList;
+    }
+  }
+
+  // --- MANAGERS CRUD ---
+  async getEmployeeManagers(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+      relations: ['manager'],
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    await this.attachProjectAssignmentsAndManagers([employee], organizationId);
+    return (employee as any).managers || [];
+  }
+
+  async assignManager(
+    organizationId: string,
+    employeeId: string,
+    dto: AssignManagerDto,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const manager = await this.employeeRepository.findOne({
+      where: { id: dto.managerId, organizationId },
+    });
+    if (!manager) {
+      throw new BadRequestException(`Manager with ID ${dto.managerId} not found`);
+    }
+    if (manager.status !== 'active') {
+      throw new BadRequestException(
+        `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+      );
+    }
+    if (manager.id === employeeId) {
+      throw new BadRequestException('Employee cannot be assigned as their own manager');
+    }
+
+    // Check circular reporting
+    const isCircular = await this.checkCircularReporting(employeeId, dto.managerId);
+    if (isCircular) {
+      throw new BadRequestException(
+        'Circular reporting relationship detected. Cannot assign manager.',
+      );
+    }
+
+    // Primary / Secondary rule:
+    // If employee has no primary manager (reportingTo is null), this first manager is PRIMARY.
+    // If employee already has a reportingTo, new manager defaults to SECONDARY unless requested as PRIMARY.
+    const isFirstManager = !employee.reportingTo;
+    const requestedType = dto.managerType || (isFirstManager ? 'PRIMARY' : 'SECONDARY');
+
+    if (requestedType === 'PRIMARY') {
+      employee.reportingTo = manager.id;
+      await this.employeeRepository.save(employee);
+    }
+
+    if (dto.projectId) {
+      let assignment = await this.assignmentRepository.findOne({
+        where: {
+          organizationId,
+          employeeId,
+          projectId: dto.projectId,
+          projectSource: dto.projectSource || 'internal',
+        },
+      });
+
+      if (assignment) {
+        assignment.managerId = dto.managerId;
+        assignment.managerType = requestedType;
+        if (dto.role) assignment.role = dto.role;
+        await this.assignmentRepository.save(assignment);
+      } else {
+        assignment = this.assignmentRepository.create({
+          organizationId,
+          employeeId,
+          projectId: dto.projectId,
+          projectSource: dto.projectSource || 'internal',
+          managerId: dto.managerId,
+          managerType: requestedType,
+          role: dto.role || 'member',
+        });
+        await this.assignmentRepository.save(assignment);
+      }
+    }
+
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+    return this.getEmployeeManagers(organizationId, employeeId);
+  }
+
+  async setPrimaryManager(
+    organizationId: string,
+    employeeId: string,
+    managerId: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const manager = await this.employeeRepository.findOne({
+      where: { id: managerId, organizationId },
+    });
+    if (!manager) {
+      throw new BadRequestException(`Manager with ID ${managerId} not found`);
+    }
+    if (manager.status !== 'active') {
+      throw new BadRequestException('Cannot set inactive employee as primary manager');
+    }
+
+    // Check circular reporting
+    const isCircular = await this.checkCircularReporting(employeeId, managerId);
+    if (isCircular) {
+      throw new BadRequestException('Circular reporting relationship detected.');
+    }
+
+    employee.reportingTo = managerId;
+    await this.employeeRepository.save(employee);
+
+    // Update assignment managerTypes
+    const assignments = await this.assignmentRepository.find({
+      where: { organizationId, employeeId },
+    });
+    for (const a of assignments) {
+      if (a.managerId === managerId) {
+        a.managerType = 'PRIMARY';
+      } else if (a.managerType === 'PRIMARY') {
+        a.managerType = 'SECONDARY';
+      }
+      await this.assignmentRepository.save(a);
+    }
+
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+    return this.getEmployeeManagers(organizationId, employeeId);
+  }
+
+  async removeManager(
+    organizationId: string,
+    employeeId: string,
+    managerId: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    // Remove or clear managerId from project assignments
+    const assignments = await this.assignmentRepository.find({
+      where: { organizationId, employeeId, managerId },
+    });
+    for (const a of assignments) {
+      a.managerId = null as any;
+      a.managerType = 'SECONDARY';
+      await this.assignmentRepository.save(a);
+    }
+
+    // If removing primary manager, pick next available manager or set to null
+    if (employee.reportingTo === managerId) {
+      const remainingAssignments = await this.assignmentRepository.find({
+        where: { organizationId, employeeId },
+      });
+      const nextMgrId = remainingAssignments.find(
+        (a) => a.managerId && a.managerId !== managerId,
+      )?.managerId;
+      employee.reportingTo = nextMgrId || null;
+      await this.employeeRepository.save(employee);
+    }
+
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+    return this.getEmployeeManagers(organizationId, employeeId);
+  }
+
+  // --- ASSETS & CLEARANCE CRUD ---
+  async getEmployeeAssets(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    return this.assetRepository.find({
+      where: { organizationId, employeeId },
+      order: { issueDate: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
+  async createEmployeeAsset(
+    organizationId: string,
+    employeeId: string,
+    dto: CreateEmployeeAssetDto,
+    createdById?: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const asset = this.assetRepository.create({
+      organizationId,
+      employeeId,
+      assetType: dto.assetType,
+      assetName: dto.assetName,
+      assetId: dto.assetId,
+      serialNumber: dto.serialNumber || null,
+      brand: dto.brand || null,
+      model: dto.model || null,
+      condition: dto.condition || 'Good',
+      issueDate: dto.issueDate,
+      expectedReturnDate: dto.expectedReturnDate || null,
+      actualReturnDate: null,
+      status: dto.status || AssetStatus.ASSIGNED,
+      isReturnRequired:
+        dto.isReturnRequired !== undefined ? dto.isReturnRequired : true,
+      notes: dto.notes || null,
+    });
+
+    return this.assetRepository.save(asset);
+  }
+
+  async updateEmployeeAsset(
+    organizationId: string,
+    employeeId: string,
+    assetId: string,
+    dto: UpdateEmployeeAssetDto,
+  ) {
+    const asset = await this.assetRepository.findOne({
+      where: { id: assetId, organizationId, employeeId },
+    });
+    if (!asset) {
+      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+    }
+
+    if (dto.assetType !== undefined) asset.assetType = dto.assetType;
+    if (dto.assetName !== undefined) asset.assetName = dto.assetName;
+    if (dto.assetId !== undefined) asset.assetId = dto.assetId;
+    if (dto.serialNumber !== undefined) asset.serialNumber = dto.serialNumber || null;
+    if (dto.brand !== undefined) asset.brand = dto.brand || null;
+    if (dto.model !== undefined) asset.model = dto.model || null;
+    if (dto.condition !== undefined) asset.condition = dto.condition;
+    if (dto.issueDate !== undefined) asset.issueDate = dto.issueDate;
+    if (dto.expectedReturnDate !== undefined)
+      asset.expectedReturnDate = dto.expectedReturnDate || null;
+    if (dto.actualReturnDate !== undefined)
+      asset.actualReturnDate = dto.actualReturnDate || null;
+    if (dto.status !== undefined) asset.status = dto.status;
+    if (dto.isReturnRequired !== undefined)
+      asset.isReturnRequired = dto.isReturnRequired;
+    if (dto.notes !== undefined) asset.notes = dto.notes || null;
+
+    return this.assetRepository.save(asset);
+  }
+
+  async returnEmployeeAsset(
+    organizationId: string,
+    employeeId: string,
+    assetId: string,
+    dto: ReturnAssetDto,
+  ) {
+    const asset = await this.assetRepository.findOne({
+      where: { id: assetId, organizationId, employeeId },
+    });
+    if (!asset) {
+      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+    }
+
+    asset.status = AssetStatus.RETURNED;
+    asset.actualReturnDate = dto.actualReturnDate || DateTime.now().toISODate();
+    if (dto.condition) asset.condition = dto.condition;
+    if (dto.notes) {
+      asset.notes = asset.notes
+        ? `${asset.notes} | Return note: ${dto.notes}`
+        : dto.notes;
+    }
+
+    return this.assetRepository.save(asset);
+  }
+
+  async deleteEmployeeAsset(
+    organizationId: string,
+    employeeId: string,
+    assetId: string,
+  ) {
+    const asset = await this.assetRepository.findOne({
+      where: { id: assetId, organizationId, employeeId },
+    });
+    if (!asset) {
+      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+    }
+
+    await this.assetRepository.remove(asset);
+    return { success: true, message: 'Asset deleted successfully' };
+  }
+
+  async getEmployeeClearance(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const assets = await this.assetRepository.find({
+      where: { organizationId, employeeId },
+      order: { issueDate: 'ASC' },
+    });
+
+    const requiredAssets = assets.filter((a) => a.isReturnRequired);
+    const pendingAssets = requiredAssets.filter(
+      (a) => a.status !== AssetStatus.RETURNED,
+    );
+    const returnedAssets = requiredAssets.filter(
+      (a) => a.status === AssetStatus.RETURNED,
+    );
+
+    let status: 'NOT_STARTED' | 'PARTIALLY_CLEARED' | 'CLEARED' = 'CLEARED';
+    let isCleared = true;
+
+    if (requiredAssets.length > 0) {
+      if (pendingAssets.length === 0) {
+        status = 'CLEARED';
+        isCleared = true;
+      } else if (returnedAssets.length === 0) {
+        status = 'NOT_STARTED';
+        isCleared = false;
+      } else {
+        status = 'PARTIALLY_CLEARED';
+        isCleared = false;
+      }
+    }
+
+    return {
+      status,
+      isCleared,
+      totalAssets: assets.length,
+      totalRequired: requiredAssets.length,
+      pendingCount: pendingAssets.length,
+      returnedCount: returnedAssets.length,
+      pendingAssets: pendingAssets.map((a) => ({
+        id: a.id,
+        assetName: a.assetName,
+        assetId: a.assetId,
+        assetType: a.assetType,
+        status: a.status,
+        issueDate: a.issueDate,
+      })),
+      assets,
+    };
+  }
+
+  // --- DOCUMENTS CRUD ---
+  async getEmployeeDocuments(
+    organizationId: string,
+    employeeId: string,
+    category?: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const where: any = { organizationId, employeeId };
+    if (category && category !== 'All') {
+      where.documentCategory = category;
+    }
+
+    const docs = await this.documentRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+    });
+
+    return await Promise.all(
+      docs.map(async (doc) => {
+        let downloadUrl = doc.fileUrl;
+        if (!doc.fileUrl.startsWith('http') && !doc.fileUrl.startsWith('data:')) {
+          try {
+            downloadUrl =
+              (await this.storageService.getSignedUrl(doc.fileUrl)) ||
+              doc.fileUrl;
+          } catch (e) {
+            // Keep doc.fileUrl
+          }
+        }
+        return {
+          ...doc,
+          downloadUrl,
+        };
+      }),
+    );
+  }
+
+  async createEmployeeDocument(
+    organizationId: string,
+    employeeId: string,
+    dto: CreateEmployeeDocumentDto,
+    uploadedById?: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const doc = this.documentRepository.create({
+      organizationId,
+      employeeId,
+      documentName: dto.documentName,
+      documentCategory: dto.documentCategory || 'Other',
+      fileUrl: dto.fileUrl,
+      fileSize: dto.fileSize,
+      mimeType: dto.mimeType,
+      remarks: dto.remarks,
+      uploadedBy: uploadedById,
+    });
+
+    return this.documentRepository.save(doc);
+  }
+
+  async deleteEmployeeDocument(
+    organizationId: string,
+    employeeId: string,
+    documentId: string,
+  ) {
+    const doc = await this.documentRepository.findOne({
+      where: { id: documentId, organizationId, employeeId },
+    });
+    if (!doc) {
+      throw new NotFoundException(`Document with ID ${documentId} not found`);
+    }
+
+    await this.documentRepository.remove(doc);
+    return { success: true, message: 'Document deleted successfully' };
+  }
+
+  // --- FULL & FINAL SETTLEMENT & PDF ---
+  async getEmployeeSettlement(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+      relations: ['department', 'designation', 'manager'],
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const [
+      existingSettlement,
+      clearance,
+      resignationReq,
+      salaryStructure,
+      leaveBalances,
+    ] = await Promise.all([
+      this.settlementRepository.findOne({
+        where: { organizationId, employeeId },
+      }),
+      this.getEmployeeClearance(organizationId, employeeId),
+      this.resignationRepository.findOne({
+        where: { employeeId, organizationId },
+        order: { createdAt: 'DESC' },
+      }),
+      this.salaryStructureRepository.findOne({
+        where: { employeeId, organizationId, status: 'active' },
+      }),
+      employee.userId
+        ? this.leaveBalanceRepository.find({
+            where: { user: { id: employee.userId } as any },
+            relations: ['leaveType'],
+          })
+        : [],
+    ]);
+
+    let totalLeaveDays = 0;
+    for (const lb of leaveBalances) {
+      const bal = Number(
+        lb.closingBalance ?? (lb.openingBalance + lb.accrued - lb.consumed),
+      );
+      if (bal > 0) {
+        totalLeaveDays += bal;
+      }
+    }
+
+    const monthlyGross = salaryStructure
+      ? Number(salaryStructure.grossSalary || salaryStructure.basic || 0)
+      : 0;
+    const dailyRate = monthlyGross > 0 ? monthlyGross / 30 : 0;
+    const encashmentAmount = Math.round(totalLeaveDays * dailyRate);
+    const resignationDate = resignationReq?.createdAt
+      ? DateTime.fromJSDate(new Date(resignationReq.createdAt)).toISODate()
+      : undefined;
+
+    const lastWorkingDate = resignationReq?.approvedLastWorkingDay || resignationReq?.proposedLastWorkingDay || undefined;
+
+    const noticeDays = 30;
+
+    if (!existingSettlement) {
+      const defaultEarnings = {
+        salaryDue: 0,
+        pendingSalary: 0,
+        leaveEncashmentDays: totalLeaveDays,
+        leaveEncashmentAmount: encashmentAmount,
+        bonusAmount: 0,
+        incentiveAmount: 0,
+        otherPayableAmount: 0,
+        totalEarnings: encashmentAmount,
+      };
+
+      const defaultDeductions = {
+        noticePeriodRecoveryAmount: 0,
+        loanRecoveryAmount: 0,
+        assetDeductionAmount: 0,
+        otherDeductionsAmount: 0,
+        deductionsRemarks: null as string | null,
+        totalDeductions: 0,
+      };
+
+      const netSettlementAmount =
+        defaultEarnings.totalEarnings - defaultDeductions.totalDeductions;
+
+      return {
+        isSaved: false,
+        employee,
+        clearance,
+        settlement: {
+          organizationId,
+          employeeId,
+          resignationRequestId: resignationReq?.id || null,
+          resignationDate: resignationDate || null,
+          noticePeriodDays: noticeDays,
+          lastWorkingDate: lastWorkingDate || null,
+          reasonForLeaving: resignationReq?.message || null,
+          ...defaultEarnings,
+          ...defaultDeductions,
+          finalSettlementAmount: netSettlementAmount,
+          netSettlementAmount,
+          status: SettlementStatus.DRAFT,
+          preparedBy: null as string | null,
+          hrApprovalName: null as string | null,
+          financeApprovalName: null as string | null,
+          approvalDate: null as string | null,
+          employeeDeclarationAcknowledged: false,
+          remarks: null as string | null,
+        },
+      };
+    }
+
+    return {
+      isSaved: true,
+      employee,
+      clearance,
+      settlement: {
+        ...existingSettlement,
+        netSettlementAmount: Number(existingSettlement.finalSettlementAmount || 0),
+      },
+    };
+  }
+
+  async saveEmployeeSettlement(
+    organizationId: string,
+    employeeId: string,
+    dto: SaveSettlementDto,
+    preparedById?: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    // Check if finalizing without clearance
+    if (
+      dto.status === SettlementStatus.FINALIZED ||
+      dto.status === SettlementStatus.APPROVED
+    ) {
+      const clearance = await this.getEmployeeClearance(
+        organizationId,
+        employeeId,
+      );
+      if (!clearance.isCleared) {
+        throw new ForbiddenException(
+          'Cannot finalize or approve settlement because company assets are still pending return.',
+        );
+      }
+    }
+
+    const salaryDue = Number(dto.salaryDue || 0);
+    const pendingSalary = Number(dto.pendingSalary || 0);
+    const leaveEncashmentAmount = Number(dto.leaveEncashmentAmount || 0);
+    const bonusAmount = Number(dto.bonusAmount || 0);
+    const incentiveAmount = Number(dto.incentiveAmount || 0);
+    const otherPayableAmount = Number(dto.otherPayableAmount || 0);
+
+    const totalEarnings =
+      salaryDue +
+      pendingSalary +
+      leaveEncashmentAmount +
+      bonusAmount +
+      incentiveAmount +
+      otherPayableAmount;
+
+    const noticePeriodRecoveryAmount = Number(
+      dto.noticePeriodRecoveryAmount || 0,
+    );
+    const loanRecoveryAmount = Number(dto.loanRecoveryAmount || 0);
+    const assetDeductionAmount = Number(dto.assetDeductionAmount || 0);
+    const otherDeductionsAmount = Number(dto.otherDeductionsAmount || 0);
+
+    const totalDeductions =
+      noticePeriodRecoveryAmount +
+      loanRecoveryAmount +
+      assetDeductionAmount +
+      otherDeductionsAmount;
+
+    const netSettlementAmount = totalEarnings - totalDeductions;
+
+    let settlement = await this.settlementRepository.findOne({
+      where: { organizationId, employeeId },
+    });
+
+    if (!settlement) {
+      settlement = this.settlementRepository.create({
+        organizationId,
+        employeeId,
+      });
+    }
+
+    settlement.resignationRequestId = dto.resignationRequestId || null;
+    if (dto.resignationDate !== undefined)
+      settlement.resignationDate = dto.resignationDate || null;
+    if (dto.noticePeriodDays !== undefined)
+      settlement.noticePeriodDays = dto.noticePeriodDays;
+    if (dto.lastWorkingDate !== undefined)
+      settlement.lastWorkingDate = dto.lastWorkingDate || null;
+    if (dto.reasonForLeaving !== undefined)
+      settlement.reasonForLeaving = dto.reasonForLeaving || null;
+
+    settlement.salaryDue = salaryDue;
+    settlement.pendingSalary = pendingSalary;
+    settlement.leaveEncashmentDays = Number(dto.leaveEncashmentDays || 0);
+    settlement.leaveEncashmentAmount = leaveEncashmentAmount;
+    settlement.bonusAmount = bonusAmount;
+    settlement.incentiveAmount = incentiveAmount;
+    settlement.otherPayableAmount = otherPayableAmount;
+    settlement.totalEarnings = totalEarnings;
+
+    settlement.noticePeriodRecoveryAmount = noticePeriodRecoveryAmount;
+    settlement.loanRecoveryAmount = loanRecoveryAmount;
+    settlement.assetDeductionAmount = assetDeductionAmount;
+    settlement.otherDeductionsAmount = otherDeductionsAmount;
+    settlement.totalDeductions = totalDeductions;
+    settlement.finalSettlementAmount = netSettlementAmount;
+    settlement.deductionsRemarks = dto.deductionsRemarks || null;
+
+    if (dto.status) settlement.status = dto.status;
+    if (dto.preparedBy !== undefined) settlement.preparedBy = dto.preparedBy || null;
+    if (dto.hrApprovalName !== undefined) settlement.hrApprovalName = dto.hrApprovalName || null;
+    if (dto.financeApprovalName !== undefined)
+      settlement.financeApprovalName = dto.financeApprovalName || null;
+    if (dto.approvalDate !== undefined) settlement.approvalDate = dto.approvalDate || null;
+    if (dto.employeeDeclarationAcknowledged !== undefined)
+      settlement.employeeDeclarationAcknowledged =
+        dto.employeeDeclarationAcknowledged;
+    if (dto.remarks !== undefined) settlement.remarks = dto.remarks || null;
+
+    return this.settlementRepository.save(settlement);
+  }
+
+  async generateSettlementPdf(
+    organizationId: string,
+    employeeId: string,
+  ): Promise<Buffer> {
+    // 1. ENFORCE ASSET CLEARANCE BEFORE DOWNLOADING
+    const clearance = await this.getEmployeeClearance(
+      organizationId,
+      employeeId,
+    );
+    if (!clearance.isCleared) {
+      throw new ForbiddenException({
+        message:
+          'Final settlement cannot be generated because company assets are still pending return.',
+        pendingAssets: clearance.pendingAssets.map((a) => a.assetName),
+      });
+    }
+
+    const [employee, org, orgSettings, settlementData] = await Promise.all([
+      this.employeeRepository.findOne({
+        where: { id: employeeId, organizationId },
+        relations: ['department', 'designation', 'manager'],
+      }),
+      this.organizationRepository.findOne({ where: { id: organizationId } }),
+      this.orgSettingsRepository.findOne({ where: { organizationId } }),
+      this.getEmployeeSettlement(organizationId, employeeId),
+    ]);
+
+    if (!employee) throw new NotFoundException('Employee not found');
+
+    const s: any = settlementData.settlement;
+    const assets = clearance.assets || [];
+
+    const formatCurrency = (val: number | string | undefined | null) => {
+      const num = Number(val || 0);
+      return (
+        '₹ ' +
+        num.toLocaleString('en-IN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      );
+    };
+
+    const formatDate = (val: any) => {
+      if (!val) return '—';
+      try {
+        return DateTime.fromJSDate(new Date(val)).toFormat('dd LLL yyyy');
+      } catch (e) {
+        return String(val);
+      }
+    };
+
+    const orgName = org?.organizationName || 'Avinya HRMS Organization';
+    const orgAddress = org?.address || (orgSettings as any)?.address || '';
+    const orgContact = org?.phone || org?.email || org?.hrMail || '';
+    const orgLogo = org?.logoUrl || '';
+
+    const managerName = employee.manager
+      ? `${employee.manager.firstName} ${employee.manager.lastName || ''}`.trim()
+      : '—';
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Full & Final Settlement - ${employee.firstName} ${employee.lastName || ''}</title>
+        <style>
+          @page { size: A4; margin: 16mm 14mm; }
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+            font-size: 11.5px;
+            line-height: 1.45;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 12px;
+            margin-bottom: 14px;
+          }
+          .org-info h1 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .org-info p {
+            margin: 0;
+            color: #64748b;
+            font-size: 10px;
+          }
+          .org-logo {
+            max-height: 55px;
+            max-width: 140px;
+            object-fit: contain;
+          }
+          .doc-title-box {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            padding: 8px;
+            text-align: center;
+            border-radius: 4px;
+            margin-bottom: 14px;
+          }
+          .doc-title-box h2 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 700;
+            color: #0f172a;
+            letter-spacing: 0.8px;
+          }
+          .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 14px;
+          }
+          .card {
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 10px;
+            background: #fafafa;
+          }
+          .card-title {
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #475569;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+          }
+          .info-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .info-table td {
+            padding: 2.5px 0;
+            font-size: 10.5px;
+          }
+          .info-table td.label {
+            color: #64748b;
+            width: 45%;
+          }
+          .info-table td.value {
+            font-weight: 600;
+            color: #0f172a;
+          }
+          .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #0f172a;
+            text-transform: uppercase;
+            background: #e2e8f0;
+            padding: 5px 8px;
+            border-radius: 3px;
+            margin: 12px 0 6px 0;
+          }
+          table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+          }
+          table.data-table th, table.data-table td {
+            border: 1px solid #cbd5e1;
+            padding: 5px 8px;
+            font-size: 10.5px;
+          }
+          table.data-table th {
+            background: #f8fafc;
+            text-align: left;
+            font-weight: 600;
+            color: #334155;
+          }
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          .badge-cleared {
+            background: #dcfce7;
+            color: #15803d;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+            font-size: 9.5px;
+          }
+          .net-amount-banner {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 10px 14px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 14px 0;
+          }
+          .net-amount-banner .label {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .net-amount-banner .amount {
+            font-size: 18px;
+            font-weight: 800;
+            color: #38bdf8;
+          }
+          .declaration {
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 9.5px;
+            color: #475569;
+            margin-bottom: 16px;
+            text-align: justify;
+          }
+          .signatures-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1.2fr;
+            gap: 10px;
+            margin-top: 18px;
+          }
+          .sig-box {
+            border: 1px dashed #94a3b8;
+            border-radius: 4px;
+            padding: 8px;
+            min-height: 85px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            font-size: 9.5px;
+          }
+          .sig-title {
+            font-weight: 700;
+            color: #334155;
+            text-align: center;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 3px;
+          }
+          .stamp-box {
+            border: 2px dashed #64748b;
+            border-radius: 4px;
+            padding: 8px;
+            min-height: 85px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #94a3b8;
+            font-weight: 700;
+            font-size: 9px;
+            text-transform: uppercase;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="org-info">
+            <h1>${orgName}</h1>
+            ${orgAddress ? `<p>${orgAddress}</p>` : ''}
+            ${orgContact ? `<p>Contact: ${orgContact}</p>` : ''}
+          </div>
+          ${orgLogo ? `<img src="${orgLogo}" class="org-logo" alt="Logo" />` : ''}
+        </div>
+
+        <div class="doc-title-box">
+          <h2>FULL & FINAL SETTLEMENT STATEMENT</h2>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Employee Information</div>
+            <table class="info-table">
+              <tr><td class="label">Employee Name:</td><td class="value">${employee.firstName} ${employee.lastName || ''}</td></tr>
+              <tr><td class="label">Employee Code / ID:</td><td class="value">${employee.employeeCode || '—'}</td></tr>
+              <tr><td class="label">Designation:</td><td class="value">${employee.designation?.name || '—'}</td></tr>
+              <tr><td class="label">Department:</td><td class="value">${employee.department?.name || '—'}</td></tr>
+              <tr><td class="label">Reporting Manager:</td><td class="value">${managerName}</td></tr>
+              <tr><td class="label">Employment Status:</td><td class="value">${employee.status?.toUpperCase() || 'EXITED'}</td></tr>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Service & Exit Details</div>
+            <table class="info-table">
+              <tr><td class="label">Date of Joining:</td><td class="value">${formatDate(employee.dateOfJoining)}</td></tr>
+              <tr><td class="label">Resignation Date:</td><td class="value">${formatDate(s.resignationDate)}</td></tr>
+              <tr><td class="label">Notice Period:</td><td class="value">${s.noticePeriodDays || 0} Days</td></tr>
+              <tr><td class="label">Last Working Date:</td><td class="value">${formatDate(s.lastWorkingDate)}</td></tr>
+              <tr><td class="label">Settlement Status:</td><td class="value">${s.status || 'FINALIZED'}</td></tr>
+              <tr><td class="label">Clearance Status:</td><td class="value"><span class="badge-cleared">✓ ALL ASSETS RETURNED</span></td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- 1 & 2. PAYABLE EARNINGS & DEDUCTIONS -->
+        <div class="grid-2">
+          <div>
+            <div class="section-title">A. Earnings & Payable Dues</div>
+            <table class="data-table">
+              <thead>
+                <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Salary Due for Worked Days</td><td class="text-right">${formatCurrency(s.salaryDue)}</td></tr>
+                <tr><td>Pending Salary / Arrears</td><td class="text-right">${formatCurrency(s.pendingSalary)}</td></tr>
+                <tr><td>Leave Encashment (${s.leaveEncashmentDays || 0} days)</td><td class="text-right">${formatCurrency(s.leaveEncashmentAmount)}</td></tr>
+                <tr><td>Performance Incentive</td><td class="text-right">${formatCurrency(s.incentiveAmount)}</td></tr>
+                <tr><td>Bonus / Ex-Gratia</td><td class="text-right">${formatCurrency(s.bonusAmount)}</td></tr>
+                <tr><td>Other Payables / Reimbursements</td><td class="text-right">${formatCurrency(s.otherPayableAmount)}</td></tr>
+                <tr style="background:#f1f5f9; font-weight:700;">
+                  <td>Total Gross Earnings (A)</td>
+                  <td class="text-right">${formatCurrency(s.totalEarnings)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <div class="section-title">B. Recoveries & Deductions</div>
+            <table class="data-table">
+              <thead>
+                <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Notice Period Shortfall Recovery</td><td class="text-right">${formatCurrency(s.noticePeriodRecoveryAmount)}</td></tr>
+                <tr><td>Loan / Advance Balance Recovery</td><td class="text-right">${formatCurrency(s.loanRecoveryAmount)}</td></tr>
+                <tr><td>Company Asset Loss / Damage</td><td class="text-right">${formatCurrency(s.assetDeductionAmount)}</td></tr>
+                <tr><td>Other Statutory / Non-Statutory Deductions</td><td class="text-right">${formatCurrency(s.otherDeductionsAmount)}</td></tr>
+                <tr style="height: 38px;"><td><span style="color:#64748b; font-size:9.5px;">${s.deductionsRemarks ? 'Note: ' + s.deductionsRemarks : '—'}</span></td><td></td></tr>
+                <tr style="background:#f1f5f9; font-weight:700;">
+                  <td>Total Deductions (B)</td>
+                  <td class="text-right">${formatCurrency(s.totalDeductions)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- NET PAYABLE BANNER -->
+        <div class="net-amount-banner">
+          <div class="label">NET FULL & FINAL SETTLEMENT AMOUNT (A - B)</div>
+          <div class="amount">${formatCurrency(s.netSettlementAmount)}</div>
+        </div>
+
+        <!-- COMPANY ASSETS / CLEARANCE SUMMARY -->
+        <div class="section-title">Company Assets & Exit Clearance Record</div>
+        <table class="data-table" style="margin-bottom:10px;">
+          <thead>
+            <tr>
+              <th>Asset Name / Description</th>
+              <th>Asset Tag / ID</th>
+              <th>Issue Date</th>
+              <th>Return Date</th>
+              <th class="text-center">Clearance Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              assets.length === 0
+                ? '<tr><td colspan="5" class="text-center" style="color:#64748b;">No physical company assets were issued to this employee.</td></tr>'
+                : assets
+                    .map(
+                      (a) => `
+                <tr>
+                  <td><strong>${a.assetName}</strong> (${a.assetType})</td>
+                  <td>${a.assetId || a.serialNumber || '—'}</td>
+                  <td>${formatDate(a.issueDate)}</td>
+                  <td>${formatDate(a.actualReturnDate)}</td>
+                  <td class="text-center"><span class="badge-cleared">✓ RETURNED & CLEARED</span></td>
+                </tr>
+              `,
+                    )
+                    .join('')
+            }
+          </tbody>
+        </table>
+
+        <!-- EMPLOYEE DECLARATION -->
+        <div class="declaration">
+          <strong>Employee Declaration:</strong> I hereby acknowledge that the above full and final settlement statement has been thoroughly reviewed and agreed upon by me. I confirm receipt/settlement of all outstanding dues, salary, encashments, and claims from <strong>${orgName}</strong>, and I state that I have returned all company assets, intellectual property, credentials, and documents in good condition. I have no further claims against the organization.
+        </div>
+
+        <!-- SIGNATURES & STAMP -->
+        <div class="signatures-grid">
+          <div class="sig-box">
+            <div class="sig-title">Employee Signature</div>
+            <div style="font-size:9px; color:#64748b; padding-top:25px;">
+              Name: ${employee.firstName} ${employee.lastName || ''}<br/>
+              Date: __________________
+            </div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-title">Prepared By (HR)</div>
+            <div style="font-size:9px; color:#64748b; padding-top:25px;">
+              Name: ${s.preparedBy || 'HR Operations'}<br/>
+              Date: __________________
+            </div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-title">Finance Approval</div>
+            <div style="font-size:9px; color:#64748b; padding-top:25px;">
+              Name: ${s.financeApprovalName || 'Finance Head'}<br/>
+              Date: __________________
+            </div>
+          </div>
+          <div class="stamp-box">
+            <div style="border:1px dashed #cbd5e1; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+              ORGANIZATION STAMP
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    let browser: puppeteer.Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      await page.setContent(html, {
+        waitUntil: 'domcontentloaded',
+        timeout: 25000,
+      });
+      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      return Buffer.from(pdf);
+    } catch (error) {
+      console.error('Failed to generate full settlement PDF:', error);
+      throw error;
+    } finally {
+      if (browser) await browser.close();
     }
   }
 
@@ -2038,6 +3324,7 @@ export class EmployeeService implements OnModuleInit {
         projectId: a.projectId,
         projectSource: a.projectSource || 'internal',
         managerId: a.managerId,
+        managerType: a.managerType || (a.managerId === employee.reportingTo ? 'PRIMARY' : 'SECONDARY'),
         role: a.role || 'member',
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
@@ -2054,6 +3341,7 @@ export class EmployeeService implements OnModuleInit {
       projectId: string;
       projectSource?: 'internal' | 'client';
       managerId?: string;
+      managerType?: 'PRIMARY' | 'SECONDARY';
       role?: string;
     },
   ) {
@@ -2061,6 +3349,7 @@ export class EmployeeService implements OnModuleInit {
       projectId,
       projectSource = 'internal',
       managerId,
+      managerType,
       role = 'member',
     } = dto;
 
@@ -2139,13 +3428,17 @@ export class EmployeeService implements OnModuleInit {
       );
     }
 
-    // 5. Create assignment
+    // 5. Determine managerType
+    const mType = managerType || (managerId && managerId === employee.reportingTo ? 'PRIMARY' : 'SECONDARY');
+
+    // 6. Create assignment
     const assignment = this.assignmentRepository.create({
       organizationId,
       employeeId,
       projectId,
       projectSource,
       managerId: managerId || null,
+      managerType: mType,
       role: role || 'member',
     });
 
@@ -2197,6 +3490,7 @@ export class EmployeeService implements OnModuleInit {
       projectId?: string;
       projectSource?: 'internal' | 'client';
       managerId?: string | null;
+      managerType?: 'PRIMARY' | 'SECONDARY';
       role?: string;
     },
   ) {
@@ -2233,6 +3527,10 @@ export class EmployeeService implements OnModuleInit {
       } else {
         assignment.managerId = null;
       }
+    }
+
+    if (dto.managerType) {
+      assignment.managerType = dto.managerType;
     }
 
     if (

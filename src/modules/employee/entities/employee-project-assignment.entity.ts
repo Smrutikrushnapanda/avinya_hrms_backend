@@ -36,6 +36,9 @@ export class EmployeeProjectAssignment {
   @Column({ name: 'manager_id', type: 'uuid', nullable: true })
   managerId: string | null;
 
+  @Column({ name: 'manager_type', length: 20, default: 'SECONDARY' })
+  managerType: string; // 'PRIMARY' | 'SECONDARY'
+
   @Column({ name: 'role', length: 50, default: 'member' })
   role: string;
 

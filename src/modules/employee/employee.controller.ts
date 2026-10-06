@@ -5,17 +5,29 @@ import {
   Body,
   Param,
   Put,
+  Patch,
   Delete,
   Query,
   UseGuards,
   UseInterceptors,
   ForbiddenException,
+  Res,
 } from '@nestjs/common';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { ValidateEmployeeDto } from './dto/validate-employee.dto';
+import {
+  CreateEmployeeAssetDto,
+  UpdateEmployeeAssetDto,
+  ReturnAssetDto,
+} from './dto/employee-asset.dto';
+import { CreateEmployeeDocumentDto } from './dto/employee-document.dto';
+import {
+  SaveSettlementDto,
+  AssignManagerDto,
+} from './dto/employee-settlement.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -379,5 +391,265 @@ export class EmployeeController {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
     return this.employeeService.remove(id);
+  }
+
+  // --- MANAGERS ---
+  @Get(':id/managers')
+  @ApiOperation({ summary: 'Get all managers for an employee' })
+  async getEmployeeManagers(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeManagers(employee.organizationId, id);
+  }
+
+  @Post(':id/managers')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Assign a manager to an employee' })
+  async assignManager(
+    @Param('id') id: string,
+    @Body() dto: AssignManagerDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.assignManager(employee.organizationId, id, dto);
+  }
+
+  @Delete(':id/managers/:managerId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Remove a manager assignment from an employee' })
+  async removeManager(
+    @Param('id') id: string,
+    @Param('managerId') managerId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.removeManager(employee.organizationId, id, managerId);
+  }
+
+  @Patch(':id/primary-manager/:managerId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Set primary manager for an employee' })
+  async setPrimaryManager(
+    @Param('id') id: string,
+    @Param('managerId') managerId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.setPrimaryManager(employee.organizationId, id, managerId);
+  }
+
+  // --- PROJECT ASSIGNMENTS ---
+  @Get(':id/project-assignments')
+  @ApiOperation({ summary: 'Get all project assignments for an employee' })
+  async getEmployeeProjectAssignments(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getProjectAssignments(employee.organizationId, id);
+  }
+
+  @Post(':id/project-assignments')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Assign employee to a project' })
+  async assignEmployeeProjectAssignment(
+    @Param('id') id: string,
+    @Body() dto: any,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.assignProject(employee.organizationId, id, dto);
+  }
+
+  @Patch(':id/project-assignments/:assignmentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Update project assignment' })
+  async updateEmployeeProjectAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @Body() dto: any,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.updateProjectAssignment(employee.organizationId, id, assignmentId, dto);
+  }
+
+  @Delete(':id/project-assignments/:assignmentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Remove project assignment' })
+  async removeEmployeeProjectAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.removeProjectAssignment(employee.organizationId, id, assignmentId);
+  }
+
+  // --- ASSETS & CLEARANCE ---
+  @Get(':id/assets')
+  @ApiOperation({ summary: 'Get employee assets' })
+  async getAssets(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeAssets(employee.organizationId, id);
+  }
+
+  @Post(':id/assets')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Assign asset to employee' })
+  async createAsset(
+    @Param('id') id: string,
+    @Body() dto: CreateEmployeeAssetDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.createEmployeeAsset(employee.organizationId, id, dto, actor.id);
+  }
+
+  @Patch(':id/assets/:assetId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Update employee asset' })
+  async updateAsset(
+    @Param('id') id: string,
+    @Param('assetId') assetId: string,
+    @Body() dto: UpdateEmployeeAssetDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.updateEmployeeAsset(employee.organizationId, id, assetId, dto);
+  }
+
+  @Post(':id/assets/:assetId/return')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Mark employee asset as returned' })
+  async returnAsset(
+    @Param('id') id: string,
+    @Param('assetId') assetId: string,
+    @Body() dto: ReturnAssetDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.returnEmployeeAsset(employee.organizationId, id, assetId, dto);
+  }
+
+  @Delete(':id/assets/:assetId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Delete employee asset' })
+  async deleteAsset(
+    @Param('id') id: string,
+    @Param('assetId') assetId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.deleteEmployeeAsset(employee.organizationId, id, assetId);
+  }
+
+  @Get(':id/clearance')
+  @ApiOperation({ summary: 'Get employee exit clearance status' })
+  async getClearance(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeClearance(employee.organizationId, id);
+  }
+
+  // --- DOCUMENTS ---
+  @Get(':id/documents')
+  @ApiOperation({ summary: 'Get employee documents' })
+  async getDocuments(
+    @Param('id') id: string,
+    @Query('category') category: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeDocuments(employee.organizationId, id, category);
+  }
+
+  @Post(':id/documents')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Create employee document' })
+  async createDocument(
+    @Param('id') id: string,
+    @Body() dto: CreateEmployeeDocumentDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.createEmployeeDocument(employee.organizationId, id, dto, actor.id);
+  }
+
+  @Delete(':id/documents/:documentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Delete employee document' })
+  async deleteDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.deleteEmployeeDocument(employee.organizationId, id, documentId);
+  }
+
+  // --- FULL & FINAL SETTLEMENT ---
+  @Get(':id/final-settlement')
+  @ApiOperation({ summary: 'Get or calculate full and final settlement' })
+  async getSettlement(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeSettlement(employee.organizationId, id);
+  }
+
+  @Post(':id/final-settlement')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Save/finalize full and final settlement' })
+  async saveSettlement(
+    @Param('id') id: string,
+    @Body() dto: SaveSettlementDto,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.saveEmployeeSettlement(employee.organizationId, id, dto, actor.id);
+  }
+
+  @Get(':id/final-settlement/pdf')
+  @ApiOperation({ summary: 'Download final settlement statement PDF' })
+  async downloadSettlementPdf(
+    @Param('id') id: string,
+    @GetUser() actor: User,
+    @Res() res: any,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    const pdfBuffer = await this.employeeService.generateSettlementPdf(employee.organizationId, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Settlement-Statement-${employee.employeeCode || employee.id}.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+    return res.end(pdfBuffer);
   }
 }
