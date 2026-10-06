@@ -440,12 +440,11 @@ export class TimeslipService {
     employeeId: string,
   ): Promise<string> {
     // 1) Employee's reporting manager (if set)
-    const emp = await this.employeeRepo
-      .createQueryBuilder('emp')
-      .leftJoin('emp.manager', 'manager')
-      .where('emp.id = :employeeId', { employeeId })
-      .select(['emp.id', 'manager.id'])
-      .getOne();
+    const emp = await this.employeeRepo.findOne({
+      where: { id: employeeId },
+      select: ['id'],
+      relations: ['manager'],
+    });
 
     if (emp?.manager?.id) {
       return emp.manager.id;

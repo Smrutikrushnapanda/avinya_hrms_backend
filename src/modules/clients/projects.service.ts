@@ -443,24 +443,83 @@ export class ProjectsService implements OnModuleInit {
     organizationId: string,
   ): Promise<boolean> {
     const actorEmployee = await this.employeeRepo.findOne({
-      where: { userId, organizationId },
+      where: [{ userId, organizationId }, { userId }],
       select: ['id'],
     });
-    if (actorEmployee?.id && project.managerId === actorEmployee.id) {
+
+    if (
+      actorEmployee?.id &&
+      (project.managerId === actorEmployee.id || project.manager?.id === actorEmployee.id)
+    ) {
       return true;
     }
+    if (project.managerId === userId || project.manager?.userId === userId) {
+      return true;
+    }
+
+    // Check project manager relation if not yet hydrated on project
+    if (project.managerId && (!project.manager || !project.manager.userId)) {
+      const mgr = await this.employeeRepo.findOne({
+        where: { id: project.managerId },
+        select: ['id', 'userId'],
+      });
+      if (mgr?.userId === userId || (actorEmployee?.id && mgr?.id === actorEmployee.id)) {
+        return true;
+      }
+    }
+
     const member = await this.memberRepo.findOne({
       where: { projectId: project.id, userId },
       select: ['id', 'role'],
     });
+    if (member?.role) {
+      const normalizedRole = member.role.trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const managerRoles = [
+        'manager',
+        'lead',
+        'projectmanager',
+        'projectlead',
+        'teamlead',
+        'techlead',
+        'admin',
+        'pm',
+        'tl',
+        'owner',
+      ];
+      if (managerRoles.some((r) => normalizedRole.includes(r))) {
+        return true;
+      }
+    }
+
+    // Check multi-manager assignments for this client project
+    try {
+      const assignmentCount = await this.projectRepo.query(
+        `SELECT COUNT(*) AS count FROM employee_project_assignments 
+         WHERE project_id = $1 AND project_source = 'client' 
+         AND (manager_id = $2 OR manager_id = $3)`,
+        [project.id, actorEmployee?.id || '00000000-0000-0000-0000-000000000000', userId],
+      );
+      if (parseInt(assignmentCount[0]?.count || '0', 10) > 0) {
+        return true;
+      }
+    } catch {
+      // Ignore if table not yet initialized
+    }
+
+    const userWithRoles = await this.userRepo.findOne({
+      where: { id: userId },
+      relations: ['roles'],
+    });
     if (
-      member?.role &&
-      ['manager', 'lead', 'project_manager', 'admin'].includes(
-        member.role.trim().toLowerCase(),
+      userWithRoles?.roles?.some((r) =>
+        ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN', 'MANAGER'].includes(
+          r.roleName?.toUpperCase(),
+        ),
       )
     ) {
       return true;
     }
+
     return false;
   }
 

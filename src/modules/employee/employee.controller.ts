@@ -161,12 +161,19 @@ export class EmployeeController {
   @CacheTTL(300) // 5 minutes cache for employee list
   @ApiOperation({ summary: 'Get all employees by organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
+  @ApiQuery({
+    name: 'status',
+    type: 'string',
+    required: false,
+    description: 'active | inactive | all (default: active)',
+  })
   findAll(
     @Query('organizationId') organizationId: string,
+    @Query('status') status: string | undefined,
     @GetUser() actor: User,
   ) {
     this.assertSameOrg(actor, organizationId);
-    return this.employeeService.findAll(organizationId);
+    return this.employeeService.findAll(organizationId, status);
   }
 
   @Get('selector')
@@ -194,6 +201,92 @@ export class EmployeeController {
       designationId,
       limit: limit ? Number(limit) : 50,
     });
+  }
+
+  // --- PROJECT ASSIGNMENTS & MANAGERS ---
+  @Get(':id/projects')
+  @ApiOperation({ summary: 'Get all project assignments and managers for an employee' })
+  @ApiParam({ name: 'id', type: 'string' })
+  async getEmployeeProjects(@Param('id') id: string, @GetUser() actor: User) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getProjectAssignments(
+      employee.organizationId,
+      id,
+    );
+  }
+
+  @Post(':id/projects')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN', 'MANAGER')
+  @ApiOperation({ summary: 'Assign a project and manager to an employee' })
+  @ApiParam({ name: 'id', type: 'string' })
+  async assignProject(
+    @Param('id') id: string,
+    @Body()
+    dto: {
+      projectId: string;
+      projectSource?: 'internal' | 'client';
+      managerId?: string;
+      role?: string;
+    },
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.assignProject(
+      employee.organizationId,
+      id,
+      dto,
+    );
+  }
+
+  @Put(':id/projects/:assignmentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN', 'MANAGER')
+  @ApiOperation({ summary: 'Update project assignment or manager for an employee' })
+  @ApiParam({ name: 'id', type: 'string' })
+  @ApiParam({ name: 'assignmentId', type: 'string' })
+  async updateProjectAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @Body()
+    dto: {
+      projectId?: string;
+      projectSource?: 'internal' | 'client';
+      managerId?: string | null;
+      role?: string;
+    },
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.updateProjectAssignment(
+      employee.organizationId,
+      id,
+      assignmentId,
+      dto,
+    );
+  }
+
+  @Delete(':id/projects/:assignmentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'HR', 'SUPERADMIN', 'MANAGER')
+  @ApiOperation({ summary: 'Remove a project assignment for an employee' })
+  @ApiParam({ name: 'id', type: 'string' })
+  @ApiParam({ name: 'assignmentId', type: 'string' })
+  async removeProjectAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.removeProjectAssignment(
+      employee.organizationId,
+      id,
+      assignmentId,
+    );
   }
 
   @Get(':id')

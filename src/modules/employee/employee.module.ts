@@ -26,6 +26,12 @@ import { WorkflowAssignment } from '../workflow/entities/workflow-assignment.ent
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 
+import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
+import { Project } from '../project/entities/project.entity';
+import { ClientProject } from '../clients/entities/project.entity';
+import { ProjectMember } from '../project/entities/project-member.entity';
+import { ClientProjectMember } from '../clients/entities/client-project-member.entity';
+
 @Module({
   imports: [
     CacheModule.register({
@@ -46,6 +52,11 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
       WorkflowAssignment,
       Timesheet,
       Timeslip,
+      EmployeeProjectAssignment,
+      Project,
+      ClientProject,
+      ProjectMember,
+      ClientProjectMember,
     ]),
     AuthCoreModule,
     LeaveModule,

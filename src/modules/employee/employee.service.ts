@@ -4,10 +4,11 @@ import {
   Injectable,
   NotFoundException,
   Inject,
+  OnModuleInit,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager, MoreThan, QueryFailedError } from 'typeorm';
+import { Repository, EntityManager, MoreThan, QueryFailedError, In } from 'typeorm';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
 import { Department } from './entities/department.entity';
@@ -32,6 +33,11 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { MailService } from '../mail/mail.service';
 import { DateTime } from 'luxon';
 import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
+import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
+import { Project } from '../project/entities/project.entity';
+import { ClientProject } from '../clients/entities/project.entity';
+import { ProjectMember } from '../project/entities/project-member.entity';
+import { ClientProjectMember } from '../clients/entities/client-project-member.entity';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -43,7 +49,7 @@ const CACHE_KEYS = {
 };
 
 @Injectable()
-export class EmployeeService {
+export class EmployeeService implements OnModuleInit {
   constructor(
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
@@ -76,6 +82,21 @@ export class EmployeeService {
     @InjectRepository(Timeslip)
     private readonly timeslipRepository: Repository<Timeslip>,
 
+    @InjectRepository(EmployeeProjectAssignment)
+    private readonly assignmentRepository: Repository<EmployeeProjectAssignment>,
+
+    @InjectRepository(Project)
+    private readonly projectRepository: Repository<Project>,
+
+    @InjectRepository(ClientProject)
+    private readonly clientProjectRepository: Repository<ClientProject>,
+
+    @InjectRepository(ProjectMember)
+    private readonly projectMemberRepository: Repository<ProjectMember>,
+
+    @InjectRepository(ClientProjectMember)
+    private readonly clientProjectMemberRepository: Repository<ClientProjectMember>,
+
     @Inject(CACHE_MANAGER)
     private readonly cacheManager: Cache,
 
@@ -87,6 +108,33 @@ export class EmployeeService {
     private readonly mailService: MailService,
     private readonly timezoneService: OrganizationTimezoneService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      const [{ schema }] = await this.employeeRepository.query(
+        'SELECT current_schema() AS schema',
+      );
+      await this.employeeRepository.query(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."employee_project_assignments" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          "organization_id" uuid NOT NULL,
+          "employee_id" uuid NOT NULL,
+          "project_id" uuid NOT NULL,
+          "project_source" varchar(20) NOT NULL DEFAULT 'internal',
+          "manager_id" uuid NULL,
+          "role" varchar(50) NOT NULL DEFAULT 'member',
+          "created_at" timestamptz NOT NULL DEFAULT now(),
+          "updated_at" timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await this.employeeRepository.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "idx_employee_project_assignments_unique"
+        ON "${schema}"."employee_project_assignments" ("organization_id", "employee_id", "project_id", "project_source")
+      `);
+    } catch (e) {
+      console.error('Failed to initialize employee_project_assignments schema:', e);
+    }
+  }
 
   async create(dto: CreateEmployeeDto) {
     try {
@@ -365,7 +413,7 @@ export class EmployeeService {
     const userRoles = await this.getUserRolesMap([employee.userId]);
     const roles = userRoles.get(employee.userId) || [];
 
-    return {
+    const result = {
       ...employee,
       roles,
       roleId: roles[0]?.id ?? null,
@@ -378,10 +426,18 @@ export class EmployeeService {
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
     };
+
+    await this.attachProjectAssignmentsAndManagers(
+      [result],
+      employee.organizationId,
+    );
+
+    return result;
   }
 
-  findAll(organizationId: string) {
-    const cacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
+  findAll(organizationId: string, status?: string) {
+    const normalizedStatus = status ? status.toLowerCase() : 'active';
+    const cacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}:${normalizedStatus}`;
 
     return this.cacheManager.get(cacheKey).then(async (cached) => {
       if (cached) {
@@ -389,8 +445,13 @@ export class EmployeeService {
         return cached;
       }
 
+      const whereClause: any = { organizationId };
+      if (normalizedStatus !== 'all') {
+        whereClause.status = normalizedStatus;
+      }
+
       const emps = await this.employeeRepository.find({
-        where: { organizationId },
+        where: whereClause,
         relations: [
           'department',
           'designation',
@@ -406,6 +467,9 @@ export class EmployeeService {
       const employees = await Promise.all(
         emps.map((e) => this.addSignedProfilePhoto(e)),
       );
+
+      // Attach project assignments and managers
+      await this.attachProjectAssignmentsAndManagers(employees, organizationId);
 
       // Cache for 5 minutes
       await this.cacheManager.set(cacheKey, employees, 300);
@@ -460,6 +524,11 @@ export class EmployeeService {
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
     };
+
+    await this.attachProjectAssignmentsAndManagers(
+      [result],
+      employee.organizationId,
+    );
 
     // Cache for 10 minutes
     await this.cacheManager.set(cacheKey, result, 600);
@@ -556,12 +625,21 @@ export class EmployeeService {
       'gender',
     ].some((key) => Object.prototype.hasOwnProperty.call(employeeUpdate, key));
 
-    if (loginUserName || loginPassword || nameFieldsChanged) {
+    const statusChanged = Object.prototype.hasOwnProperty.call(
+      employeeUpdate,
+      'status',
+    );
+
+    if (loginUserName || loginPassword || nameFieldsChanged || statusChanged) {
       const user = await this.userRepository.findOne({
         where: { id: employee.userId },
       });
       if (!user) {
         throw new NotFoundException(`User for employee ${id} not found`);
+      }
+
+      if (statusChanged && employeeUpdate.status) {
+        user.isActive = employeeUpdate.status.toLowerCase() === 'active';
       }
 
       if (loginUserName) {
@@ -957,15 +1035,16 @@ export class EmployeeService {
       .leftJoinAndSelect('employee.user', 'user')
       .where('employee.organizationId = :organizationId', { organizationId });
 
-    // Add status filter
-    if (status !== 'all') {
+    // Add status filter (default to 'active' unless 'all' or explicit)
+    const effectiveStatus = status ? status.toLowerCase() : 'active';
+    if (effectiveStatus !== 'all') {
       queryBuilder = queryBuilder.andWhere('employee.status = :status', {
-        status,
+        status: effectiveStatus,
       });
     }
 
     // Add department filter
-    if (department !== 'all') {
+    if (department && department !== 'all') {
       queryBuilder = queryBuilder.andWhere(
         'employee.departmentId = :departmentId',
         { departmentId: department },
@@ -973,7 +1052,7 @@ export class EmployeeService {
     }
 
     // Add designation filter
-    if (designation !== 'all') {
+    if (designation && designation !== 'all') {
       queryBuilder = queryBuilder.andWhere(
         'employee.designationId = :designationId',
         { designationId: designation },
@@ -988,7 +1067,7 @@ export class EmployeeService {
     }
 
     // Add join date filter
-    if (joinDateFilter !== 'all') {
+    if (joinDateFilter && joinDateFilter !== 'all') {
       const now = new Date();
       switch (joinDateFilter) {
         case 'last30':
@@ -1074,6 +1153,12 @@ export class EmployeeService {
           primaryRole: roles[0]?.roleName ?? null,
         };
       }),
+    );
+
+    // Attach project assignments and multiple managers
+    await this.attachProjectAssignmentsAndManagers(
+      employeesWithUserName,
+      organizationId,
     );
 
     // Calculate pagination info
@@ -1683,37 +1768,555 @@ export class EmployeeService {
     return this.checkCircularReporting(employeeId, manager.reportingTo);
   }
 
+  // --- ATTACH PROJECT ASSIGNMENTS & MULTIPLE MANAGERS ---
+  async attachProjectAssignmentsAndManagers(
+    employees: any[],
+    organizationId: string,
+  ): Promise<void> {
+    if (!employees || employees.length === 0) return;
+
+    const empIds = employees.map((e) => e.id).filter(Boolean);
+    if (empIds.length === 0) return;
+
+    const assignments = await this.assignmentRepository.find({
+      where: {
+        organizationId,
+        employeeId: In(empIds),
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    const projectIds = Array.from(
+      new Set(assignments.map((a) => a.projectId).filter(Boolean)),
+    );
+    const managerIds = Array.from(
+      new Set(
+        [
+          ...assignments.map((a) => a.managerId).filter(Boolean),
+          ...employees.map((e) => e.reportingTo).filter(Boolean),
+        ].filter(Boolean),
+      ),
+    );
+
+    const [internalProjects, clientProjects, managers] = await Promise.all([
+      projectIds.length
+        ? this.projectRepository.find({
+            where: { id: In(projectIds), organizationId },
+            select: ['id', 'name', 'status'],
+          })
+        : [],
+      projectIds.length
+        ? this.clientProjectRepository.find({
+            where: { id: In(projectIds), organizationId },
+            select: ['id', 'projectName', 'projectCode', 'status'],
+          })
+        : [],
+      managerIds.length
+        ? this.employeeRepository.find({
+            where: { id: In(managerIds), organizationId },
+            relations: ['designation'],
+            select: [
+              'id',
+              'firstName',
+              'lastName',
+              'workEmail',
+              'photoUrl',
+              'passportPhotoUrl',
+              'status',
+              'employeeCode',
+            ],
+          })
+        : [],
+    ]);
+
+    const projectMap = new Map<string, any>();
+    for (const p of internalProjects) {
+      projectMap.set(`internal:${p.id}`, { ...p, source: 'internal' });
+      projectMap.set(p.id, { ...p, source: 'internal' });
+    }
+    for (const cp of clientProjects) {
+      const obj = {
+        id: cp.id,
+        name: cp.projectName,
+        code: cp.projectCode,
+        status: cp.status,
+        source: 'client',
+      };
+      projectMap.set(`client:${cp.id}`, obj);
+      if (!projectMap.has(cp.id)) {
+        projectMap.set(cp.id, obj);
+      }
+    }
+
+    const managerMap = new Map<string, any>();
+    for (const m of managers) {
+      const signedPhoto = await this.signIfNeeded(this.getProfilePhotoKey(m));
+      managerMap.set(m.id, {
+        id: m.id,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        workEmail: m.workEmail,
+        employeeCode: m.employeeCode,
+        photoUrl: signedPhoto,
+        status: m.status,
+        isActive: m.status === 'active',
+      });
+    }
+
+    const assignmentsByEmp = new Map<string, any[]>();
+    for (const a of assignments) {
+      const projKey = a.projectSource
+        ? `${a.projectSource}:${a.projectId}`
+        : a.projectId;
+      const project = projectMap.get(projKey) || projectMap.get(a.projectId) || {
+        id: a.projectId,
+        name: 'Project',
+        source: a.projectSource || 'internal',
+      };
+      const manager = a.managerId ? managerMap.get(a.managerId) || null : null;
+
+      const item = {
+        id: a.id,
+        employeeId: a.employeeId,
+        projectId: a.projectId,
+        projectSource: a.projectSource || 'internal',
+        managerId: a.managerId,
+        role: a.role || 'member',
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+        project,
+        manager,
+      };
+
+      const list = assignmentsByEmp.get(a.employeeId) || [];
+      list.push(item);
+      assignmentsByEmp.set(a.employeeId, list);
+    }
+
+    for (const emp of employees) {
+      const empAssignments = assignmentsByEmp.get(emp.id) || [];
+      emp.projectAssignments = empAssignments;
+
+      // Build consolidated managers list
+      const managersList: any[] = [];
+      const seenManagerProjectKey = new Set<string>();
+
+      for (const a of empAssignments) {
+        if (a.manager) {
+          const key = `${a.manager.id}:${a.project?.id}`;
+          if (!seenManagerProjectKey.has(key)) {
+            seenManagerProjectKey.add(key);
+            managersList.push({
+              ...a.manager,
+              projectId: a.project?.id,
+              projectName: a.project?.name,
+              projectSource: a.projectSource,
+              assignmentId: a.id,
+              role: a.role,
+            });
+          }
+        }
+      }
+
+      // If no project assignment managers exist, fallback to legacy reportingTo / manager
+      if (managersList.length === 0 && (emp.manager || emp.reportingTo)) {
+        const legacyMgr =
+          emp.manager || (emp.reportingTo ? managerMap.get(emp.reportingTo) : null);
+        if (legacyMgr) {
+          managersList.push({
+            id: legacyMgr.id,
+            firstName: legacyMgr.firstName,
+            lastName: legacyMgr.lastName,
+            workEmail: legacyMgr.workEmail,
+            photoUrl: legacyMgr.photoUrl || null,
+            status: legacyMgr.status || 'active',
+            isActive: (legacyMgr.status || 'active') === 'active',
+            projectName: 'General',
+            projectSource: 'general',
+          });
+        }
+      }
+
+      emp.managers = managersList;
+    }
+  }
+
+  // --- PROJECT ASSIGNMENTS CRUD ---
+  async getProjectAssignments(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+
+    const assignments = await this.assignmentRepository.find({
+      where: { organizationId, employeeId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const projectIds = assignments.map((a) => a.projectId).filter(Boolean);
+    const managerIds = assignments.map((a) => a.managerId).filter(Boolean);
+
+    const [internalProjects, clientProjects, managers] = await Promise.all([
+      projectIds.length
+        ? this.projectRepository.find({
+            where: { id: In(projectIds), organizationId },
+            select: ['id', 'name', 'status'],
+          })
+        : [],
+      projectIds.length
+        ? this.clientProjectRepository.find({
+            where: { id: In(projectIds), organizationId },
+            select: ['id', 'projectName', 'projectCode', 'status'],
+          })
+        : [],
+      managerIds.length
+        ? this.employeeRepository.find({
+            where: { id: In(managerIds), organizationId },
+            relations: ['designation'],
+            select: [
+              'id',
+              'firstName',
+              'lastName',
+              'workEmail',
+              'photoUrl',
+              'passportPhotoUrl',
+              'status',
+              'employeeCode',
+            ],
+          })
+        : [],
+    ]);
+
+    const projectMap = new Map<string, any>();
+    for (const p of internalProjects) {
+      projectMap.set(`internal:${p.id}`, { ...p, source: 'internal' });
+      projectMap.set(p.id, { ...p, source: 'internal' });
+    }
+    for (const cp of clientProjects) {
+      const obj = {
+        id: cp.id,
+        name: cp.projectName,
+        code: cp.projectCode,
+        status: cp.status,
+        source: 'client',
+      };
+      projectMap.set(`client:${cp.id}`, obj);
+      if (!projectMap.has(cp.id)) {
+        projectMap.set(cp.id, obj);
+      }
+    }
+
+    const managerMap = new Map<string, any>();
+    for (const m of managers) {
+      const signedPhoto = await this.signIfNeeded(this.getProfilePhotoKey(m));
+      managerMap.set(m.id, {
+        id: m.id,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        workEmail: m.workEmail,
+        employeeCode: m.employeeCode,
+        photoUrl: signedPhoto,
+        status: m.status,
+        isActive: m.status === 'active',
+      });
+    }
+
+    return assignments.map((a) => {
+      const projKey = `${a.projectSource || 'internal'}:${a.projectId}`;
+      const project = projectMap.get(projKey) ||
+        projectMap.get(a.projectId) || {
+          id: a.projectId,
+          name: 'Project',
+          source: a.projectSource || 'internal',
+        };
+      const manager = a.managerId ? managerMap.get(a.managerId) || null : null;
+      return {
+        id: a.id,
+        employeeId: a.employeeId,
+        projectId: a.projectId,
+        projectSource: a.projectSource || 'internal',
+        managerId: a.managerId,
+        role: a.role || 'member',
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+        project,
+        manager,
+      };
+    });
+  }
+
+  async assignProject(
+    organizationId: string,
+    employeeId: string,
+    dto: {
+      projectId: string;
+      projectSource?: 'internal' | 'client';
+      managerId?: string;
+      role?: string;
+    },
+  ) {
+    const {
+      projectId,
+      projectSource = 'internal',
+      managerId,
+      role = 'member',
+    } = dto;
+
+    // 1. Employee must exist
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException(
+        `Employee with ID ${employeeId} not found in this organization`,
+      );
+    }
+
+    // 2. Project must exist
+    let projectExists = false;
+    let projectName = '';
+    if (projectSource === 'client') {
+      const cp = await this.clientProjectRepository.findOne({
+        where: { id: projectId, organizationId },
+      });
+      if (cp) {
+        projectExists = true;
+        projectName = cp.projectName;
+      }
+    } else {
+      const ip = await this.projectRepository.findOne({
+        where: { id: projectId, organizationId },
+      });
+      if (ip) {
+        projectExists = true;
+        projectName = ip.name;
+      }
+    }
+
+    if (!projectExists) {
+      throw new BadRequestException(
+        `Project with ID ${projectId} not found in this organization`,
+      );
+    }
+
+    // 3. Manager must exist and be ACTIVE
+    if (managerId) {
+      const manager = await this.employeeRepository.findOne({
+        where: { id: managerId, organizationId },
+      });
+      if (!manager) {
+        throw new BadRequestException(
+          `Manager with ID ${managerId} not found in this organization`,
+        );
+      }
+      if (manager.status !== 'active') {
+        throw new BadRequestException(
+          `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+        );
+      }
+      if (manager.id === employeeId) {
+        throw new BadRequestException(
+          'Employee cannot be assigned as their own manager',
+        );
+      }
+    }
+
+    // 4. Check duplicate assignment (employee_id + project_id + project_source)
+    const existing = await this.assignmentRepository.findOne({
+      where: {
+        organizationId,
+        employeeId,
+        projectId,
+        projectSource,
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        `Employee is already assigned to this project (${projectName})`,
+      );
+    }
+
+    // 5. Create assignment
+    const assignment = this.assignmentRepository.create({
+      organizationId,
+      employeeId,
+      projectId,
+      projectSource,
+      managerId: managerId || null,
+      role: role || 'member',
+    });
+
+    await this.assignmentRepository.save(assignment);
+
+    // Sync with project members table if needed
+    try {
+      if (projectSource === 'client' && employee.userId) {
+        const existingMember = await this.clientProjectMemberRepository.findOne({
+          where: { projectId, userId: employee.userId },
+        });
+        if (!existingMember) {
+          await this.clientProjectMemberRepository.save(
+            this.clientProjectMemberRepository.create({
+              projectId,
+              userId: employee.userId,
+              role: role || 'member',
+            }),
+          );
+        }
+      } else if (employee.userId) {
+        const existingMember = await this.projectMemberRepository.findOne({
+          where: { projectId, userId: employee.userId },
+        });
+        if (!existingMember) {
+          await this.projectMemberRepository.save(
+            this.projectMemberRepository.create({
+              projectId,
+              userId: employee.userId,
+              role: role || 'member',
+            }),
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('Could not sync project member row:', e);
+    }
+
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+
+    return this.getProjectAssignments(organizationId, employeeId);
+  }
+
+  async updateProjectAssignment(
+    organizationId: string,
+    employeeId: string,
+    assignmentId: string,
+    dto: {
+      projectId?: string;
+      projectSource?: 'internal' | 'client';
+      managerId?: string | null;
+      role?: string;
+    },
+  ) {
+    const assignment = await this.assignmentRepository.findOne({
+      where: { id: assignmentId, organizationId, employeeId },
+    });
+    if (!assignment) {
+      throw new NotFoundException(
+        `Project assignment with ID ${assignmentId} not found`,
+      );
+    }
+
+    if (dto.managerId !== undefined) {
+      if (dto.managerId) {
+        const manager = await this.employeeRepository.findOne({
+          where: { id: dto.managerId, organizationId },
+        });
+        if (!manager) {
+          throw new BadRequestException(
+            `Manager with ID ${dto.managerId} not found`,
+          );
+        }
+        if (manager.status !== 'active') {
+          throw new BadRequestException(
+            `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+          );
+        }
+        if (manager.id === employeeId) {
+          throw new BadRequestException(
+            'Employee cannot be assigned as their own manager',
+          );
+        }
+        assignment.managerId = dto.managerId;
+      } else {
+        assignment.managerId = null;
+      }
+    }
+
+    if (
+      dto.projectId &&
+      (dto.projectId !== assignment.projectId ||
+        dto.projectSource !== assignment.projectSource)
+    ) {
+      const newSource = dto.projectSource || assignment.projectSource;
+      const dup = await this.assignmentRepository.findOne({
+        where: {
+          organizationId,
+          employeeId,
+          projectId: dto.projectId,
+          projectSource: newSource,
+        },
+      });
+      if (dup && dup.id !== assignmentId) {
+        throw new ConflictException(
+          'Employee is already assigned to this project',
+        );
+      }
+      assignment.projectId = dto.projectId;
+      assignment.projectSource = newSource;
+    }
+
+    if (dto.role) {
+      assignment.role = dto.role;
+    }
+
+    await this.assignmentRepository.save(assignment);
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+
+    return this.getProjectAssignments(organizationId, employeeId);
+  }
+
+  async removeProjectAssignment(
+    organizationId: string,
+    employeeId: string,
+    assignmentId: string,
+  ) {
+    const assignment = await this.assignmentRepository.findOne({
+      where: { id: assignmentId, organizationId, employeeId },
+    });
+    if (!assignment) {
+      throw new NotFoundException(
+        `Project assignment with ID ${assignmentId} not found`,
+      );
+    }
+
+    await this.assignmentRepository.remove(assignment);
+    await this.invalidateEmployeeCache(organizationId, employeeId);
+
+    return {
+      success: true,
+      message: 'Project assignment removed successfully',
+    };
+  }
+
   // --- CACHE INVALIDATION HELPER ---
   private async invalidateEmployeeCache(
     organizationId: string,
     employeeId?: string,
   ) {
     try {
-      // Invalidate employee list cache for the organization
-      const orgCacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}`;
-      await this.cacheManager.del(orgCacheKey);
-      console.log(
-        '🗑️ Invalidated employee list cache for org:',
-        organizationId,
-      );
+      // Invalidate employee list caches for the organization
+      await Promise.all([
+        this.cacheManager.del(`${CACHE_KEYS.EMPLOYEES}:${organizationId}`),
+        this.cacheManager.del(
+          `${CACHE_KEYS.EMPLOYEES}:${organizationId}:active`,
+        ),
+        this.cacheManager.del(
+          `${CACHE_KEYS.EMPLOYEES}:${organizationId}:inactive`,
+        ),
+        this.cacheManager.del(`${CACHE_KEYS.EMPLOYEES}:${organizationId}:all`),
+        this.cacheManager.del(`managers:${organizationId}`),
+        this.cacheManager.del(`${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`),
+      ]);
 
-      // Invalidate specific employee cache if provided
       if (employeeId) {
-        const empCacheKey = `${CACHE_KEYS.EMPLOYEE}:${employeeId}`;
-        await this.cacheManager.del(empCacheKey);
-        console.log('🗑️ Invalidated employee cache:', employeeId);
+        await this.cacheManager.del(`${CACHE_KEYS.EMPLOYEE}:${employeeId}`);
       }
-
-      // Invalidate dashboard stats cache
-      const statsCacheKey = `${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`;
-      await this.cacheManager.del(statsCacheKey);
-      console.log(
-        '🗑️ Invalidated dashboard stats cache for org:',
-        organizationId,
-      );
+      console.log('🗑️ Invalidated all employee caches for org:', organizationId);
     } catch (error) {
       console.error('❌ Error invalidating cache:', error);
-      // Don't throw - cache invalidation failure shouldn't break the operation
     }
   }
 

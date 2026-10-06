@@ -166,7 +166,7 @@ export class DashboardController {
       page,
       limit,
       search: search?.trim() || '',
-      status: status || 'all',
+      status: status || 'active',
       department: department || 'all',
       designation: designation || 'all',
       branch: branch || 'all',

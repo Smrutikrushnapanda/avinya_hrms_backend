@@ -640,19 +640,65 @@ export class ProjectService implements OnModuleInit {
     organizationId: string,
   ): Promise<boolean> {
     if (project.createdByUserId === userId) return true;
+
+    const actorEmployee = await this.employeeRepo.findOne({
+      where: [{ userId, organizationId }, { userId }],
+      select: ['id'],
+    });
+
     const member = await this.findMembershipByIdentity(
       project.id,
       userId,
       organizationId,
     );
+    if (member?.role) {
+      const normalizedRole = member.role.trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const managerRoles = [
+        'manager',
+        'lead',
+        'projectmanager',
+        'projectlead',
+        'teamlead',
+        'techlead',
+        'admin',
+        'pm',
+        'tl',
+        'owner',
+      ];
+      if (managerRoles.some((r) => normalizedRole.includes(r))) {
+        return true;
+      }
+    }
+
+    // Check multi-manager assignments for this internal project
+    try {
+      const assignmentCount = await this.projectRepo.query(
+        `SELECT COUNT(*) AS count FROM employee_project_assignments 
+         WHERE project_id = $1 AND project_source = 'internal' 
+         AND (manager_id = $2 OR manager_id = $3)`,
+        [project.id, actorEmployee?.id || '00000000-0000-0000-0000-000000000000', userId],
+      );
+      if (parseInt(assignmentCount[0]?.count || '0', 10) > 0) {
+        return true;
+      }
+    } catch {
+      // Ignore if table not yet initialized
+    }
+
+    const userWithRoles = await this.userRepo.findOne({
+      where: { id: userId },
+      relations: ['roles'],
+    });
     if (
-      member?.role &&
-      ['manager', 'lead', 'project_manager', 'admin'].includes(
-        member.role.trim().toLowerCase(),
+      userWithRoles?.roles?.some((r) =>
+        ['ADMIN', 'SUPER_ADMIN', 'ORG_ADMIN', 'MANAGER'].includes(
+          r.roleName?.toUpperCase(),
+        ),
       )
     ) {
       return true;
     }
+
     return false;
   }
 
@@ -1231,6 +1277,7 @@ export class ProjectService implements OnModuleInit {
       .leftJoinAndSelect('emp.department', 'department')
       .leftJoinAndSelect('emp.designation', 'designation')
       .where('emp.organizationId = :organizationId', { organizationId })
+      .andWhere("emp.status = 'active'")
       .andWhere('emp.userId <> :requestingUserId', { requestingUserId })
       .andWhere('emp.userId IS NOT NULL')
       .andWhere(
@@ -1293,12 +1340,39 @@ export class ProjectService implements OnModuleInit {
       return [];
     }
 
-    // Get all employees who report to this manager
-    const teamMembers = await this.employeeRepo.find({
-      where: { reportingTo: employee.id, organizationId },
-      relations: ['user', 'department', 'designation'],
-      order: { firstName: 'ASC' },
-    });
+    // Get all employees who report to this manager directly or via project assignment
+    const assignedEmpRows = await this.employeeRepo
+      .query(
+        `SELECT DISTINCT employee_id FROM employee_project_assignments WHERE manager_id = $1 AND organization_id = $2`,
+        [employee.id, organizationId],
+      )
+      .catch(() => []);
+    const assignedEmpIds = assignedEmpRows
+      .map((r: any) => r.employee_id)
+      .filter(Boolean);
+
+    const qb = this.employeeRepo
+      .createQueryBuilder('emp')
+      .leftJoinAndSelect('emp.user', 'user')
+      .leftJoinAndSelect('emp.department', 'department')
+      .leftJoinAndSelect('emp.designation', 'designation')
+      .where('emp.organizationId = :organizationId', { organizationId })
+      .andWhere("emp.status = 'active'");
+
+    if (assignedEmpIds.length > 0) {
+      qb.andWhere(
+        new Brackets((b) => {
+          b.where('emp.reportingTo = :empId', { empId: employee.id }).orWhere(
+            'emp.id IN (:...assignedEmpIds)',
+            { assignedEmpIds },
+          );
+        }),
+      );
+    } else {
+      qb.andWhere('emp.reportingTo = :empId', { empId: employee.id });
+    }
+
+    const teamMembers = await qb.orderBy('emp.firstName', 'ASC').getMany();
 
     return teamMembers.map((tm) => ({
       employeeId: tm.id,
