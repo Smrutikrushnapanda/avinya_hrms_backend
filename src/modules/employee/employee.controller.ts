@@ -797,10 +797,10 @@ export class EmployeeController {
     return res.end(pdfBuffer);
   }
 
-  // --- EMPLOYEE LETTERS (EXPERIENCE & RELIEVING) ---
+  // --- EMPLOYEE LETTERS (EXPERIENCE, RELIEVING & JOINING) ---
   @Post(':id/letters/preview')
   @ApiOperation({
-    summary: 'Preview experience or relieving letter for employee',
+    summary: 'Preview experience, relieving or joining letter for employee',
   })
   async previewLetter(
     @Param('id') id: string,
@@ -814,7 +814,8 @@ export class EmployeeController {
 
   @Get(':id/letters/:type/pdf')
   @ApiOperation({
-    summary: 'Download experience or relieving letter PDF for employee',
+    summary:
+      'Download experience, relieving or joining letter PDF for employee',
   })
   async downloadLetterPdf(
     @Param('id') id: string,
@@ -834,7 +835,9 @@ export class EmployeeController {
     const docName =
       type === DocumentTemplateType.EXPERIENCE_LETTER
         ? 'Experience-Certificate'
-        : 'Relieving-Letter';
+        : type === DocumentTemplateType.JOINING_LETTER
+          ? 'Joining-Letter'
+          : 'Relieving-Letter';
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${docName}-${employee.employeeCode || employee.id}.pdf"`,

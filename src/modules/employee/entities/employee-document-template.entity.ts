@@ -13,6 +13,7 @@ import { Organization } from 'src/modules/auth-core/entities/organization.entity
 export enum DocumentTemplateType {
   EXPERIENCE_LETTER = 'EXPERIENCE_LETTER',
   RELIEVING_LETTER = 'RELIEVING_LETTER',
+  JOINING_LETTER = 'JOINING_LETTER',
 }
 
 @Entity('employee_document_templates')

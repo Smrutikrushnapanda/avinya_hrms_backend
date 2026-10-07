@@ -3919,6 +3919,14 @@ export class EmployeeService implements OnModuleInit {
   }
 
   // --- DOCUMENT TEMPLATES & LETTERS ---
+  getDefaultTemplateName(type: DocumentTemplateType): string {
+    if (type === DocumentTemplateType.EXPERIENCE_LETTER)
+      return 'Default Experience Letter';
+    if (type === DocumentTemplateType.JOINING_LETTER)
+      return 'Default Joining Letter';
+    return 'Default Relieving Letter';
+  }
+
   getDefaultTemplateContent(type: DocumentTemplateType): string {
     if (type === DocumentTemplateType.EXPERIENCE_LETTER) {
       return `<p><strong>TO WHOM IT MAY CONCERN</strong></p>
@@ -3930,6 +3938,35 @@ export class EmployeeService implements OnModuleInit {
 <p>During their tenure, we found them to be hard-working, punctual, and professional in all interactions. Their character and conduct were found to be exemplary throughout their service with us.</p>
 <p><br></p>
 <p>We wish <strong>{{employee_name}}</strong> the very best in all future career endeavors and personal pursuits.</p>
+<p><br></p>
+<p>Sincerely,</p>
+<p><strong>Authorized Signatory</strong><br>{{organization_name}}</p>`;
+    }
+
+    if (type === DocumentTemplateType.JOINING_LETTER) {
+      return `<p><strong>JOINING LETTER</strong></p>
+<p><br></p>
+<p>Date: <strong>{{current_date}}</strong></p>
+<p><br></p>
+<p>Dear <strong>{{employee_name}}</strong>,</p>
+<p><br></p>
+<p>We are pleased to confirm your appointment with <strong>{{organization_name}}</strong> as <strong>{{designation}}</strong> in the <strong>{{department}}</strong> department. Your date of joining with us is <strong>{{joining_date}}</strong>.</p>
+<p><br></p>
+<p><strong>Employee Details:</strong></p>
+<ul>
+  <li><strong>Employee Name:</strong> {{employee_name}}</li>
+  <li><strong>Employee ID:</strong> {{employee_id}}</li>
+  <li><strong>Designation:</strong> {{designation}}</li>
+  <li><strong>Department:</strong> {{department}}</li>
+  <li><strong>Date of Joining:</strong> {{joining_date}}</li>
+  <li><strong>Reporting Manager:</strong> {{reporting_manager}}</li>
+  <li><strong>Work Email:</strong> {{email}}</li>
+  <li><strong>Contact Number:</strong> {{phone}}</li>
+</ul>
+<p><br></p>
+<p>Please report to the HR department on your date of joining carrying the original documents for verification. We look forward to a long and successful association with us.</p>
+<p><br></p>
+<p>Welcome aboard!</p>
 <p><br></p>
 <p>Sincerely,</p>
 <p><strong>Authorized Signatory</strong><br>{{organization_name}}</p>`;
@@ -3971,6 +4008,7 @@ export class EmployeeService implements OnModuleInit {
     const types = [
       DocumentTemplateType.EXPERIENCE_LETTER,
       DocumentTemplateType.RELIEVING_LETTER,
+      DocumentTemplateType.JOINING_LETTER,
     ];
 
     const result = [];
@@ -3980,10 +4018,7 @@ export class EmployeeService implements OnModuleInit {
         existing = this.templateRepository.create({
           organizationId,
           templateType: type,
-          templateName:
-            type === DocumentTemplateType.EXPERIENCE_LETTER
-              ? 'Default Experience Letter'
-              : 'Default Relieving Letter',
+          templateName: this.getDefaultTemplateName(type),
           content: this.getDefaultTemplateContent(type),
           isActive: true,
         });
@@ -4007,10 +4042,7 @@ export class EmployeeService implements OnModuleInit {
       template = this.templateRepository.create({
         organizationId,
         templateType: type,
-        templateName:
-          type === DocumentTemplateType.EXPERIENCE_LETTER
-            ? 'Default Experience Letter'
-            : 'Default Relieving Letter',
+        templateName: this.getDefaultTemplateName(type),
         content: this.getDefaultTemplateContent(type),
         isActive: true,
       });
@@ -4081,10 +4113,7 @@ export class EmployeeService implements OnModuleInit {
     });
 
     const defaultContent = this.getDefaultTemplateContent(type);
-    const defaultName =
-      type === DocumentTemplateType.EXPERIENCE_LETTER
-        ? 'Default Experience Letter'
-        : 'Default Relieving Letter';
+    const defaultName = this.getDefaultTemplateName(type);
 
     if (template) {
       template.templateName = defaultName;
@@ -4376,7 +4405,9 @@ export class EmployeeService implements OnModuleInit {
     const docTitleText =
       type === DocumentTemplateType.EXPERIENCE_LETTER
         ? 'Experience Certificate'
-        : 'Relieving Letter';
+        : type === DocumentTemplateType.JOINING_LETTER
+          ? 'Joining Letter'
+          : 'Relieving Letter';
 
     const fullHtml = `
       <!DOCTYPE html>
@@ -4447,7 +4478,9 @@ export class EmployeeService implements OnModuleInit {
       const docTitle =
         type === DocumentTemplateType.EXPERIENCE_LETTER
           ? 'EXPERIENCE CERTIFICATE'
-          : 'RELIEVING LETTER';
+          : type === DocumentTemplateType.JOINING_LETTER
+            ? 'JOINING LETTER'
+            : 'RELIEVING LETTER';
       const lines = this.stripHtmlToLines(preview.renderedHtml);
       return this.createFallbackPdfBuffer(`${org.name} - ${docTitle}`, [
         { lines },
