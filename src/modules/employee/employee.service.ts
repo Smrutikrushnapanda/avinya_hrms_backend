@@ -9,7 +9,13 @@ import {
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager, MoreThan, QueryFailedError, In } from 'typeorm';
+import {
+  Repository,
+  EntityManager,
+  MoreThan,
+  QueryFailedError,
+  In,
+} from 'typeorm';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
 import { Department } from './entities/department.entity';
@@ -45,21 +51,34 @@ import {
   EmployeeDocumentTemplate,
   DocumentTemplateType,
 } from './entities/employee-document-template.entity';
-import { EmployeeSettlement, SettlementStatus } from './entities/employee-settlement.entity';
+import {
+  EmployeeSettlement,
+  SettlementStatus,
+} from './entities/employee-settlement.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
 import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
+import { PayrollSettings } from '../payroll/entities/payroll-settings.entity';
 import { LeaveBalance } from '../leave/entities/leave-balance.entity';
-import { CreateEmployeeAssetDto, UpdateEmployeeAssetDto, ReturnAssetDto } from './dto/employee-asset.dto';
+import {
+  CreateEmployeeAssetDto,
+  UpdateEmployeeAssetDto,
+  ReturnAssetDto,
+} from './dto/employee-asset.dto';
 import { CreateEmployeeDocumentDto } from './dto/employee-document.dto';
 import {
   CreateDocumentTemplateDto,
   UpdateDocumentTemplateDto,
   PreviewLetterDto,
 } from './dto/employee-document-template.dto';
-import { SaveSettlementDto, AssignManagerDto } from './dto/employee-settlement.dto';
+import {
+  SaveSettlementDto,
+  AssignManagerDto,
+} from './dto/employee-settlement.dto';
 import * as puppeteer from 'puppeteer';
 import * as fs from 'fs';
+import * as https from 'https';
+import * as http from 'http';
 
 // Cache key constants
 const CACHE_KEYS = {
@@ -139,6 +158,9 @@ export class EmployeeService implements OnModuleInit {
 
     @InjectRepository(SalaryStructure)
     private readonly salaryStructureRepository: Repository<SalaryStructure>,
+
+    @InjectRepository(PayrollSettings)
+    private readonly payrollSettingsRepository: Repository<PayrollSettings>,
 
     @InjectRepository(LeaveBalance)
     private readonly leaveBalanceRepository: Repository<LeaveBalance>,
@@ -2049,11 +2071,12 @@ export class EmployeeService implements OnModuleInit {
       const projKey = a.projectSource
         ? `${a.projectSource}:${a.projectId}`
         : a.projectId;
-      const project = projectMap.get(projKey) || projectMap.get(a.projectId) || {
-        id: a.projectId,
-        name: 'Project',
-        source: a.projectSource || 'internal',
-      };
+      const project = projectMap.get(projKey) ||
+        projectMap.get(a.projectId) || {
+          id: a.projectId,
+          name: 'Project',
+          source: a.projectSource || 'internal',
+        };
       const manager = a.managerId ? managerMap.get(a.managerId) || null : null;
 
       const item = {
@@ -2120,19 +2143,21 @@ export class EmployeeService implements OnModuleInit {
             source: a.projectSource,
             assignmentId: a.id,
             role: a.role,
-            managerType: isPrimary ? 'PRIMARY' : (a.managerType || 'SECONDARY'),
+            managerType: isPrimary ? 'PRIMARY' : a.managerType || 'SECONDARY',
           };
 
           if (existing) {
             if (isPrimary) existing.managerType = 'PRIMARY';
-            const hasProj = existing.projects.some((p: any) => p.id === projectItem.id);
+            const hasProj = existing.projects.some(
+              (p: any) => p.id === projectItem.id,
+            );
             if (!hasProj) {
               existing.projects.push(projectItem);
             }
           } else {
             managerDict.set(mId, {
               ...a.manager,
-              managerType: isPrimary ? 'PRIMARY' : (a.managerType || 'SECONDARY'),
+              managerType: isPrimary ? 'PRIMARY' : a.managerType || 'SECONDARY',
               projects: [projectItem],
             });
           }
@@ -2154,8 +2179,10 @@ export class EmployeeService implements OnModuleInit {
 
       // Sort: PRIMARY first, then SECONDARY
       const managersList = Array.from(managerDict.values()).sort((a, b) => {
-        if (a.managerType === 'PRIMARY' && b.managerType !== 'PRIMARY') return -1;
-        if (b.managerType === 'PRIMARY' && a.managerType !== 'PRIMARY') return 1;
+        if (a.managerType === 'PRIMARY' && b.managerType !== 'PRIMARY')
+          return -1;
+        if (b.managerType === 'PRIMARY' && a.managerType !== 'PRIMARY')
+          return 1;
         return 0;
       });
 
@@ -2193,7 +2220,9 @@ export class EmployeeService implements OnModuleInit {
       where: { id: dto.managerId, organizationId },
     });
     if (!manager) {
-      throw new BadRequestException(`Manager with ID ${dto.managerId} not found`);
+      throw new BadRequestException(
+        `Manager with ID ${dto.managerId} not found`,
+      );
     }
     if (manager.status !== 'active') {
       throw new BadRequestException(
@@ -2201,11 +2230,16 @@ export class EmployeeService implements OnModuleInit {
       );
     }
     if (manager.id === employeeId) {
-      throw new BadRequestException('Employee cannot be assigned as their own manager');
+      throw new BadRequestException(
+        'Employee cannot be assigned as their own manager',
+      );
     }
 
     // Check circular reporting
-    const isCircular = await this.checkCircularReporting(employeeId, dto.managerId);
+    const isCircular = await this.checkCircularReporting(
+      employeeId,
+      dto.managerId,
+    );
     if (isCircular) {
       throw new BadRequestException(
         'Circular reporting relationship detected. Cannot assign manager.',
@@ -2216,7 +2250,8 @@ export class EmployeeService implements OnModuleInit {
     // If employee has no primary manager (reportingTo is null), this first manager is PRIMARY.
     // If employee already has a reportingTo, new manager defaults to SECONDARY unless requested as PRIMARY.
     const isFirstManager = !employee.reportingTo;
-    const requestedType = dto.managerType || (isFirstManager ? 'PRIMARY' : 'SECONDARY');
+    const requestedType =
+      dto.managerType || (isFirstManager ? 'PRIMARY' : 'SECONDARY');
 
     if (requestedType === 'PRIMARY') {
       employee.reportingTo = manager.id;
@@ -2275,13 +2310,17 @@ export class EmployeeService implements OnModuleInit {
       throw new BadRequestException(`Manager with ID ${managerId} not found`);
     }
     if (manager.status !== 'active') {
-      throw new BadRequestException('Cannot set inactive employee as primary manager');
+      throw new BadRequestException(
+        'Cannot set inactive employee as primary manager',
+      );
     }
 
     // Check circular reporting
     const isCircular = await this.checkCircularReporting(employeeId, managerId);
     if (isCircular) {
-      throw new BadRequestException('Circular reporting relationship detected.');
+      throw new BadRequestException(
+        'Circular reporting relationship detected.',
+      );
     }
 
     employee.reportingTo = managerId;
@@ -2408,7 +2447,8 @@ export class EmployeeService implements OnModuleInit {
     if (dto.assetType !== undefined) asset.assetType = dto.assetType;
     if (dto.assetName !== undefined) asset.assetName = dto.assetName;
     if (dto.assetId !== undefined) asset.assetId = dto.assetId;
-    if (dto.serialNumber !== undefined) asset.serialNumber = dto.serialNumber || null;
+    if (dto.serialNumber !== undefined)
+      asset.serialNumber = dto.serialNumber || null;
     if (dto.brand !== undefined) asset.brand = dto.brand || null;
     if (dto.model !== undefined) asset.model = dto.model || null;
     if (dto.condition !== undefined) asset.condition = dto.condition;
@@ -2548,7 +2588,10 @@ export class EmployeeService implements OnModuleInit {
     return await Promise.all(
       docs.map(async (doc) => {
         let downloadUrl = doc.fileUrl;
-        if (!doc.fileUrl.startsWith('http') && !doc.fileUrl.startsWith('data:')) {
+        if (
+          !doc.fileUrl.startsWith('http') &&
+          !doc.fileUrl.startsWith('data:')
+        ) {
           try {
             downloadUrl =
               (await this.storageService.getSignedUrl(doc.fileUrl)) ||
@@ -2648,7 +2691,7 @@ export class EmployeeService implements OnModuleInit {
     let totalLeaveDays = 0;
     for (const lb of leaveBalances) {
       const bal = Number(
-        lb.closingBalance ?? (lb.openingBalance + lb.accrued - lb.consumed),
+        lb.closingBalance ?? lb.openingBalance + lb.accrued - lb.consumed,
       );
       if (bal > 0) {
         totalLeaveDays += bal;
@@ -2659,7 +2702,10 @@ export class EmployeeService implements OnModuleInit {
       ? Number(salaryStructure.grossSalary || salaryStructure.basic || 0)
       : 0;
     const dailyRate = monthlyGross > 0 ? monthlyGross / 30 : 0;
-    const encashmentAmount = totalLeaveDays > 0 && dailyRate > 0 ? Math.round(totalLeaveDays * dailyRate) : null;
+    const encashmentAmount =
+      totalLeaveDays > 0 && dailyRate > 0
+        ? Math.round(totalLeaveDays * dailyRate)
+        : null;
     const resignationDate = resignationReq?.createdAt
       ? DateTime.fromJSDate(new Date(resignationReq.createdAt)).toISODate()
       : null;
@@ -2773,6 +2819,19 @@ export class EmployeeService implements OnModuleInit {
       return isNaN(num) ? null : num;
     };
 
+    // ✅ Validate: Last Working Date MUST be >= Resignation Date
+    if (dto.lastWorkingDate && dto.resignationDate) {
+      const lwd = new Date(String(dto.lastWorkingDate).slice(0, 10));
+      const rd = new Date(String(dto.resignationDate).slice(0, 10));
+      if (lwd < rd) {
+        throw new BadRequestException({
+          message:
+            'Last Working Date must be greater than or equal to Resignation Date.',
+          validation: 'lastWorkingDate_vs_resignationDate',
+        });
+      }
+    }
+
     let settlement = await this.settlementRepository.findOne({
       where: { organizationId, employeeId },
     });
@@ -2786,7 +2845,9 @@ export class EmployeeService implements OnModuleInit {
 
     settlement.resignationRequestId = dto.resignationRequestId || null;
     if (dto.resignationDate !== undefined)
-      settlement.resignationDate = dto.resignationDate ? String(dto.resignationDate).slice(0, 10) : null;
+      settlement.resignationDate = dto.resignationDate
+        ? String(dto.resignationDate).slice(0, 10)
+        : null;
     if (dto.noticePeriodDays !== undefined)
       settlement.noticePeriodDays =
         dto.noticePeriodDays !== null &&
@@ -2795,17 +2856,32 @@ export class EmployeeService implements OnModuleInit {
           ? Number(dto.noticePeriodDays)
           : 0;
     if (dto.lastWorkingDate !== undefined)
-      settlement.lastWorkingDate = dto.lastWorkingDate ? String(dto.lastWorkingDate).slice(0, 10) : null;
+      settlement.lastWorkingDate = dto.lastWorkingDate
+        ? String(dto.lastWorkingDate).slice(0, 10)
+        : null;
     if (dto.reasonForLeaving !== undefined)
       settlement.reasonForLeaving = dto.reasonForLeaving || null;
 
-    if (dto.salaryDue !== undefined) settlement.salaryDue = parseNullableNumber(dto.salaryDue);
-    if (dto.pendingSalary !== undefined) settlement.pendingSalary = parseNullableNumber(dto.pendingSalary);
-    if (dto.leaveEncashmentDays !== undefined) settlement.leaveEncashmentDays = parseNullableNumber(dto.leaveEncashmentDays);
-    if (dto.leaveEncashmentAmount !== undefined) settlement.leaveEncashmentAmount = parseNullableNumber(dto.leaveEncashmentAmount);
-    if (dto.bonusAmount !== undefined) settlement.bonusAmount = parseNullableNumber(dto.bonusAmount);
-    if (dto.incentiveAmount !== undefined) settlement.incentiveAmount = parseNullableNumber(dto.incentiveAmount);
-    if (dto.otherPayableAmount !== undefined) settlement.otherPayableAmount = parseNullableNumber(dto.otherPayableAmount);
+    if (dto.salaryDue !== undefined)
+      settlement.salaryDue = parseNullableNumber(dto.salaryDue);
+    if (dto.pendingSalary !== undefined)
+      settlement.pendingSalary = parseNullableNumber(dto.pendingSalary);
+    if (dto.leaveEncashmentDays !== undefined)
+      settlement.leaveEncashmentDays = parseNullableNumber(
+        dto.leaveEncashmentDays,
+      );
+    if (dto.leaveEncashmentAmount !== undefined)
+      settlement.leaveEncashmentAmount = parseNullableNumber(
+        dto.leaveEncashmentAmount,
+      );
+    if (dto.bonusAmount !== undefined)
+      settlement.bonusAmount = parseNullableNumber(dto.bonusAmount);
+    if (dto.incentiveAmount !== undefined)
+      settlement.incentiveAmount = parseNullableNumber(dto.incentiveAmount);
+    if (dto.otherPayableAmount !== undefined)
+      settlement.otherPayableAmount = parseNullableNumber(
+        dto.otherPayableAmount,
+      );
 
     const earningsArray = [
       settlement.salaryDue,
@@ -2814,7 +2890,7 @@ export class EmployeeService implements OnModuleInit {
       settlement.bonusAmount,
       settlement.incentiveAmount,
       settlement.otherPayableAmount,
-    ].filter((v) => v !== null && v !== undefined) as number[];
+    ].filter((v) => v !== null && v !== undefined);
 
     settlement.totalEarnings =
       earningsArray.length > 0
@@ -2822,27 +2898,38 @@ export class EmployeeService implements OnModuleInit {
         : null;
 
     if (dto.noticePeriodRecoveryAmount !== undefined)
-      settlement.noticePeriodRecoveryAmount = parseNullableNumber(dto.noticePeriodRecoveryAmount);
+      settlement.noticePeriodRecoveryAmount = parseNullableNumber(
+        dto.noticePeriodRecoveryAmount,
+      );
     if (dto.loanRecoveryAmount !== undefined)
-      settlement.loanRecoveryAmount = parseNullableNumber(dto.loanRecoveryAmount);
+      settlement.loanRecoveryAmount = parseNullableNumber(
+        dto.loanRecoveryAmount,
+      );
     if (dto.assetDeductionAmount !== undefined)
-      settlement.assetDeductionAmount = parseNullableNumber(dto.assetDeductionAmount);
+      settlement.assetDeductionAmount = parseNullableNumber(
+        dto.assetDeductionAmount,
+      );
     if (dto.otherDeductionsAmount !== undefined)
-      settlement.otherDeductionsAmount = parseNullableNumber(dto.otherDeductionsAmount);
+      settlement.otherDeductionsAmount = parseNullableNumber(
+        dto.otherDeductionsAmount,
+      );
 
     const deductionsArray = [
       settlement.noticePeriodRecoveryAmount,
       settlement.loanRecoveryAmount,
       settlement.assetDeductionAmount,
       settlement.otherDeductionsAmount,
-    ].filter((v) => v !== null && v !== undefined) as number[];
+    ].filter((v) => v !== null && v !== undefined);
 
     settlement.totalDeductions =
       deductionsArray.length > 0
         ? deductionsArray.reduce((acc, curr) => acc + Number(curr), 0)
         : null;
 
-    if (settlement.totalEarnings !== null || settlement.totalDeductions !== null) {
+    if (
+      settlement.totalEarnings !== null ||
+      settlement.totalDeductions !== null
+    ) {
       settlement.finalSettlementAmount =
         (settlement.totalEarnings ?? 0) - (settlement.totalDeductions ?? 0);
     } else {
@@ -2853,15 +2940,20 @@ export class EmployeeService implements OnModuleInit {
     settlement.deductionsRemarks = dto.deductionsRemarks || null;
 
     if (dto.status) settlement.status = dto.status as SettlementStatus;
-    if (dto.preparedBy !== undefined) settlement.preparedBy = dto.preparedBy || null;
-    if (dto.hrApprovalName !== undefined) settlement.hrApprovalName = dto.hrApprovalName || null;
+    if (dto.preparedBy !== undefined)
+      settlement.preparedBy = dto.preparedBy || null;
+    if (dto.hrApprovalName !== undefined)
+      settlement.hrApprovalName = dto.hrApprovalName || null;
     if (dto.financeApprovalName !== undefined)
       settlement.financeApprovalName = dto.financeApprovalName || null;
     if (dto.approvalDate !== undefined)
-      settlement.approvalDate = dto.approvalDate ? String(dto.approvalDate).slice(0, 10) : null;
+      settlement.approvalDate = dto.approvalDate
+        ? String(dto.approvalDate).slice(0, 10)
+        : null;
     if (dto.employeeDeclarationAcknowledged !== undefined)
-      settlement.employeeDeclarationAcknowledged =
-        Boolean(dto.employeeDeclarationAcknowledged);
+      settlement.employeeDeclarationAcknowledged = Boolean(
+        dto.employeeDeclarationAcknowledged,
+      );
     if (dto.remarks !== undefined) settlement.remarks = dto.remarks || null;
 
     return this.settlementRepository.save(settlement);
@@ -2878,7 +2970,8 @@ export class EmployeeService implements OnModuleInit {
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ].filter((p): p is string => !!p && fs.existsSync(p));
 
-    const executablePath = candidatePaths.length > 0 ? candidatePaths[0] : undefined;
+    const executablePath =
+      candidatePaths.length > 0 ? candidatePaths[0] : undefined;
 
     const args = [
       '--no-sandbox',
@@ -2916,6 +3009,554 @@ export class EmployeeService implements OnModuleInit {
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
+  }
+
+  /**
+   * Shared professional CSS styles for all PDF documents.
+   * Uses a corporate neutral design system with optional brand color.
+   * Designed for A4 @page with proper margins and print quality.
+   */
+  private buildProfessionalPdfStyles(
+    options: {
+      brandColor?: string;
+      brandColorLight?: string;
+      showPageNumbers?: boolean;
+      showHeader?: boolean;
+      showFooter?: boolean;
+      footerText?: string;
+    } = {},
+  ): string {
+    const brandColor = this.sanitizeBrandColor(options.brandColor) || '#1e3a5f'; // Professional dark blue
+    const brandColorLight =
+      options.brandColorLight || this.hexToRgba(brandColor, 0.06);
+
+    return `
+      @page { size: A4; }
+      * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html, body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        color: #1a1a2e;
+        background: #fff;
+        margin: 0;
+        padding: 0;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      /* Page header (in-document letterhead on first page) */
+      .doc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 2px solid ${brandColor};
+        padding-bottom: 10px;
+        margin-bottom: 18px;
+      }
+      .doc-header .org-info h1 {
+        margin: 0 0 4px 0;
+        font-size: 17px;
+        font-weight: 700;
+        color: ${brandColor};
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        line-height: 1.2;
+      }
+      .doc-header .org-info p {
+        margin: 1px 0;
+        color: #5a6a85;
+        font-size: 9px;
+        line-height: 1.4;
+      }
+      .doc-header .org-logo {
+        max-height: 55px;
+        max-width: 150px;
+        object-fit: contain;
+      }
+      /* Document end note (page numbers handled by print engine footer) */
+      .doc-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1px solid #d0d8e8;
+        padding-top: 8px;
+        margin-top: 18px;
+        font-size: 8.5px;
+        color: #7a8aa3;
+      }
+      .doc-footer .page-info {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .doc-footer .confidential { font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+
+      /* Document title bar */
+      .doc-title-bar {
+        background: ${brandColorLight};
+        border: 1px solid ${brandColor}40;
+        border-left: 4px solid ${brandColor};
+        padding: 10px 14px;
+        margin-bottom: 20px;
+        text-align: center;
+        page-break-inside: avoid;
+      }
+      .doc-title-bar h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        color: ${brandColor};
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+      }
+
+      /* Section container */
+      .section { margin-bottom: 20px; page-break-inside: avoid; }
+      .section-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: ${brandColor};
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        background: ${brandColorLight};
+        border-left: 4px solid ${brandColor};
+        padding: 8px 12px;
+        margin: 0 0 12px 0;
+      }
+
+      /* Info cards grid */
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 18px;
+        page-break-inside: avoid;
+      }
+      .info-card {
+        border: 1px solid #d8dfea;
+        border-radius: 6px;
+        padding: 12px 14px;
+        background: #fafbfd;
+      }
+      .info-card-title {
+        font-size: 9.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: ${brandColor};
+        letter-spacing: 0.3px;
+        border-bottom: 1px solid #d8dfea;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+      }
+      .info-table { width: 100%; border-collapse: collapse; }
+      .info-table td { padding: 3.5px 0; font-size: 10px; vertical-align: top; }
+      .info-table td.label { color: #5a6a85; width: 48%; }
+      .info-table td.value { font-weight: 600; color: #1a1a2e; text-align: right; }
+
+      /* Data tables */
+      .data-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; page-break-inside: auto; }
+      .data-table thead { display: table-header-group; }
+      .data-table tr { page-break-inside: avoid; }
+      .data-table th, .data-table td {
+        border: 1px solid #d0d8e8;
+        padding: 7px 10px;
+        font-size: 10px;
+        vertical-align: middle;
+      }
+      .data-table th {
+        background: ${brandColorLight};
+        text-align: left;
+        font-weight: 600;
+        color: ${brandColor};
+        border-bottom: 2px solid ${brandColor};
+      }
+      .data-table tbody tr:nth-child(even) { background: #fafbfd; }
+      .data-table tbody tr.total-row {
+        background: ${brandColorLight};
+        font-weight: 700;
+      }
+      .data-table .text-right { text-align: right; }
+      .data-table .text-center { text-align: center; }
+      .data-table td.remarks { color: #6b7b94; font-size: 9px; }
+
+      /* Status badge */
+      .status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 8.5px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+      }
+      .status-badge.cleared { background: #e8f5e9; color: #2e7d32; }
+      .status-badge.pending { background: #fff3e0; color: #e65100; }
+      .status-badge.draft { background: #e8eaf6; color: #283593; }
+
+      /* Net amount banner */
+      .net-banner {
+        background: ${brandColor};
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 18px 0;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+        page-break-inside: avoid;
+      }
+      .net-banner .label {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: rgba(255, 255, 255, 0.85);
+      }
+      .net-banner .amount {
+        font-size: 20px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.5px;
+      }
+
+      /* Declaration box */
+      .declaration-box {
+        border: 1px solid #d0d8e8;
+        border-left: 4px solid ${brandColor};
+        background: #fafbfd;
+        padding: 12px 14px;
+        border-radius: 4px;
+        font-size: 9.5px;
+        color: #3a4a64;
+        line-height: 1.6;
+        margin-bottom: 20px;
+        page-break-inside: avoid;
+      }
+      .declaration-box strong { color: ${brandColor}; }
+
+      /* Signatures grid */
+      .sig-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-top: 24px;
+        page-break-inside: avoid;
+      }
+      .sig-box {
+        border: 1px solid #c0c8d8;
+        border-radius: 6px;
+        padding: 14px;
+        min-height: 95px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        font-size: 9.5px;
+      }
+      .sig-title {
+        font-weight: 700;
+        color: ${brandColor};
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        font-size: 9px;
+        border-bottom: 1px solid #d8dfea;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+      }
+      .sig-name {
+        font-weight: 600;
+        color: #1a1a2e;
+        text-align: center;
+        margin-bottom: 4px;
+      }
+      .sig-date-line {
+        border-top: 1px solid #b0b8cc;
+        margin-top: 8px;
+        padding-top: 8px;
+        font-size: 8.5px;
+        color: #6b7b94;
+        text-align: center;
+      }
+
+      /* Stamp box */
+      .stamp-box {
+        border: 2px dashed ${brandColor}80;
+        border-radius: 6px;
+        padding: 12px;
+        min-height: 95px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: ${brandColor}90;
+        font-weight: 700;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.2px;
+        background: ${brandColor}08;
+      }
+      .stamp-box .seal-inner {
+        border: 1px dashed ${brandColor}80;
+        border-radius: 4px;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Letter-specific styles */
+      .letterhead {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 2px solid ${brandColor};
+        padding-bottom: 12px;
+        margin-bottom: 24px;
+      }
+      .letterhead .org-info h1 {
+        margin: 0 0 4px 0;
+        font-size: 18px;
+        font-weight: 700;
+        color: ${brandColor};
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .letterhead .org-info p { margin: 1px 0; color: #5a6a85; font-size: 9.5px; line-height: 1.4; }
+      .letterhead .org-logo { max-height: 60px; max-width: 160px; object-fit: contain; }
+
+      .letter-content { font-size: 12px; color: #1a1a2e; line-height: 1.7; }
+      .letter-content p { margin-bottom: 14px; text-align: justify; orphans: 3; widows: 3; }
+      .letter-content ul { margin: 12px 0 18px 22px; padding: 0; }
+      .letter-content li { margin-bottom: 6px; }
+      .letter-content h1, .letter-content h2, .letter-content h3, .letter-content h4 {
+        color: ${brandColor};
+        margin: 16px 0 8px 0;
+        page-break-after: avoid;
+      }
+      .letter-content h1 { font-size: 16px; font-weight: 700; }
+      .letter-content h2 { font-size: 14px; font-weight: 700; }
+      .letter-content h3, .letter-content h4 { font-size: 12.5px; font-weight: 700; }
+      .letter-content table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      .letter-content table th, .letter-content table td { border: 1px solid #d0d8e8; padding: 6px 9px; font-size: 11px; }
+      .letter-content table th { background: ${brandColorLight}; color: ${brandColor}; text-align: left; }
+      .letter-content a { color: ${brandColor}; text-decoration: none; }
+      .letter-content blockquote {
+        margin: 12px 0;
+        padding: 8px 14px;
+        border-left: 3px solid ${brandColor};
+        background: ${brandColorLight};
+        color: #3a4a64;
+      }
+
+      .signatures-container {
+        margin-top: 40px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        page-break-inside: avoid;
+      }
+      .signature-block { font-size: 11px; line-height: 1.6; }
+      .signature-line { width: 200px; border-bottom: 1px solid #9ca8bc; margin-bottom: 10px; height: 45px; }
+      .signature-block strong { color: ${brandColor}; display: block; margin-top: 8px; }
+
+      .letter-footer-note {
+        margin-top: 30px;
+        border-top: 1px solid #d8dfea;
+        padding-top: 10px;
+        font-size: 8.5px;
+        color: #7a8aa3;
+        text-align: center;
+      }
+
+      /* Utility classes */
+      .text-right { text-align: right; }
+      .text-center { text-align: center; }
+      .text-muted { color: #6b7b94; font-size: 9px; }
+      .bold { font-weight: 700; }
+    `;
+  }
+
+  /**
+   * Build the professional header element for running header/footer.
+   */
+  private buildHeaderElement(
+    orgName: string,
+    orgAddress: string,
+    orgContact: string,
+    orgLogo: string,
+  ): string {
+    const hasAddress = orgAddress && orgAddress.trim().length > 0;
+    const hasContact = orgContact && orgContact.trim().length > 0;
+    return `
+      <div class="doc-header">
+        <div class="org-info">
+          <h1>${orgName}</h1>
+          ${hasAddress ? `<p>${orgAddress}</p>` : ''}
+          ${hasContact ? `<p>Contact: ${orgContact}</p>` : ''}
+        </div>
+        ${orgLogo ? `<img src="${orgLogo}" class="org-logo" alt="${orgName} Logo" />` : ''}
+      </div>
+    `;
+  }
+
+  /**
+   * Normalize a brand color to a 6-digit hex value (returns null when unusable).
+   */
+  private sanitizeBrandColor(color?: string | null): string | null {
+    if (!color) return null;
+    const c = color.trim();
+    const shortHex = c.match(/^#([0-9a-fA-F]{3})$/);
+    if (shortHex) {
+      const s = shortHex[1];
+      return `#${s[0]}${s[0]}${s[1]}${s[1]}${s[2]}${s[2]}`.toLowerCase();
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(c)) return c.toLowerCase();
+    const rgb = c.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+    if (rgb) {
+      return `#${rgb
+        .slice(1, 4)
+        .map((n) => Math.min(255, Number(n)).toString(16).padStart(2, '0'))
+        .join('')}`;
+    }
+    return null;
+  }
+
+  /**
+   * Convert a 6-digit hex color to an rgba() string with the given alpha.
+   */
+  private hexToRgba(hex: string, alpha: number): string {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    if ([r, g, b].some((n) => isNaN(n))) return `rgba(30, 58, 95, ${alpha})`;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  /**
+   * Fetch a remote image URL and convert it to a base64 data URI so PDF
+   * generation never depends on runtime network/CORS (same approach as payslip PDFs).
+   */
+  private async fetchLogoAsDataUri(url: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+      const client = url.startsWith('https') ? https : http;
+      const req = client.get(url, { timeout: 10000 }, (res) => {
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          this.fetchLogoAsDataUri(res.headers.location)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          reject(new Error(`Logo fetch failed with status ${res.statusCode}`));
+          return;
+        }
+        const contentType = res.headers['content-type'] || 'image/png';
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const base64 = Buffer.concat(chunks).toString('base64');
+          resolve(`data:${contentType};base64,${base64}`);
+        });
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Logo fetch timed out'));
+      });
+    });
+  }
+
+  /**
+   * Resolve PDF branding (color, logo, footer note) from existing organization
+   * configuration: payroll_settings (primaryColor / logoUrl / footerNote)
+   * falling back to organizations.logoUrl. Never hardcodes brand values.
+   */
+  private async getPdfBranding(
+    organizationId: string,
+    org?: Organization | null,
+  ): Promise<{
+    brandColor: string;
+    logoUrl: string;
+    footerNote: string;
+    organization: Organization | null;
+  }> {
+    const [payrollSettings, organization] = await Promise.all([
+      this.payrollSettingsRepository.findOne({ where: { organizationId } }),
+      org
+        ? Promise.resolve(org)
+        : this.organizationRepository.findOne({
+            where: { id: organizationId },
+          }),
+    ]);
+
+    const brandColor =
+      this.sanitizeBrandColor(payrollSettings?.primaryColor) || '#1e3a5f';
+
+    const logoUrl = payrollSettings?.logoUrl || organization?.logoUrl || '';
+    let resolvedLogo = logoUrl;
+    if (logoUrl) {
+      try {
+        resolvedLogo = (await this.fetchLogoAsDataUri(logoUrl)) || logoUrl;
+      } catch {
+        resolvedLogo = logoUrl;
+      }
+    }
+
+    return {
+      brandColor,
+      logoUrl: resolvedLogo,
+      footerNote: payrollSettings?.footerNote || '',
+      organization: organization || null,
+    };
+  }
+
+  /**
+   * Escape text for safe interpolation into HTML/print templates.
+   */
+  private escapeHtmlText(value: string): string {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * Slim running header used by the print engine on every page (inline styles only).
+   */
+  private buildPuppeteerHeaderTemplate(
+    orgName: string,
+    docTitle: string,
+    brandColor: string,
+  ): string {
+    const name = this.escapeHtmlText(orgName);
+    const title = this.escapeHtmlText(docTitle);
+    return `<div style="width:100%; font-family:Arial,Helvetica,sans-serif; font-size:8px; color:#5a6a85; padding:0 6mm; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid ${brandColor}; padding-bottom:3px; box-sizing:border-box;">
+      <span style="text-transform:uppercase; letter-spacing:0.4px; font-weight:700; color:${brandColor};">${name}</span>
+      <span style="letter-spacing:0.3px;">${title}</span>
+    </div>`;
+  }
+
+  /**
+   * Slim footer used by the print engine on every page with page numbering
+   * (Chromium supports .pageNumber / .totalPages only inside print templates).
+   */
+  private buildPuppeteerFooterTemplate(
+    leftText: string,
+    brandColor: string,
+  ): string {
+    const left = this.escapeHtmlText(leftText);
+    return `<div style="width:100%; font-family:Arial,Helvetica,sans-serif; font-size:8px; color:#7a8aa3; padding:0 6mm; display:flex; justify-content:space-between; align-items:center; border-top:1px solid ${brandColor}55; padding-top:3px; box-sizing:border-box;">
+      <span style="letter-spacing:0.3px;">${left}</span>
+      <span style="font-weight:600; color:#5a6a85;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    </div>`;
   }
 
   private createFallbackPdfBuffer(
@@ -3017,7 +3658,9 @@ export class EmployeeService implements OnModuleInit {
     const s: any = settlementData.settlement;
     const assets = clearance.assets || [];
 
-    const formatNullableCurrency = (val: number | string | undefined | null) => {
+    const formatNullableCurrency = (
+      val: number | string | undefined | null,
+    ) => {
       if (val === null || val === undefined || val === '') return '';
       const num = Number(val);
       if (isNaN(num)) return '';
@@ -3049,9 +3692,12 @@ export class EmployeeService implements OnModuleInit {
       : '';
 
     const clearanceLabel =
-      assets.length === 0
-        ? '✓ NO ASSETS PENDING'
-        : '✓ ALL ASSETS RETURNED';
+      assets.length === 0 ? '✓ NO ASSETS PENDING' : '✓ ALL ASSETS RETURNED';
+
+    const branding = await this.getPdfBranding(organizationId, org);
+    const brandColor = branding.brandColor;
+    const issuedDate = DateTime.now().toFormat('dd LLL yyyy');
+    const footerLeft = branding.footerNote || `${orgName} \u2022 Confidential`;
 
     const html = `
       <!DOCTYPE html>
@@ -3060,219 +3706,20 @@ export class EmployeeService implements OnModuleInit {
         <meta charset="utf-8" />
         <title>Full & Final Settlement - ${employee.firstName} ${employee.lastName || ''}</title>
         <style>
-          @page { size: A4; margin: 16mm 14mm; }
-          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            color: #1e293b;
-            background: #fff;
-            margin: 0;
-            padding: 0;
-            font-size: 11.5px;
-            line-height: 1.45;
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #0f172a;
-            padding-bottom: 12px;
-            margin-bottom: 14px;
-          }
-          .org-info h1 {
-            margin: 0 0 4px 0;
-            font-size: 18px;
-            font-weight: 700;
-            color: #0f172a;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          .org-info p {
-            margin: 0;
-            color: #64748b;
-            font-size: 10px;
-          }
-          .org-logo {
-            max-height: 55px;
-            max-width: 140px;
-            object-fit: contain;
-          }
-          .doc-title-box {
-            background: #f1f5f9;
-            border: 1px solid #cbd5e1;
-            padding: 8px;
-            text-align: center;
-            border-radius: 4px;
-            margin-bottom: 14px;
-          }
-          .doc-title-box h2 {
-            margin: 0;
-            font-size: 13px;
-            font-weight: 700;
-            color: #0f172a;
-            letter-spacing: 0.8px;
-          }
-          .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 14px;
-          }
-          .card {
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            padding: 10px;
-            background: #fafafa;
-          }
-          .card-title {
-            font-size: 10.5px;
-            font-weight: 700;
-            text-transform: uppercase;
-            color: #475569;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 4px;
-            margin-bottom: 8px;
-          }
-          .info-table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .info-table td {
-            padding: 2.5px 0;
-            font-size: 10.5px;
-          }
-          .info-table td.label {
-            color: #64748b;
-            width: 45%;
-          }
-          .info-table td.value {
-            font-weight: 600;
-            color: #0f172a;
-          }
-          .section-title {
-            font-size: 11px;
-            font-weight: 700;
-            color: #0f172a;
-            text-transform: uppercase;
-            background: #e2e8f0;
-            padding: 5px 8px;
-            border-radius: 3px;
-            margin: 12px 0 6px 0;
-          }
-          table.data-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 10px;
-          }
-          table.data-table th, table.data-table td {
-            border: 1px solid #cbd5e1;
-            padding: 5px 8px;
-            font-size: 10.5px;
-          }
-          table.data-table th {
-            background: #f8fafc;
-            text-align: left;
-            font-weight: 600;
-            color: #334155;
-          }
-          .text-right { text-align: right; }
-          .text-center { text-align: center; }
-          .badge-cleared {
-            background: #dcfce7;
-            color: #15803d;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-weight: 600;
-            font-size: 9.5px;
-          }
-          .net-amount-banner {
-            background: #0f172a;
-            color: #ffffff;
-            padding: 10px 14px;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 14px 0;
-          }
-          .net-amount-banner .label {
-            font-size: 13px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          .net-amount-banner .amount {
-            font-size: 18px;
-            font-weight: 800;
-            color: #38bdf8;
-          }
-          .declaration {
-            border: 1px solid #cbd5e1;
-            background: #f8fafc;
-            padding: 8px 10px;
-            border-radius: 4px;
-            font-size: 9.5px;
-            color: #475569;
-            margin-bottom: 16px;
-            text-align: justify;
-          }
-          .signatures-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1.2fr;
-            gap: 10px;
-            margin-top: 18px;
-          }
-          .sig-box {
-            border: 1px dashed #94a3b8;
-            border-radius: 4px;
-            padding: 8px;
-            min-height: 85px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            font-size: 9.5px;
-          }
-          .sig-title {
-            font-weight: 700;
-            color: #334155;
-            text-align: center;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 3px;
-          }
-          .stamp-box {
-            border: 2px dashed #64748b;
-            border-radius: 4px;
-            padding: 8px;
-            min-height: 85px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            color: #94a3b8;
-            font-weight: 700;
-            font-size: 9px;
-            text-transform: uppercase;
-          }
+          ${this.buildProfessionalPdfStyles({ brandColor, footerText: footerLeft })}
         </style>
       </head>
       <body>
-        <div class="header">
-          <div class="org-info">
-            <h1>${orgName}</h1>
-            ${orgAddress ? `<p>${orgAddress}</p>` : ''}
-            ${orgContact ? `<p>Contact: ${orgContact}</p>` : ''}
-          </div>
-          ${orgLogo ? `<img src="${orgLogo}" class="org-logo" alt="Logo" />` : ''}
+        ${this.buildHeaderElement(orgName, orgAddress, orgContact, branding.logoUrl || orgLogo)}
+
+        <div class="doc-title-bar">
+          <h2>FULL &amp; FINAL SETTLEMENT STATEMENT</h2>
+          <div class="text-muted" style="margin-top:4px;">Employee Code: ${employee.employeeCode || '-'} &nbsp;&bull;&nbsp; Issued on ${issuedDate}</div>
         </div>
 
-        <div class="doc-title-box">
-          <h2>FULL & FINAL SETTLEMENT STATEMENT</h2>
-        </div>
-
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-title">Employee Information</div>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-card-title">Employee Information</div>
             <table class="info-table">
               <tr><td class="label">Employee Name:</td><td class="value">${employee.firstName} ${employee.lastName || ''}</td></tr>
               <tr><td class="label">Employee Code / ID:</td><td class="value">${employee.employeeCode || ''}</td></tr>
@@ -3283,23 +3730,22 @@ export class EmployeeService implements OnModuleInit {
             </table>
           </div>
 
-          <div class="card">
-            <div class="card-title">Service & Exit Details</div>
+          <div class="info-card">
+            <div class="info-card-title">Service &amp; Exit Details</div>
             <table class="info-table">
               <tr><td class="label">Date of Joining:</td><td class="value">${formatNullableDate(employee.dateOfJoining)}</td></tr>
               <tr><td class="label">Resignation Date:</td><td class="value">${formatNullableDate(s.resignationDate)}</td></tr>
-              <tr><td class="label">Notice Period:</td><td class="value">${s.noticePeriodDays !== null && s.noticePeriodDays !== undefined && s.noticePeriodDays !== '' ? s.noticePeriodDays + ' Days' : ''}</td></tr>
+              <tr><td class="label">Notice Period:</td><td class="value">${s.noticePeriodDays !== null && s.noticePeriodDays !== undefined && s.noticePeriodDays !== '' ? s.noticePeriodDays + ' Days' : '-'}</td></tr>
               <tr><td class="label">Last Working Date:</td><td class="value">${formatNullableDate(s.lastWorkingDate)}</td></tr>
               <tr><td class="label">Settlement Status:</td><td class="value">${s.status || ''}</td></tr>
-              <tr><td class="label">Clearance Status:</td><td class="value"><span class="badge-cleared">${clearanceLabel}</span></td></tr>
+              <tr><td class="label">Clearance Status:</td><td class="value"><span class="status-badge cleared">${clearanceLabel}</span></td></tr>
             </table>
           </div>
         </div>
 
-        <!-- 1 & 2. PAYABLE EARNINGS & DEDUCTIONS -->
-        <div class="grid-2">
+        <div class="info-grid">
           <div>
-            <div class="section-title">A. Earnings & Payable Dues</div>
+            <div class="section-title">A. Earnings &amp; Payable Dues</div>
             <table class="data-table">
               <thead>
                 <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
@@ -3307,11 +3753,11 @@ export class EmployeeService implements OnModuleInit {
               <tbody>
                 <tr><td>Salary Due for Worked Days</td><td class="text-right">${formatNullableCurrency(s.salaryDue)}</td></tr>
                 <tr><td>Pending Salary / Arrears</td><td class="text-right">${formatNullableCurrency(s.pendingSalary)}</td></tr>
-                <tr><td>Leave Encashment ${s.leaveEncashmentDays !== null && s.leaveEncashmentDays !== undefined ? `(${s.leaveEncashmentDays} days)` : ''}</td><td class="text-right">${formatNullableCurrency(s.leaveEncashmentAmount)}</td></tr>
+                <tr><td>Leave Encashment ${s.leaveEncashmentDays !== null && s.leaveEncashmentDays !== undefined ? '(' + s.leaveEncashmentDays + ' days)' : ''}</td><td class="text-right">${formatNullableCurrency(s.leaveEncashmentAmount)}</td></tr>
                 <tr><td>Performance Incentive</td><td class="text-right">${formatNullableCurrency(s.incentiveAmount)}</td></tr>
                 <tr><td>Bonus / Ex-Gratia</td><td class="text-right">${formatNullableCurrency(s.bonusAmount)}</td></tr>
                 <tr><td>Other Payables / Reimbursements</td><td class="text-right">${formatNullableCurrency(s.otherPayableAmount)}</td></tr>
-                <tr style="background:#f1f5f9; font-weight:700;">
+                <tr class="total-row">
                   <td>Total Gross Earnings (A)</td>
                   <td class="text-right">${formatNullableCurrency(s.totalEarnings)}</td>
                 </tr>
@@ -3320,7 +3766,7 @@ export class EmployeeService implements OnModuleInit {
           </div>
 
           <div>
-            <div class="section-title">B. Recoveries & Deductions</div>
+            <div class="section-title">B. Recoveries &amp; Deductions</div>
             <table class="data-table">
               <thead>
                 <tr><th>Component</th><th class="text-right">Amount (INR)</th></tr>
@@ -3330,8 +3776,8 @@ export class EmployeeService implements OnModuleInit {
                 <tr><td>Loan / Advance Balance Recovery</td><td class="text-right">${formatNullableCurrency(s.loanRecoveryAmount)}</td></tr>
                 <tr><td>Company Asset Loss / Damage</td><td class="text-right">${formatNullableCurrency(s.assetDeductionAmount)}</td></tr>
                 <tr><td>Other Statutory / Non-Statutory Deductions</td><td class="text-right">${formatNullableCurrency(s.otherDeductionsAmount)}</td></tr>
-                <tr style="height: 38px;"><td><span style="color:#64748b; font-size:9.5px;">${s.deductionsRemarks ? 'Note: ' + s.deductionsRemarks : ''}</span></td><td></td></tr>
-                <tr style="background:#f1f5f9; font-weight:700;">
+                <tr><td class="remarks" colspan="2">${s.deductionsRemarks ? 'Note: ' + s.deductionsRemarks : ''}</td></tr>
+                <tr class="total-row">
                   <td>Total Deductions (B)</td>
                   <td class="text-right">${formatNullableCurrency(s.totalDeductions)}</td>
                 </tr>
@@ -3340,77 +3786,67 @@ export class EmployeeService implements OnModuleInit {
           </div>
         </div>
 
-        <!-- NET PAYABLE BANNER -->
-        <div class="net-amount-banner">
-          <div class="label">NET FULL & FINAL SETTLEMENT AMOUNT (A - B)</div>
+        <div class="net-banner">
+          <div class="label">Net Full &amp; Final Settlement Amount (A - B)</div>
           <div class="amount">${formatNullableCurrency(s.finalSettlementAmount ?? s.netSettlementAmount)}</div>
         </div>
 
-        <!-- COMPANY ASSETS / CLEARANCE SUMMARY -->
-        <div class="section-title">Company Assets & Exit Clearance Record</div>
-        <table class="data-table" style="margin-bottom:10px;">
-          <thead>
-            <tr>
-              <th>Asset Name / Description</th>
-              <th>Asset Tag / ID</th>
-              <th>Issue Date</th>
-              <th>Return Date</th>
-              <th class="text-center">Clearance Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              assets.length === 0
-                ? '<tr><td colspan="5" class="text-center" style="color:#64748b;">No physical company assets were assigned to this employee.</td></tr>'
-                : assets
-                    .map(
-                      (a) => `
-                <tr>
-                  <td><strong>${a.assetName}</strong> (${a.assetType})</td>
-                  <td>${a.assetId || a.serialNumber || ''}</td>
-                  <td>${formatNullableDate(a.issueDate)}</td>
-                  <td>${formatNullableDate(a.actualReturnDate)}</td>
-                  <td class="text-center"><span class="badge-cleared">✓ RETURNED & CLEARED</span></td>
-                </tr>
-              `,
-                    )
-                    .join('')
-            }
-          </tbody>
-        </table>
+        <div class="section">
+          <div class="section-title">Company Assets &amp; Exit Clearance Record</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Asset Name / Description</th>
+                <th>Asset Tag / ID</th>
+                <th>Issue Date</th>
+                <th>Return Date</th>
+                <th class="text-center">Clearance Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                assets.length === 0
+                  ? '<tr><td colspan="5" class="text-center text-muted">No physical company assets were assigned to this employee.</td></tr>'
+                  : assets
+                      .map(
+                        (a) => `
+              <tr>
+                <td><strong>${a.assetName}</strong> (${a.assetType})</td>
+                <td>${a.assetId || a.serialNumber || ''}</td>
+                <td>${formatNullableDate(a.issueDate)}</td>
+                <td>${formatNullableDate(a.actualReturnDate)}</td>
+                <td class="text-center"><span class="status-badge cleared">Returned &amp; Cleared</span></td>
+              </tr>
+            `,
+                      )
+                      .join('')
+              }
+            </tbody>
+          </table>
+        </div>
 
-        <!-- EMPLOYEE DECLARATION -->
-        <div class="declaration">
+        <div class="declaration-box">
           <strong>Employee Declaration:</strong> I hereby acknowledge that the above full and final settlement statement has been thoroughly reviewed and agreed upon by me. I confirm receipt/settlement of all outstanding dues, salary, encashments, and claims from <strong>${orgName}</strong>, and I state that I have returned all company assets, intellectual property, credentials, and documents in good condition. I have no further claims against the organization.
         </div>
 
-        <!-- SIGNATURES & STAMP -->
-        <div class="signatures-grid">
+        <div class="sig-grid">
           <div class="sig-box">
             <div class="sig-title">Employee Signature</div>
-            <div style="font-size:9px; color:#64748b; padding-top:25px;">
-              Name: ${employee.firstName} ${employee.lastName || ''}<br/>
-              Date: __________________
-            </div>
+            <div class="sig-name">Name: ${employee.firstName} ${employee.lastName || ''}</div>
+            <div class="sig-date-line">Date: __________________</div>
           </div>
           <div class="sig-box">
             <div class="sig-title">Prepared By (HR)</div>
-            <div style="font-size:9px; color:#64748b; padding-top:25px;">
-              Name: ${s.preparedBy || 'HR Operations'}<br/>
-              Date: __________________
-            </div>
+            <div class="sig-name">Name: ${s.preparedBy || 'HR Operations'}</div>
+            <div class="sig-date-line">Date: __________________</div>
           </div>
           <div class="sig-box">
             <div class="sig-title">Finance Approval</div>
-            <div style="font-size:9px; color:#64748b; padding-top:25px;">
-              Name: ${s.financeApprovalName || 'Finance Head'}<br/>
-              Date: __________________
-            </div>
+            <div class="sig-name">Name: ${s.financeApprovalName || 'Finance Head'}</div>
+            <div class="sig-date-line">Date: __________________</div>
           </div>
           <div class="stamp-box">
-            <div style="border:1px dashed #cbd5e1; width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
-              ORGANIZATION STAMP
-            </div>
+            <div class="seal-inner">Organization Stamp</div>
           </div>
         </div>
       </body>
@@ -3425,10 +3861,27 @@ export class EmployeeService implements OnModuleInit {
         waitUntil: 'domcontentloaded',
         timeout: 25000,
       });
-      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate: this.buildPuppeteerHeaderTemplate(
+          orgName,
+          'Full & Final Settlement Statement',
+          brandColor,
+        ),
+        footerTemplate: this.buildPuppeteerFooterTemplate(
+          footerLeft,
+          brandColor,
+        ),
+        margin: { top: '14mm', bottom: '14mm', left: '14mm', right: '14mm' },
+      });
       return Buffer.from(pdf);
     } catch (error) {
-      console.error('Failed to generate full settlement PDF via Puppeteer, falling back to native PDF:', error);
+      console.error(
+        'Failed to generate full settlement PDF via Puppeteer, falling back to native PDF:',
+        error,
+      );
       const sections = [
         {
           title: 'Employee Information',
@@ -3609,7 +4062,8 @@ export class EmployeeService implements OnModuleInit {
       throw new NotFoundException(`Template with ID ${id} not found`);
     }
 
-    if (dto.templateName !== undefined) template.templateName = dto.templateName;
+    if (dto.templateName !== undefined)
+      template.templateName = dto.templateName;
     if (dto.content !== undefined) template.content = dto.content;
     if (dto.isActive !== undefined) template.isActive = dto.isActive;
     template.updatedBy = userId || null;
@@ -3687,7 +4141,8 @@ export class EmployeeService implements OnModuleInit {
 
     const parts: string[] = [];
     if (years > 0) parts.push(`${years} ${years === 1 ? 'Year' : 'Years'}`);
-    if (months > 0) parts.push(`${months} ${months === 1 ? 'Month' : 'Months'}`);
+    if (months > 0)
+      parts.push(`${months} ${months === 1 ? 'Month' : 'Months'}`);
     if (days > 0 || parts.length === 0)
       parts.push(`${days} ${days === 1 ? 'Day' : 'Days'}`);
 
@@ -3696,8 +4151,10 @@ export class EmployeeService implements OnModuleInit {
     return {
       experienceDuration: duration,
       experience: duration,
-      experienceYears: years > 0 ? `${years} ${years === 1 ? 'Year' : 'Years'}` : '',
-      experienceMonths: months > 0 ? `${months} ${months === 1 ? 'Month' : 'Months'}` : '',
+      experienceYears:
+        years > 0 ? `${years} ${years === 1 ? 'Year' : 'Years'}` : '',
+      experienceMonths:
+        months > 0 ? `${months} ${months === 1 ? 'Month' : 'Months'}` : '',
       experienceDays: days > 0 ? `${days} ${days === 1 ? 'Day' : 'Days'}` : '',
     };
   }
@@ -3714,7 +4171,13 @@ export class EmployeeService implements OnModuleInit {
       if (val === null || val === undefined || val === '') return '';
       const num = Number(val);
       if (isNaN(num)) return '';
-      return '₹ ' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return (
+        '₹ ' +
+        num.toLocaleString('en-IN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      );
     };
 
     const formatDate = (val: any) => {
@@ -3734,19 +4197,24 @@ export class EmployeeService implements OnModuleInit {
       : '';
 
     const orgName = org?.organizationName || 'Avinya HRMS Organization';
-    const orgAddress = org?.address || (orgSettings as any)?.address || '';
+    const orgAddress = org?.address || orgSettings?.address || '';
     const orgPhone = org?.phone || '';
     const orgEmail = org?.email || org?.hrMail || '';
     const orgLogo = org?.logoUrl || '';
 
     const variables: Record<string, string> = {
       // Employee variables
-      '{{employee_name}}': `${employee.firstName} ${employee.lastName || ''}`.trim(),
+      '{{employee_name}}':
+        `${employee.firstName} ${employee.lastName || ''}`.trim(),
       '{{employee_id}}': employee.employeeCode || '',
       '{{employee_code}}': employee.employeeCode || '',
       '{{designation}}': employee.designation?.name || '',
       '{{department}}': employee.department?.name || '',
-      '{{email}}': employee.workEmail || employee.personalEmail || employee.user?.email || '',
+      '{{email}}':
+        employee.workEmail ||
+        employee.personalEmail ||
+        employee.user?.email ||
+        '',
       '{{phone}}': employee.contactNumber || employee.user?.mobileNumber || '',
       '{{joining_date}}': formatDate(employee.dateOfJoining),
       '{{last_working_date}}': formatDate(lastWorkDate),
@@ -3766,7 +4234,9 @@ export class EmployeeService implements OnModuleInit {
       '{{organization_address}}': orgAddress,
       '{{organization_phone}}': orgPhone,
       '{{organization_email}}': orgEmail,
-      '{{organization_logo}}': orgLogo ? `<img src="${orgLogo}" alt="${orgName}" style="max-height:50px;" />` : '',
+      '{{organization_logo}}': orgLogo
+        ? `<img src="${orgLogo}" alt="${orgName}" style="max-height:50px;" />`
+        : '',
 
       // Settlement variables
       '{{salary_due}}': formatNullableCurrency(s.salaryDue),
@@ -3776,12 +4246,16 @@ export class EmployeeService implements OnModuleInit {
       '{{performance_incentive}}': formatNullableCurrency(s.incentiveAmount),
       '{{other_payables}}': formatNullableCurrency(s.otherPayableAmount),
       '{{total_earnings}}': formatNullableCurrency(s.totalEarnings),
-      '{{notice_period_recovery}}': formatNullableCurrency(s.noticePeriodRecoveryAmount),
+      '{{notice_period_recovery}}': formatNullableCurrency(
+        s.noticePeriodRecoveryAmount,
+      ),
       '{{loan_recovery}}': formatNullableCurrency(s.loanRecoveryAmount),
       '{{asset_deduction}}': formatNullableCurrency(s.assetDeductionAmount),
       '{{other_deductions}}': formatNullableCurrency(s.otherDeductionsAmount),
       '{{total_deductions}}': formatNullableCurrency(s.totalDeductions),
-      '{{final_settlement_amount}}': formatNullableCurrency(s.finalSettlementAmount ?? s.netSettlementAmount),
+      '{{final_settlement_amount}}': formatNullableCurrency(
+        s.finalSettlementAmount ?? s.netSettlementAmount,
+      ),
 
       // Date variables
       '{{current_date}}': DateTime.now().toFormat('dd LLL yyyy'),
@@ -3830,7 +4304,8 @@ export class EmployeeService implements OnModuleInit {
           dto.templateType,
         );
       }
-      rawContent = template?.content || this.getDefaultTemplateContent(dto.templateType);
+      rawContent =
+        template?.content || this.getDefaultTemplateContent(dto.templateType);
       templateName = template?.templateName || '';
     }
 
@@ -3859,7 +4334,9 @@ export class EmployeeService implements OnModuleInit {
         department: employee.department?.name || '',
         dateOfJoining: employee.dateOfJoining,
         lastWorkingDate:
-          settlementData?.settlement?.lastWorkingDate || employee.dateOfExit || null,
+          settlementData?.settlement?.lastWorkingDate ||
+          employee.dateOfExit ||
+          null,
         experienceDuration: exp.experienceDuration,
       },
       organization: {
@@ -3884,117 +4361,35 @@ export class EmployeeService implements OnModuleInit {
     const org = preview.organization;
     const emp = preview.employee;
 
+    const branding = await this.getPdfBranding(organizationId);
+    const brandColor = branding.brandColor;
+    const orgName = org.name;
+    const orgAddress = org.address || '';
+    const orgContact =
+      branding.organization?.phone ||
+      branding.organization?.email ||
+      branding.organization?.hrMail ||
+      '';
+    const issuedDate = DateTime.now().toFormat('dd LLL yyyy');
+    const footerNote = branding.footerNote || '';
+    const footerLeft = branding.footerNote || `${orgName} - System Generated`;
+    const docTitleText =
+      type === DocumentTemplateType.EXPERIENCE_LETTER
+        ? 'Experience Certificate'
+        : 'Relieving Letter';
+
     const fullHtml = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>${type === DocumentTemplateType.EXPERIENCE_LETTER ? 'Experience Certificate' : 'Relieving Letter'} - ${emp.name}</title>
+        <title>${docTitleText} - ${emp.name}</title>
         <style>
-          @page {
-            size: A4;
-            margin: 20mm 18mm 20mm 18mm;
-          }
-          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            color: #1e293b;
-            background: #fff;
-            margin: 0;
-            padding: 0;
-            font-size: 12.5px;
-            line-height: 1.65;
-          }
-          .letterhead {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #0f172a;
-            padding-bottom: 14px;
-            margin-bottom: 26px;
-          }
-          .org-info h1 {
-            margin: 0 0 4px 0;
-            font-size: 19px;
-            font-weight: 700;
-            color: #0f172a;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          .org-info p {
-            margin: 0;
-            color: #64748b;
-            font-size: 10.5px;
-            line-height: 1.4;
-          }
-          .org-logo {
-            max-height: 60px;
-            max-width: 150px;
-            object-fit: contain;
-          }
-          .letter-content {
-            min-height: 480px;
-            font-size: 12.5px;
-            color: #1e293b;
-          }
-          .letter-content p {
-            margin-bottom: 12px;
-          }
-          .letter-content ul {
-            margin: 10px 0 16px 20px;
-            padding: 0;
-          }
-          .letter-content li {
-            margin-bottom: 4px;
-          }
-          .signatures-container {
-            margin-top: 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
-          }
-          .signature-block {
-            font-size: 11px;
-            line-height: 1.5;
-          }
-          .signature-line {
-            width: 180px;
-            border-bottom: 1px solid #94a3b8;
-            margin-bottom: 8px;
-            height: 40px;
-          }
-          .stamp-box {
-            width: 130px;
-            height: 85px;
-            border: 2px dashed #94a3b8;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            color: #94a3b8;
-            font-size: 9px;
-            font-weight: 700;
-            text-transform: uppercase;
-          }
-          .footer-note {
-            margin-top: 40px;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 8px;
-            font-size: 9px;
-            color: #94a3b8;
-            text-align: center;
-          }
+          ${this.buildProfessionalPdfStyles({ brandColor, footerText: footerLeft })}
         </style>
       </head>
       <body>
-        <div class="letterhead">
-          <div class="org-info">
-            <h1>${org.name}</h1>
-            ${org.address ? `<p>${org.address}</p>` : ''}
-          </div>
-          ${org.logoUrl ? `<img src="${org.logoUrl}" class="org-logo" alt="Logo" />` : ''}
-        </div>
+        ${this.buildHeaderElement(orgName, orgAddress, orgContact, branding.logoUrl || org.logoUrl || '')}
 
         <div class="letter-content">
           ${preview.renderedHtml}
@@ -4003,16 +4398,18 @@ export class EmployeeService implements OnModuleInit {
         <div class="signatures-container">
           <div class="signature-block">
             <div class="signature-line"></div>
-            <strong>Authorized Signatory</strong><br/>
-            ${org.name}
+            <strong>Authorized Signatory</strong>
+            ${orgName}
+            <div class="text-muted" style="margin-top:6px;">Date: __________________</div>
           </div>
           <div class="stamp-box">
-            OFFICIAL STAMP
+            <div class="seal-inner">Official Stamp</div>
           </div>
         </div>
 
-        <div class="footer-note">
-          This document is system-generated on ${DateTime.now().toFormat('dd LLL yyyy')} by ${org.name}.
+        <div class="letter-footer-note">
+          This document is system-generated on ${issuedDate} by ${orgName}.
+          ${footerNote ? '<div style="margin-top:3px;">' + footerNote + '</div>' : ''}
         </div>
       </body>
       </html>
@@ -4026,10 +4423,27 @@ export class EmployeeService implements OnModuleInit {
         waitUntil: 'domcontentloaded',
         timeout: 25000,
       });
-      const pdf = await page.pdf({ format: 'A4', printBackground: true });
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate: this.buildPuppeteerHeaderTemplate(
+          orgName,
+          docTitleText,
+          brandColor,
+        ),
+        footerTemplate: this.buildPuppeteerFooterTemplate(
+          footerLeft,
+          brandColor,
+        ),
+        margin: { top: '14mm', bottom: '14mm', left: '16mm', right: '16mm' },
+      });
       return Buffer.from(pdf);
     } catch (error) {
-      console.error(`Failed to generate ${type} PDF via Puppeteer, falling back to native PDF:`, error);
+      console.error(
+        `Failed to generate ${type} PDF via Puppeteer, falling back to native PDF:`,
+        error,
+      );
       const docTitle =
         type === DocumentTemplateType.EXPERIENCE_LETTER
           ? 'EXPERIENCE CERTIFICATE'
@@ -4144,7 +4558,9 @@ export class EmployeeService implements OnModuleInit {
         projectId: a.projectId,
         projectSource: a.projectSource || 'internal',
         managerId: a.managerId,
-        managerType: a.managerType || (a.managerId === employee.reportingTo ? 'PRIMARY' : 'SECONDARY'),
+        managerType:
+          a.managerType ||
+          (a.managerId === employee.reportingTo ? 'PRIMARY' : 'SECONDARY'),
         role: a.role || 'member',
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
@@ -4249,7 +4665,11 @@ export class EmployeeService implements OnModuleInit {
     }
 
     // 5. Determine managerType
-    const mType = managerType || (managerId && managerId === employee.reportingTo ? 'PRIMARY' : 'SECONDARY');
+    const mType =
+      managerType ||
+      (managerId && managerId === employee.reportingTo
+        ? 'PRIMARY'
+        : 'SECONDARY');
 
     // 6. Create assignment
     const assignment = this.assignmentRepository.create({
@@ -4267,9 +4687,11 @@ export class EmployeeService implements OnModuleInit {
     // Sync with project members table if needed
     try {
       if (projectSource === 'client' && employee.userId) {
-        const existingMember = await this.clientProjectMemberRepository.findOne({
-          where: { projectId, userId: employee.userId },
-        });
+        const existingMember = await this.clientProjectMemberRepository.findOne(
+          {
+            where: { projectId, userId: employee.userId },
+          },
+        );
         if (!existingMember) {
           await this.clientProjectMemberRepository.save(
             this.clientProjectMemberRepository.create({
@@ -4426,13 +4848,18 @@ export class EmployeeService implements OnModuleInit {
         ),
         this.cacheManager.del(`${CACHE_KEYS.EMPLOYEES}:${organizationId}:all`),
         this.cacheManager.del(`managers:${organizationId}`),
-        this.cacheManager.del(`${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`),
+        this.cacheManager.del(
+          `${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`,
+        ),
       ]);
 
       if (employeeId) {
         await this.cacheManager.del(`${CACHE_KEYS.EMPLOYEE}:${employeeId}`);
       }
-      console.log('🗑️ Invalidated all employee caches for org:', organizationId);
+      console.log(
+        '🗑️ Invalidated all employee caches for org:',
+        organizationId,
+      );
     } catch (error) {
       console.error('❌ Error invalidating cache:', error);
     }

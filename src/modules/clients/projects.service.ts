@@ -449,7 +449,8 @@ export class ProjectsService implements OnModuleInit {
 
     if (
       actorEmployee?.id &&
-      (project.managerId === actorEmployee.id || project.manager?.id === actorEmployee.id)
+      (project.managerId === actorEmployee.id ||
+        project.manager?.id === actorEmployee.id)
     ) {
       return true;
     }
@@ -463,7 +464,10 @@ export class ProjectsService implements OnModuleInit {
         where: { id: project.managerId },
         select: ['id', 'userId'],
       });
-      if (mgr?.userId === userId || (actorEmployee?.id && mgr?.id === actorEmployee.id)) {
+      if (
+        mgr?.userId === userId ||
+        (actorEmployee?.id && mgr?.id === actorEmployee.id)
+      ) {
         return true;
       }
     }
@@ -473,7 +477,10 @@ export class ProjectsService implements OnModuleInit {
       select: ['id', 'role'],
     });
     if (member?.role) {
-      const normalizedRole = member.role.trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const normalizedRole = member.role
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, '');
       const managerRoles = [
         'manager',
         'lead',
@@ -497,7 +504,11 @@ export class ProjectsService implements OnModuleInit {
         `SELECT COUNT(*) AS count FROM employee_project_assignments 
          WHERE project_id = $1 AND project_source = 'client' 
          AND (manager_id = $2 OR manager_id = $3)`,
-        [project.id, actorEmployee?.id || '00000000-0000-0000-0000-000000000000', userId],
+        [
+          project.id,
+          actorEmployee?.id || '00000000-0000-0000-0000-000000000000',
+          userId,
+        ],
       );
       if (parseInt(assignmentCount[0]?.count || '0', 10) > 0) {
         return true;

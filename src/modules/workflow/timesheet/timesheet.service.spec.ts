@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { TimesheetService } from './timesheet.service';
@@ -76,13 +80,17 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
   describe('Active week editing (Wednesday Oct 7, 2026)', () => {
     beforeEach(() => {
       // Wednesday Oct 7, 2026 14:00:00 IST
-      const now = DateTime.fromISO('2026-10-07T14:00:00.000', { zone: timezone });
+      const now = DateTime.fromISO('2026-10-07T14:00:00.000', {
+        zone: timezone,
+      });
       timezoneMock.getNow.mockResolvedValue(now);
       timezoneMock.getToday.mockResolvedValue('2026-10-07');
     });
 
     it('allows editing and deleting entries from Monday Oct 5 within current week', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-05' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-05' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -90,13 +98,17 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
         }),
       ).resolves.toBeDefined();
 
-      await expect(service.deleteTimesheet(entryId, employeeId)).resolves.toEqual({
+      await expect(
+        service.deleteTimesheet(entryId, employeeId),
+      ).resolves.toEqual({
         success: true,
       });
     });
 
     it('allows editing and deleting entries from today (Wednesday Oct 7)', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-07' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-07' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -104,13 +116,17 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
         }),
       ).resolves.toBeDefined();
 
-      await expect(service.deleteTimesheet(entryId, employeeId)).resolves.toEqual({
+      await expect(
+        service.deleteTimesheet(entryId, employeeId),
+      ).resolves.toEqual({
         success: true,
       });
     });
 
     it('rejects editing future date entries (Thursday Oct 8)', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-08' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-08' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -120,7 +136,9 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
     });
 
     it('rejects editing previous week entries (Saturday Oct 3) with 403 Forbidden', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-03' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-03' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -132,11 +150,15 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
 
   describe('Saturday deadline (Saturday Oct 10, 2026)', () => {
     it('allows editing on Saturday before midnight (23:00 IST)', async () => {
-      const satNow = DateTime.fromISO('2026-10-10T23:00:00.000', { zone: timezone });
+      const satNow = DateTime.fromISO('2026-10-10T23:00:00.000', {
+        zone: timezone,
+      });
       timezoneMock.getNow.mockResolvedValue(satNow);
       timezoneMock.getToday.mockResolvedValue('2026-10-10');
 
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-10' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-10' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -149,13 +171,17 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
   describe('Sunday transition / reset day (Sunday Oct 11, 2026)', () => {
     beforeEach(() => {
       // Sunday Oct 11, 2026 09:00:00 IST
-      const sunNow = DateTime.fromISO('2026-10-11T09:00:00.000', { zone: timezone });
+      const sunNow = DateTime.fromISO('2026-10-11T09:00:00.000', {
+        zone: timezone,
+      });
       timezoneMock.getNow.mockResolvedValue(sunNow);
       timezoneMock.getToday.mockResolvedValue('2026-10-11');
     });
 
     it('rejects editing previous week Saturday Oct 10 entry because deadline passed (403)', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-10' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-10' }),
+      );
 
       await expect(
         service.updateTimesheet(entryId, employeeId, {
@@ -165,7 +191,9 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
     });
 
     it('rejects editing previous week Friday Oct 9 entry on Sunday (403)', async () => {
-      timesheetRepoMock.findOne.mockResolvedValue(makeEntry({ date: '2026-10-09' }));
+      timesheetRepoMock.findOne.mockResolvedValue(
+        makeEntry({ date: '2026-10-09' }),
+      );
 
       await expect(
         service.deleteTimesheet(entryId, employeeId),
@@ -175,7 +203,9 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
 
   describe('Authorization and not found checks', () => {
     beforeEach(() => {
-      const now = DateTime.fromISO('2026-10-07T14:00:00.000', { zone: timezone });
+      const now = DateTime.fromISO('2026-10-07T14:00:00.000', {
+        zone: timezone,
+      });
       timezoneMock.getNow.mockResolvedValue(now);
       timezoneMock.getToday.mockResolvedValue('2026-10-07');
     });
@@ -197,9 +227,9 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
         makeEntry({ employeeId: otherEmployeeId, date: '2026-10-07' }),
       );
 
-      await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.deleteTimesheet(entryId, employeeId),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects edit/delete for a missing entry', async () => {
@@ -208,9 +238,9 @@ describe('TimesheetService – weekly timesheet lifecycle & Saturday deadline', 
       await expect(
         service.updateTimesheet(entryId, employeeId, {}),
       ).rejects.toThrow(NotFoundException);
-      await expect(service.deleteTimesheet(entryId, employeeId)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.deleteTimesheet(entryId, employeeId),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

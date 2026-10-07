@@ -652,7 +652,10 @@ export class ProjectService implements OnModuleInit {
       organizationId,
     );
     if (member?.role) {
-      const normalizedRole = member.role.trim().toLowerCase().replace(/[\s_-]+/g, '');
+      const normalizedRole = member.role
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, '');
       const managerRoles = [
         'manager',
         'lead',
@@ -676,7 +679,11 @@ export class ProjectService implements OnModuleInit {
         `SELECT COUNT(*) AS count FROM employee_project_assignments 
          WHERE project_id = $1 AND project_source = 'internal' 
          AND (manager_id = $2 OR manager_id = $3)`,
-        [project.id, actorEmployee?.id || '00000000-0000-0000-0000-000000000000', userId],
+        [
+          project.id,
+          actorEmployee?.id || '00000000-0000-0000-0000-000000000000',
+          userId,
+        ],
       );
       if (parseInt(assignmentCount[0]?.count || '0', 10) > 0) {
         return true;

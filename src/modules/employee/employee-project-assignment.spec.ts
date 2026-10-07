@@ -17,6 +17,15 @@ import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
 import { ProjectMember } from '../project/entities/project-member.entity';
 import { ClientProjectMember } from '../clients/entities/client-project-member.entity';
+import { EmployeeAsset } from './entities/employee-asset.entity';
+import { EmployeeDocument } from './entities/employee-document.entity';
+import { EmployeeDocumentTemplate } from './entities/employee-document-template.entity';
+import { EmployeeSettlement } from './entities/employee-settlement.entity';
+import { Organization } from '../auth-core/entities/organization.entity';
+import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
+import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
+import { PayrollSettings } from '../payroll/entities/payroll-settings.entity';
+import { LeaveBalance } from '../leave/entities/leave-balance.entity';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { UsersService } from '../auth-core/services/users.service';
 import { LeaveService } from '../leave/leave.service';
@@ -25,7 +34,11 @@ import { StorageService } from '../attendance/storage.service';
 import { MailService } from '../mail/mail.service';
 import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 import { EntityManager } from 'typeorm';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 
 describe('EmployeeService — Multiple Managers & Deactivation', () => {
   let service: EmployeeService;
@@ -94,24 +107,71 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
         { provide: getRepositoryToken(Department), useValue: {} },
         { provide: getRepositoryToken(Branch), useValue: {} },
         { provide: getRepositoryToken(AttendanceShift), useValue: {} },
-        { provide: getRepositoryToken(UserRole), useValue: { createQueryBuilder: jest.fn().mockReturnValue({ innerJoin: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(), getRawMany: jest.fn().mockResolvedValue([]) }) } },
+        {
+          provide: getRepositoryToken(UserRole),
+          useValue: {
+            createQueryBuilder: jest.fn().mockReturnValue({
+              innerJoin: jest.fn().mockReturnThis(),
+              select: jest.fn().mockReturnThis(),
+              addSelect: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              andWhere: jest.fn().mockReturnThis(),
+              orderBy: jest.fn().mockReturnThis(),
+              getRawMany: jest.fn().mockResolvedValue([]),
+            }),
+          },
+        },
         { provide: getRepositoryToken(Role), useValue: {} },
         { provide: getRepositoryToken(User), useValue: mockUserRepo },
         { provide: getRepositoryToken(ResignationRequest), useValue: {} },
         { provide: getRepositoryToken(WorkflowAssignment), useValue: {} },
         { provide: getRepositoryToken(Timesheet), useValue: {} },
         { provide: getRepositoryToken(Timeslip), useValue: {} },
-        { provide: getRepositoryToken(EmployeeProjectAssignment), useValue: mockAssignmentRepo },
+        {
+          provide: getRepositoryToken(EmployeeProjectAssignment),
+          useValue: mockAssignmentRepo,
+        },
         { provide: getRepositoryToken(Project), useValue: mockProjectRepo },
-        { provide: getRepositoryToken(ClientProject), useValue: mockClientProjectRepo },
-        { provide: getRepositoryToken(ProjectMember), useValue: { findOne: jest.fn().mockResolvedValue(null), create: jest.fn(), save: jest.fn() } },
-        { provide: getRepositoryToken(ClientProjectMember), useValue: { findOne: jest.fn().mockResolvedValue(null), create: jest.fn(), save: jest.fn() } },
+        {
+          provide: getRepositoryToken(ClientProject),
+          useValue: mockClientProjectRepo,
+        },
+        {
+          provide: getRepositoryToken(ProjectMember),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue(null),
+            create: jest.fn(),
+            save: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(ClientProjectMember),
+          useValue: {
+            findOne: jest.fn().mockResolvedValue(null),
+            create: jest.fn(),
+            save: jest.fn(),
+          },
+        },
+        { provide: getRepositoryToken(EmployeeAsset), useValue: {} },
+        { provide: getRepositoryToken(EmployeeDocument), useValue: {} },
+        { provide: getRepositoryToken(EmployeeDocumentTemplate), useValue: {} },
+        { provide: getRepositoryToken(EmployeeSettlement), useValue: {} },
+        { provide: getRepositoryToken(Organization), useValue: {} },
+        { provide: getRepositoryToken(OrganizationSettings), useValue: {} },
+        { provide: getRepositoryToken(SalaryStructure), useValue: {} },
+        { provide: getRepositoryToken(PayrollSettings), useValue: {} },
+        { provide: getRepositoryToken(LeaveBalance), useValue: {} },
         { provide: CACHE_MANAGER, useValue: mockCacheManager },
         { provide: UsersService, useValue: {} },
         { provide: EntityManager, useValue: {} },
         { provide: LeaveService, useValue: {} },
         { provide: WfhService, useValue: {} },
-        { provide: StorageService, useValue: { getSignedUrl: jest.fn().mockResolvedValue('https://signed.url') } },
+        {
+          provide: StorageService,
+          useValue: {
+            getSignedUrl: jest.fn().mockResolvedValue('https://signed.url'),
+          },
+        },
         { provide: MailService, useValue: {} },
         { provide: OrganizationTimezoneService, useValue: {} },
       ],
@@ -123,21 +183,61 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
   describe('Part 1-4: Project Assignment and Multi-Manager Validation', () => {
     it('1. Employee can have one project + one manager', async () => {
       mockEmployeeRepo.findOne.mockImplementation(({ where }) => {
-        if (where.id === EMP_ID) return Promise.resolve({ id: EMP_ID, organizationId: ORG_ID, status: 'active' });
-        if (where.id === MGR_A_ID) return Promise.resolve({ id: MGR_A_ID, organizationId: ORG_ID, firstName: 'Amit', lastName: 'Kumar', status: 'active' });
+        if (where.id === EMP_ID)
+          return Promise.resolve({
+            id: EMP_ID,
+            organizationId: ORG_ID,
+            status: 'active',
+          });
+        if (where.id === MGR_A_ID)
+          return Promise.resolve({
+            id: MGR_A_ID,
+            organizationId: ORG_ID,
+            firstName: 'Amit',
+            lastName: 'Kumar',
+            status: 'active',
+          });
         return Promise.resolve(null);
       });
-      mockProjectRepo.findOne.mockResolvedValue({ id: PROJ_A_ID, organizationId: ORG_ID, name: 'Project Alpha' });
+      mockProjectRepo.findOne.mockResolvedValue({
+        id: PROJ_A_ID,
+        organizationId: ORG_ID,
+        name: 'Project Alpha',
+      });
       mockAssignmentRepo.findOne.mockResolvedValue(null);
-      mockAssignmentRepo.create.mockReturnValue({ id: 'assign-1', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_A_ID, managerId: MGR_A_ID, projectSource: 'internal' });
+      mockAssignmentRepo.create.mockReturnValue({
+        id: 'assign-1',
+        organizationId: ORG_ID,
+        employeeId: EMP_ID,
+        projectId: PROJ_A_ID,
+        managerId: MGR_A_ID,
+        projectSource: 'internal',
+      });
       mockAssignmentRepo.save.mockResolvedValue({ id: 'assign-1' });
       mockAssignmentRepo.find.mockResolvedValue([
-        { id: 'assign-1', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_A_ID, managerId: MGR_A_ID, projectSource: 'internal', role: 'member', createdAt: new Date(), updatedAt: new Date() },
+        {
+          id: 'assign-1',
+          organizationId: ORG_ID,
+          employeeId: EMP_ID,
+          projectId: PROJ_A_ID,
+          managerId: MGR_A_ID,
+          projectSource: 'internal',
+          role: 'member',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
       ]);
       mockEmployeeRepo.find.mockResolvedValue([
-        { id: MGR_A_ID, firstName: 'Amit', lastName: 'Kumar', status: 'active' },
+        {
+          id: MGR_A_ID,
+          firstName: 'Amit',
+          lastName: 'Kumar',
+          status: 'active',
+        },
       ]);
-      mockProjectRepo.find.mockResolvedValue([{ id: PROJ_A_ID, name: 'Project Alpha', status: 'active' }]);
+      mockProjectRepo.find.mockResolvedValue([
+        { id: PROJ_A_ID, name: 'Project Alpha', status: 'active' },
+      ]);
       mockClientProjectRepo.find.mockResolvedValue([]);
 
       const result = await service.assignProject(ORG_ID, EMP_ID, {
@@ -155,21 +255,70 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
 
     it('2. Employee can have multiple projects + different managers', async () => {
       mockEmployeeRepo.findOne.mockImplementation(({ where }) => {
-        if (where.id === EMP_ID) return Promise.resolve({ id: EMP_ID, organizationId: ORG_ID, status: 'active' });
-        if (where.id === MGR_B_ID) return Promise.resolve({ id: MGR_B_ID, organizationId: ORG_ID, firstName: 'Priya', lastName: 'Singh', status: 'active' });
+        if (where.id === EMP_ID)
+          return Promise.resolve({
+            id: EMP_ID,
+            organizationId: ORG_ID,
+            status: 'active',
+          });
+        if (where.id === MGR_B_ID)
+          return Promise.resolve({
+            id: MGR_B_ID,
+            organizationId: ORG_ID,
+            firstName: 'Priya',
+            lastName: 'Singh',
+            status: 'active',
+          });
         return Promise.resolve(null);
       });
-      mockProjectRepo.findOne.mockResolvedValue({ id: PROJ_B_ID, organizationId: ORG_ID, name: 'Project Beta' });
+      mockProjectRepo.findOne.mockResolvedValue({
+        id: PROJ_B_ID,
+        organizationId: ORG_ID,
+        name: 'Project Beta',
+      });
       mockAssignmentRepo.findOne.mockResolvedValue(null);
-      mockAssignmentRepo.create.mockReturnValue({ id: 'assign-2', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_B_ID, managerId: MGR_B_ID, projectSource: 'internal' });
+      mockAssignmentRepo.create.mockReturnValue({
+        id: 'assign-2',
+        organizationId: ORG_ID,
+        employeeId: EMP_ID,
+        projectId: PROJ_B_ID,
+        managerId: MGR_B_ID,
+        projectSource: 'internal',
+      });
       mockAssignmentRepo.save.mockResolvedValue({ id: 'assign-2' });
       mockAssignmentRepo.find.mockResolvedValue([
-        { id: 'assign-1', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_A_ID, managerId: MGR_A_ID, projectSource: 'internal', role: 'developer' },
-        { id: 'assign-2', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_B_ID, managerId: MGR_B_ID, projectSource: 'internal', role: 'lead' },
+        {
+          id: 'assign-1',
+          organizationId: ORG_ID,
+          employeeId: EMP_ID,
+          projectId: PROJ_A_ID,
+          managerId: MGR_A_ID,
+          projectSource: 'internal',
+          role: 'developer',
+        },
+        {
+          id: 'assign-2',
+          organizationId: ORG_ID,
+          employeeId: EMP_ID,
+          projectId: PROJ_B_ID,
+          managerId: MGR_B_ID,
+          projectSource: 'internal',
+          role: 'lead',
+        },
       ]);
       mockEmployeeRepo.find.mockResolvedValue([
-        { id: MGR_A_ID, firstName: 'Amit', lastName: 'Kumar', status: 'active' },
-        { id: MGR_B_ID, firstName: 'Priya', lastName: 'Singh', status: 'active' },
+        {
+          id: MGR_A_ID,
+          firstName: 'Amit',
+          lastName: 'Kumar',
+          status: 'active',
+        },
+        {
+          id: MGR_B_ID,
+          firstName: 'Priya',
+          lastName: 'Singh',
+          status: 'active',
+        },
       ]);
       mockProjectRepo.find.mockResolvedValue([
         { id: PROJ_A_ID, name: 'Project Alpha', status: 'active' },
@@ -190,12 +339,29 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
 
     it('4. Duplicate employee/project assignment is rejected', async () => {
       mockEmployeeRepo.findOne.mockImplementation(({ where }) => {
-        if (where.id === EMP_ID) return Promise.resolve({ id: EMP_ID, organizationId: ORG_ID, status: 'active' });
-        if (where.id === MGR_A_ID) return Promise.resolve({ id: MGR_A_ID, organizationId: ORG_ID, firstName: 'Amit', status: 'active' });
+        if (where.id === EMP_ID)
+          return Promise.resolve({
+            id: EMP_ID,
+            organizationId: ORG_ID,
+            status: 'active',
+          });
+        if (where.id === MGR_A_ID)
+          return Promise.resolve({
+            id: MGR_A_ID,
+            organizationId: ORG_ID,
+            firstName: 'Amit',
+            status: 'active',
+          });
         return Promise.resolve(null);
       });
-      mockProjectRepo.findOne.mockResolvedValue({ id: PROJ_A_ID, organizationId: ORG_ID, name: 'Project Alpha' });
-      mockAssignmentRepo.findOne.mockResolvedValue({ id: 'existing-assignment' });
+      mockProjectRepo.findOne.mockResolvedValue({
+        id: PROJ_A_ID,
+        organizationId: ORG_ID,
+        name: 'Project Alpha',
+      });
+      mockAssignmentRepo.findOne.mockResolvedValue({
+        id: 'existing-assignment',
+      });
 
       await expect(
         service.assignProject(ORG_ID, EMP_ID, {
@@ -217,7 +383,10 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
     });
 
     it('6. Invalid project is rejected', async () => {
-      mockEmployeeRepo.findOne.mockResolvedValue({ id: EMP_ID, organizationId: ORG_ID });
+      mockEmployeeRepo.findOne.mockResolvedValue({
+        id: EMP_ID,
+        organizationId: ORG_ID,
+      });
       mockProjectRepo.findOne.mockResolvedValue(null);
 
       await expect(
@@ -230,11 +399,27 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
 
     it('7. Inactive manager cannot be assigned to a new assignment', async () => {
       mockEmployeeRepo.findOne.mockImplementation(({ where }) => {
-        if (where.id === EMP_ID) return Promise.resolve({ id: EMP_ID, organizationId: ORG_ID, status: 'active' });
-        if (where.id === INACTIVE_MGR_ID) return Promise.resolve({ id: INACTIVE_MGR_ID, organizationId: ORG_ID, firstName: 'Inactive', lastName: 'User', status: 'inactive' });
+        if (where.id === EMP_ID)
+          return Promise.resolve({
+            id: EMP_ID,
+            organizationId: ORG_ID,
+            status: 'active',
+          });
+        if (where.id === INACTIVE_MGR_ID)
+          return Promise.resolve({
+            id: INACTIVE_MGR_ID,
+            organizationId: ORG_ID,
+            firstName: 'Inactive',
+            lastName: 'User',
+            status: 'inactive',
+          });
         return Promise.resolve(null);
       });
-      mockProjectRepo.findOne.mockResolvedValue({ id: PROJ_A_ID, organizationId: ORG_ID, name: 'Project Alpha' });
+      mockProjectRepo.findOne.mockResolvedValue({
+        id: PROJ_A_ID,
+        organizationId: ORG_ID,
+        name: 'Project Alpha',
+      });
 
       await expect(
         service.assignProject(ORG_ID, EMP_ID, {
@@ -245,10 +430,18 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
     });
 
     it('8. Removing one assignment does not remove other assignments', async () => {
-      mockAssignmentRepo.findOne.mockResolvedValue({ id: 'assign-1', organizationId: ORG_ID, employeeId: EMP_ID });
+      mockAssignmentRepo.findOne.mockResolvedValue({
+        id: 'assign-1',
+        organizationId: ORG_ID,
+        employeeId: EMP_ID,
+      });
       mockAssignmentRepo.remove.mockResolvedValue(undefined);
 
-      const res = await service.removeProjectAssignment(ORG_ID, EMP_ID, 'assign-1');
+      const res = await service.removeProjectAssignment(
+        ORG_ID,
+        EMP_ID,
+        'assign-1',
+      );
       expect(res.success).toBe(true);
       expect(mockAssignmentRepo.remove).toHaveBeenCalled();
     });
@@ -257,14 +450,22 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
   describe('Part 7-14: Employee Status Filtering & Deactivation Behavior', () => {
     it('9. Active employees are queried by default when status is not passed', async () => {
       mockEmployeeRepo.find.mockResolvedValue([
-        { id: EMP_ID, organizationId: ORG_ID, firstName: 'Rahul', status: 'active' },
+        {
+          id: EMP_ID,
+          organizationId: ORG_ID,
+          firstName: 'Rahul',
+          status: 'active',
+        },
       ]);
       mockAssignmentRepo.find.mockResolvedValue([]);
 
       const result = await service.findAll(ORG_ID);
       expect(mockEmployeeRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ organizationId: ORG_ID, status: 'active' }),
+          where: expect.objectContaining({
+            organizationId: ORG_ID,
+            status: 'active',
+          }),
         }),
       );
       expect(result).toHaveLength(1);
@@ -272,14 +473,22 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
 
     it('12. Inactive employees returned when explicitly requested with status=inactive', async () => {
       mockEmployeeRepo.find.mockResolvedValue([
-        { id: 'emp-inactive', organizationId: ORG_ID, firstName: 'Inactive', status: 'inactive' },
+        {
+          id: 'emp-inactive',
+          organizationId: ORG_ID,
+          firstName: 'Inactive',
+          status: 'inactive',
+        },
       ]);
       mockAssignmentRepo.find.mockResolvedValue([]);
 
       const result = await service.findAll(ORG_ID, 'inactive');
       expect(mockEmployeeRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ organizationId: ORG_ID, status: 'inactive' }),
+          where: expect.objectContaining({
+            organizationId: ORG_ID,
+            status: 'inactive',
+          }),
         }),
       );
       expect(result).toHaveLength(1);
@@ -287,15 +496,35 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
 
     it('15. Deactivated manager preserves historical relationship with isActive=false', async () => {
       const empList: any[] = [
-        { id: EMP_ID, organizationId: ORG_ID, firstName: 'Rahul', status: 'active' },
+        {
+          id: EMP_ID,
+          organizationId: ORG_ID,
+          firstName: 'Rahul',
+          status: 'active',
+        },
       ];
       mockAssignmentRepo.find.mockResolvedValue([
-        { id: 'assign-old', organizationId: ORG_ID, employeeId: EMP_ID, projectId: PROJ_A_ID, managerId: INACTIVE_MGR_ID, projectSource: 'internal', role: 'developer' },
+        {
+          id: 'assign-old',
+          organizationId: ORG_ID,
+          employeeId: EMP_ID,
+          projectId: PROJ_A_ID,
+          managerId: INACTIVE_MGR_ID,
+          projectSource: 'internal',
+          role: 'developer',
+        },
       ]);
-      mockProjectRepo.find.mockResolvedValue([{ id: PROJ_A_ID, name: 'Legacy Project', status: 'active' }]);
+      mockProjectRepo.find.mockResolvedValue([
+        { id: PROJ_A_ID, name: 'Legacy Project', status: 'active' },
+      ]);
       mockClientProjectRepo.find.mockResolvedValue([]);
       mockEmployeeRepo.find.mockResolvedValue([
-        { id: INACTIVE_MGR_ID, firstName: 'Former', lastName: 'Manager', status: 'inactive' },
+        {
+          id: INACTIVE_MGR_ID,
+          firstName: 'Former',
+          lastName: 'Manager',
+          status: 'inactive',
+        },
       ]);
 
       await service.attachProjectAssignmentsAndManagers(empList, ORG_ID);

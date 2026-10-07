@@ -1707,6 +1707,7 @@ export class AttendanceService {
       anomalyReason?: string;
       inLocationAddress?: string;
       outLocationAddress?: string;
+      workEndTime?: string;
     }[]
   > {
     const monthlyTz =
@@ -1846,6 +1847,7 @@ export class AttendanceService {
       anomalyReason?: string;
       inLocationAddress?: string;
       outLocationAddress?: string;
+      workEndTime?: string;
     }[] = [];
 
     for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
@@ -1902,6 +1904,9 @@ export class AttendanceService {
         anomalyReason: attendanceEntry?.anomalyReason,
         inLocationAddress: attendanceEntry?.inLocationAddress,
         outLocationAddress: attendanceEntry?.outLocationAddress,
+        // Configured office end time (shift → branch → org settings) used by
+        // clients to derive overtime: max(0, punchOut - workEndTime).
+        workEndTime: shiftConfig?.workEndTime,
       });
     }
 

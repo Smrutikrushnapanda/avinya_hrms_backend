@@ -416,4 +416,41 @@ export class AttendanceCalculationService {
       dateStr: zoned.toFormat('yyyy-MM-dd'),
     };
   }
+
+  /**
+   * Calculate overtime based on configured work end time.
+   * Overtime = max(0, actualLastPunchOut - configuredWorkEndTime)
+   *
+   * Uses the office timing configuration applicable to the employee's organization.
+   * Never hardcodes 7 PM, 6 PM, 18:00, 19:00, etc.
+   * Correctly handles seconds/minutes.
+   * Preserves timezone handling already used by the HRMS.
+   * Use the organization's configured office timing.
+   *
+   * @param outTime - The punch-out time (Date object, typically from attendance record outTime)
+   * @param workEndTime - The configured work end time (e.g., "19:00:00" or "19:00")
+   * @param timezone - The organization's timezone (default: Asia/Kolkata)
+   * @returns Overtime in minutes (0 if no overtime or outTime is null)
+   */
+  calculateOvertimeMinutes(
+    outTime: Date | null,
+    workEndTime: string,
+    timezone = 'Asia/Kolkata',
+  ): number {
+    if (!outTime) return 0;
+
+    const workEndMinutes = this.parseTimeToMinutes(workEndTime);
+
+    // Extract the time portion from the out Date in the given timezone
+    const zonedOut = DateTime.fromJSDate(outTime).setZone(timezone);
+    const outHour = zonedOut.hour;
+    const outMinute = zonedOut.minute;
+
+    const outTimeMinutes = outHour * 60 + outMinute;
+    const diff = outTimeMinutes - workEndMinutes;
+
+    if (diff <= 0) return 0;
+
+    return diff;
+  }
 }

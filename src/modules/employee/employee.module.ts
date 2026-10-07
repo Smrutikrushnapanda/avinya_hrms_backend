@@ -34,6 +34,7 @@ import { EmployeeSettlement } from './entities/employee-settlement.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { OrganizationSettings } from '../auth-core/entities/organization-settings.entity';
 import { SalaryStructure } from '../payroll/entities/salary-structure.entity';
+import { PayrollSettings } from '../payroll/entities/payroll-settings.entity';
 import { LeaveBalance } from '../leave/entities/leave-balance.entity';
 import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
@@ -68,6 +69,7 @@ import { ClientProjectMember } from '../clients/entities/client-project-member.e
       Organization,
       OrganizationSettings,
       SalaryStructure,
+      PayrollSettings,
       LeaveBalance,
       Project,
       ClientProject,

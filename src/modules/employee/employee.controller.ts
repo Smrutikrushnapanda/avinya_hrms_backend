@@ -289,7 +289,9 @@ export class EmployeeController {
 
   // --- PROJECT ASSIGNMENTS & MANAGERS ---
   @Get(':id/projects')
-  @ApiOperation({ summary: 'Get all project assignments and managers for an employee' })
+  @ApiOperation({
+    summary: 'Get all project assignments and managers for an employee',
+  })
   @ApiParam({ name: 'id', type: 'string' })
   async getEmployeeProjects(@Param('id') id: string, @GetUser() actor: User) {
     const employee = await this.employeeService.findOne(id);
@@ -318,17 +320,15 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.assignProject(
-      employee.organizationId,
-      id,
-      dto,
-    );
+    return this.employeeService.assignProject(employee.organizationId, id, dto);
   }
 
   @Put(':id/projects/:assignmentId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'HR', 'SUPERADMIN', 'MANAGER')
-  @ApiOperation({ summary: 'Update project assignment or manager for an employee' })
+  @ApiOperation({
+    summary: 'Update project assignment or manager for an employee',
+  })
   @ApiParam({ name: 'id', type: 'string' })
   @ApiParam({ name: 'assignmentId', type: 'string' })
   async updateProjectAssignment(
@@ -471,7 +471,10 @@ export class EmployeeController {
   async getEmployeeManagers(@Param('id') id: string, @GetUser() actor: User) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.getEmployeeManagers(employee.organizationId, id);
+    return this.employeeService.getEmployeeManagers(
+      employee.organizationId,
+      id,
+    );
   }
 
   @Post(':id/managers')
@@ -499,7 +502,11 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.removeManager(employee.organizationId, id, managerId);
+    return this.employeeService.removeManager(
+      employee.organizationId,
+      id,
+      managerId,
+    );
   }
 
   @Patch(':id/primary-manager/:managerId')
@@ -513,16 +520,26 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.setPrimaryManager(employee.organizationId, id, managerId);
+    return this.employeeService.setPrimaryManager(
+      employee.organizationId,
+      id,
+      managerId,
+    );
   }
 
   // --- PROJECT ASSIGNMENTS ---
   @Get(':id/project-assignments')
   @ApiOperation({ summary: 'Get all project assignments for an employee' })
-  async getEmployeeProjectAssignments(@Param('id') id: string, @GetUser() actor: User) {
+  async getEmployeeProjectAssignments(
+    @Param('id') id: string,
+    @GetUser() actor: User,
+  ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.getProjectAssignments(employee.organizationId, id);
+    return this.employeeService.getProjectAssignments(
+      employee.organizationId,
+      id,
+    );
   }
 
   @Post(':id/project-assignments')
@@ -551,7 +568,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.updateProjectAssignment(employee.organizationId, id, assignmentId, dto);
+    return this.employeeService.updateProjectAssignment(
+      employee.organizationId,
+      id,
+      assignmentId,
+      dto,
+    );
   }
 
   @Delete(':id/project-assignments/:assignmentId')
@@ -565,7 +587,11 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.removeProjectAssignment(employee.organizationId, id, assignmentId);
+    return this.employeeService.removeProjectAssignment(
+      employee.organizationId,
+      id,
+      assignmentId,
+    );
   }
 
   // --- ASSETS & CLEARANCE ---
@@ -588,7 +614,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.createEmployeeAsset(employee.organizationId, id, dto, actor.id);
+    return this.employeeService.createEmployeeAsset(
+      employee.organizationId,
+      id,
+      dto,
+      actor.id,
+    );
   }
 
   @Patch(':id/assets/:assetId')
@@ -603,7 +634,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.updateEmployeeAsset(employee.organizationId, id, assetId, dto);
+    return this.employeeService.updateEmployeeAsset(
+      employee.organizationId,
+      id,
+      assetId,
+      dto,
+    );
   }
 
   @Post(':id/assets/:assetId/return')
@@ -618,7 +654,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.returnEmployeeAsset(employee.organizationId, id, assetId, dto);
+    return this.employeeService.returnEmployeeAsset(
+      employee.organizationId,
+      id,
+      assetId,
+      dto,
+    );
   }
 
   @Delete(':id/assets/:assetId')
@@ -632,7 +673,11 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.deleteEmployeeAsset(employee.organizationId, id, assetId);
+    return this.employeeService.deleteEmployeeAsset(
+      employee.organizationId,
+      id,
+      assetId,
+    );
   }
 
   @Get(':id/clearance')
@@ -640,7 +685,10 @@ export class EmployeeController {
   async getClearance(@Param('id') id: string, @GetUser() actor: User) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.getEmployeeClearance(employee.organizationId, id);
+    return this.employeeService.getEmployeeClearance(
+      employee.organizationId,
+      id,
+    );
   }
 
   // --- DOCUMENTS ---
@@ -653,7 +701,11 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.getEmployeeDocuments(employee.organizationId, id, category);
+    return this.employeeService.getEmployeeDocuments(
+      employee.organizationId,
+      id,
+      category,
+    );
   }
 
   @Post(':id/documents')
@@ -667,7 +719,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.createEmployeeDocument(employee.organizationId, id, dto, actor.id);
+    return this.employeeService.createEmployeeDocument(
+      employee.organizationId,
+      id,
+      dto,
+      actor.id,
+    );
   }
 
   @Delete(':id/documents/:documentId')
@@ -681,7 +738,11 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.deleteEmployeeDocument(employee.organizationId, id, documentId);
+    return this.employeeService.deleteEmployeeDocument(
+      employee.organizationId,
+      id,
+      documentId,
+    );
   }
 
   // --- FULL & FINAL SETTLEMENT ---
@@ -690,7 +751,10 @@ export class EmployeeController {
   async getSettlement(@Param('id') id: string, @GetUser() actor: User) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.getEmployeeSettlement(employee.organizationId, id);
+    return this.employeeService.getEmployeeSettlement(
+      employee.organizationId,
+      id,
+    );
   }
 
   @Post(':id/final-settlement')
@@ -704,7 +768,12 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.saveEmployeeSettlement(employee.organizationId, id, dto, actor.id);
+    return this.employeeService.saveEmployeeSettlement(
+      employee.organizationId,
+      id,
+      dto,
+      actor.id,
+    );
   }
 
   @Get(':id/final-settlement/pdf')
@@ -716,7 +785,10 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    const pdfBuffer = await this.employeeService.generateSettlementPdf(employee.organizationId, id);
+    const pdfBuffer = await this.employeeService.generateSettlementPdf(
+      employee.organizationId,
+      id,
+    );
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Settlement-Statement-${employee.employeeCode || employee.id}.pdf"`,
@@ -727,7 +799,9 @@ export class EmployeeController {
 
   // --- EMPLOYEE LETTERS (EXPERIENCE & RELIEVING) ---
   @Post(':id/letters/preview')
-  @ApiOperation({ summary: 'Preview experience or relieving letter for employee' })
+  @ApiOperation({
+    summary: 'Preview experience or relieving letter for employee',
+  })
   async previewLetter(
     @Param('id') id: string,
     @Body() dto: PreviewLetterDto,
@@ -735,15 +809,13 @@ export class EmployeeController {
   ) {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
-    return this.employeeService.previewLetter(
-      employee.organizationId,
-      id,
-      dto,
-    );
+    return this.employeeService.previewLetter(employee.organizationId, id, dto);
   }
 
   @Get(':id/letters/:type/pdf')
-  @ApiOperation({ summary: 'Download experience or relieving letter PDF for employee' })
+  @ApiOperation({
+    summary: 'Download experience or relieving letter PDF for employee',
+  })
   async downloadLetterPdf(
     @Param('id') id: string,
     @Param('type') type: DocumentTemplateType,

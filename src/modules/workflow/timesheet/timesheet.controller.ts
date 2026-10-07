@@ -57,7 +57,11 @@ export class TimesheetController {
       user.userId,
       user.organizationId,
     );
-    if (!isAdminOrHr(user) && dto.employeeId && dto.employeeId !== actingEmpId) {
+    if (
+      !isAdminOrHr(user) &&
+      dto.employeeId &&
+      dto.employeeId !== actingEmpId
+    ) {
       throw new ForbiddenException(
         'You can only create timesheets for yourself',
       );
@@ -84,7 +88,11 @@ export class TimesheetController {
       user.userId,
       user.organizationId,
     );
-    if (!isAdminOrHr(user) && dto.employeeId && dto.employeeId !== actingEmpId) {
+    if (
+      !isAdminOrHr(user) &&
+      dto.employeeId &&
+      dto.employeeId !== actingEmpId
+    ) {
       throw new ForbiddenException(
         'You can only create timesheets for yourself',
       );
