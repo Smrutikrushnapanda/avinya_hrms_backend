@@ -59,8 +59,12 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger setup — disabled in production
-  if (process.env.NODE_ENV !== 'production') {
+  // Swagger setup: off in production unless explicitly enabled.
+  const swaggerEnabled =
+    process.env.NODE_ENV !== 'production' ||
+    (process.env.SWAGGER_ENABLED || '').toLowerCase() === 'true';
+
+  if (swaggerEnabled) {
     const config = new DocumentBuilder()
       .setTitle('Avinya HRMS API')
       .setDescription('Avinya HRMS API Documentation')
@@ -78,9 +82,11 @@ async function bootstrap() {
   console.log(
     `Server running on: http://localhost:${process.env.PORT || 8080}`,
   );
-  console.log(
-    `Swagger docs: http://localhost:${process.env.PORT || 8080}/docs`,
-  );
+  if (swaggerEnabled) {
+    console.log(
+      `Swagger docs: http://localhost:${process.env.PORT || 8080}/docs`,
+    );
+  }
 }
 
 bootstrap();
