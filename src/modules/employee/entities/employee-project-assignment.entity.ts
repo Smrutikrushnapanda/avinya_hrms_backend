@@ -10,8 +10,8 @@ import {
 } from 'typeorm';
 import { Employee } from './employee.entity';
 import { Organization } from 'src/modules/auth-core/entities/organization.entity';
-import { Project } from 'src/modules/project/entities/project.entity';
-import { ClientProject } from 'src/modules/clients/entities/project.entity';
+
+export type EmployeeProjectSource = 'internal' | 'client';
 
 @Entity('employee_project_assignments')
 @Index(['organizationId', 'employeeId', 'projectId', 'projectSource'], {
@@ -31,7 +31,7 @@ export class EmployeeProjectAssignment {
   projectId: string;
 
   @Column({ name: 'project_source', length: 20, default: 'internal' })
-  projectSource: string; // 'internal' | 'client'
+  projectSource: EmployeeProjectSource;
 
   @Column({ name: 'manager_id', type: 'uuid', nullable: true })
   managerId: string | null;
@@ -61,11 +61,6 @@ export class EmployeeProjectAssignment {
   @JoinColumn({ name: 'manager_id' })
   manager: Employee | null;
 
-  @ManyToOne(() => Project, { nullable: true, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'project_id' })
-  internalProject: Project | null;
-
-  @ManyToOne(() => ClientProject, { nullable: true, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'project_id' })
-  clientProject: ClientProject | null;
+  // projectId is polymorphic: projectSource decides whether it points to
+  // projects.id or client_projects.id. Do not add a TypeORM relation here.
 }

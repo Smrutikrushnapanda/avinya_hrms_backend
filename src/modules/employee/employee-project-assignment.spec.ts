@@ -50,6 +50,7 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
   const INACTIVE_MGR_ID = 'mgr-cccc-inactive-333333333333';
   const PROJ_A_ID = 'proj-aaaa-1111-2222-333333333333';
   const PROJ_B_ID = 'proj-bbbb-1111-2222-333333333333';
+  const CLIENT_PROJ_ID = 'client-proj-1111-2222-333333333333';
 
   const mockEmployeeRepo = {
     find: jest.fn().mockResolvedValue([]),
@@ -395,6 +396,126 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
           projectSource: 'internal',
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('6a. Client project assignment resolves through client_projects', async () => {
+      mockEmployeeRepo.findOne.mockImplementation(({ where }) => {
+        if (where.id === EMP_ID) {
+          return Promise.resolve({
+            id: EMP_ID,
+            organizationId: ORG_ID,
+            userId: 'user-1111',
+            status: 'active',
+          });
+        }
+        return Promise.resolve(null);
+      });
+      mockProjectRepo.findOne.mockResolvedValue(null);
+      mockClientProjectRepo.findOne.mockResolvedValue({
+        id: CLIENT_PROJ_ID,
+        organizationId: ORG_ID,
+        projectName: 'Client Portal',
+        projectCode: 'CP',
+      });
+      mockAssignmentRepo.findOne.mockResolvedValue(null);
+      mockAssignmentRepo.create.mockReturnValue({
+        id: 'assign-client-1',
+        organizationId: ORG_ID,
+        employeeId: EMP_ID,
+        projectId: CLIENT_PROJ_ID,
+        projectSource: 'client',
+      });
+      mockAssignmentRepo.save.mockResolvedValue({ id: 'assign-client-1' });
+      mockAssignmentRepo.find.mockResolvedValue([
+        {
+          id: 'assign-client-1',
+          organizationId: ORG_ID,
+          employeeId: EMP_ID,
+          projectId: CLIENT_PROJ_ID,
+          managerId: null,
+          projectSource: 'client',
+          role: 'member',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      mockClientProjectRepo.find.mockResolvedValue([
+        {
+          id: CLIENT_PROJ_ID,
+          projectName: 'Client Portal',
+          projectCode: 'CP',
+          status: 'active',
+        },
+      ]);
+
+      const result = await service.assignProject(ORG_ID, EMP_ID, {
+        projectId: CLIENT_PROJ_ID,
+        projectSource: 'client',
+      });
+
+      expect(mockProjectRepo.findOne).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: CLIENT_PROJ_ID }),
+        }),
+      );
+      expect(mockClientProjectRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CLIENT_PROJ_ID, organizationId: ORG_ID },
+      });
+      expect(result[0].projectSource).toBe('client');
+      expect(result[0].project.name).toBe('Client Portal');
+    });
+
+    it('6b. Invalid project source is rejected', async () => {
+      mockEmployeeRepo.findOne.mockResolvedValue({
+        id: EMP_ID,
+        organizationId: ORG_ID,
+      });
+
+      await expect(
+        service.assignProject(ORG_ID, EMP_ID, {
+          projectId: PROJ_A_ID,
+          projectSource: 'vendor' as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('6c. Updating source validates project against selected table', async () => {
+      mockAssignmentRepo.findOne.mockResolvedValueOnce({
+        id: 'assign-1',
+        organizationId: ORG_ID,
+        employeeId: EMP_ID,
+        projectId: PROJ_A_ID,
+        projectSource: 'internal',
+        managerId: null,
+        role: 'member',
+      });
+      mockClientProjectRepo.findOne.mockResolvedValue({
+        id: CLIENT_PROJ_ID,
+        organizationId: ORG_ID,
+        projectName: 'Client Portal',
+      });
+      mockAssignmentRepo.findOne.mockResolvedValueOnce(null);
+      mockAssignmentRepo.save.mockResolvedValue({ id: 'assign-1' });
+      mockEmployeeRepo.findOne.mockResolvedValue({
+        id: EMP_ID,
+        organizationId: ORG_ID,
+      });
+      mockAssignmentRepo.find.mockResolvedValue([]);
+
+      await service.updateProjectAssignment(ORG_ID, EMP_ID, 'assign-1', {
+        projectId: CLIENT_PROJ_ID,
+        projectSource: 'client',
+      });
+
+      expect(mockClientProjectRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CLIENT_PROJ_ID, organizationId: ORG_ID },
+      });
+      expect(mockAssignmentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: CLIENT_PROJ_ID,
+          projectSource: 'client',
+        }),
+      );
     });
 
     it('7. Inactive manager cannot be assigned to a new assignment', async () => {

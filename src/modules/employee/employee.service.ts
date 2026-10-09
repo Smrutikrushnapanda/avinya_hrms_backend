@@ -42,7 +42,10 @@ import { MailService } from '../mail/mail.service';
 import { DateTime } from 'luxon';
 import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 import { getFullName } from '../../shared/name.util';
-import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
+import {
+  EmployeeProjectAssignment,
+  EmployeeProjectSource,
+} from './entities/employee-project-assignment.entity';
 import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
 import { ProjectMember } from '../project/entities/project-member.entity';
@@ -1829,8 +1832,11 @@ export class EmployeeService implements OnModuleInit {
         manager: {
           id: manager.id,
           name:
-            getFullName(manager.firstName, manager.middleName, manager.lastName) ||
-            manager.workEmail,
+            getFullName(
+              manager.firstName,
+              manager.middleName,
+              manager.lastName,
+            ) || manager.workEmail,
           currentDirectReports: directReports,
           employeeCount: directReports + (employeeId ? 1 : 0),
         },
@@ -4498,7 +4504,11 @@ export class EmployeeService implements OnModuleInit {
       renderedHtml,
       employee: {
         id: employee.id,
-        name: getFullName(employee.firstName, employee.middleName, employee.lastName),
+        name: getFullName(
+          employee.firstName,
+          employee.middleName,
+          employee.lastName,
+        ),
         employeeCode: employee.employeeCode,
         designation: employee.designation?.name || '',
         department: employee.department?.name || '',
@@ -4636,7 +4646,10 @@ export class EmployeeService implements OnModuleInit {
   }
 
   // --- PROJECT ASSIGNMENTS CRUD ---
-  async getEmployeeAssignedProjects(organizationId: string, employeeId: string) {
+  async getEmployeeAssignedProjects(
+    organizationId: string,
+    employeeId: string,
+  ) {
     const employee = await this.employeeRepository.findOne({
       where: { id: employeeId, organizationId },
       select: ['id', 'userId'],
@@ -4829,32 +4842,11 @@ export class EmployeeService implements OnModuleInit {
       );
     }
 
-    // 2. Project must exist
-    let projectExists = false;
-    let projectName = '';
-    if (projectSource === 'client') {
-      const cp = await this.clientProjectRepository.findOne({
-        where: { id: projectId, organizationId },
-      });
-      if (cp) {
-        projectExists = true;
-        projectName = cp.projectName;
-      }
-    } else {
-      const ip = await this.projectRepository.findOne({
-        where: { id: projectId, organizationId },
-      });
-      if (ip) {
-        projectExists = true;
-        projectName = ip.name;
-      }
-    }
-
-    if (!projectExists) {
-      throw new BadRequestException(
-        `Project with ID ${projectId} not found in this organization`,
-      );
-    }
+    const { projectName } = await this.resolveAssignmentProject(
+      organizationId,
+      projectId,
+      projectSource,
+    );
 
     // 3. Manager must exist and be ACTIVE
     if (managerId) {
@@ -5005,17 +4997,21 @@ export class EmployeeService implements OnModuleInit {
       assignment.managerType = dto.managerType;
     }
 
-    if (
-      dto.projectId &&
-      (dto.projectId !== assignment.projectId ||
-        dto.projectSource !== assignment.projectSource)
-    ) {
+    if (dto.projectId !== undefined || dto.projectSource !== undefined) {
+      const newProjectId = dto.projectId || assignment.projectId;
       const newSource = dto.projectSource || assignment.projectSource;
+
+      await this.resolveAssignmentProject(
+        organizationId,
+        newProjectId,
+        newSource,
+      );
+
       const dup = await this.assignmentRepository.findOne({
         where: {
           organizationId,
           employeeId,
-          projectId: dto.projectId,
+          projectId: newProjectId,
           projectSource: newSource,
         },
       });
@@ -5024,7 +5020,7 @@ export class EmployeeService implements OnModuleInit {
           'Employee is already assigned to this project',
         );
       }
-      assignment.projectId = dto.projectId;
+      assignment.projectId = newProjectId;
       assignment.projectSource = newSource;
     }
 
@@ -5059,6 +5055,34 @@ export class EmployeeService implements OnModuleInit {
       success: true,
       message: 'Project assignment removed successfully',
     };
+  }
+
+  private async resolveAssignmentProject(
+    organizationId: string,
+    projectId: string,
+    projectSource: EmployeeProjectSource,
+  ): Promise<{ projectName: string }> {
+    if (!['internal', 'client'].includes(projectSource)) {
+      throw new BadRequestException(
+        `Invalid project_source "${projectSource}". Expected "internal" or "client"`,
+      );
+    }
+
+    if (projectSource === 'client') {
+      const project = await this.clientProjectRepository.findOne({
+        where: { id: projectId, organizationId },
+      });
+      if (project) return { projectName: project.projectName };
+    } else {
+      const project = await this.projectRepository.findOne({
+        where: { id: projectId, organizationId },
+      });
+      if (project) return { projectName: project.name };
+    }
+
+    throw new BadRequestException(
+      `Project with ID ${projectId} not found in this organization for source "${projectSource}"`,
+    );
   }
 
   // --- CACHE INVALIDATION HELPER ---
