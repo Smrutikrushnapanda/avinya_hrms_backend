@@ -1,4 +1,6 @@
 import {
+  IsArray,
+  IsBoolean,
   IsDateString,
   IsInt,
   IsNumber,
@@ -39,6 +41,11 @@ export class UpdateProjectDto {
   managerId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  additionalManagerIds?: string[];
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(100)
@@ -53,4 +60,12 @@ export class UpdateProjectDto {
   @IsNumber()
   @Min(0)
   hourlyRate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  workOrderAssigned?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  parentProjectId?: string;
 }

@@ -13,6 +13,7 @@ import { PollQuestion } from './entities/poll-question.entity';
 import { CreateQuestionDto, QuestionType } from './dto/create-question.dto';
 import { PollOption } from './entities/poll-option.entity';
 import { DateTime } from 'luxon';
+import { getFullName } from '../../shared/name.util';
 import { OrganizationTimezoneService } from 'src/shared/organization-timezone.service';
 import { PollResponse } from './entities/poll-response.entity';
 import { Employee } from '../employee/entities/employee.entity'; // ADDED
@@ -210,14 +211,14 @@ export class PollsService {
       userIds.length > 0
         ? await this.employeeRepo.find({
             where: { userId: In(userIds) },
-            select: ['userId', 'firstName', 'lastName'],
+            select: ['userId', 'firstName', 'middleName', 'lastName'],
           })
         : [];
 
     // Create a map of userId to employee name
     const userIdToNameMap = new Map<string, string>();
     employees.forEach((emp) => {
-      const fullName = `${emp.firstName} ${emp.lastName || ''}`.trim();
+      const fullName = getFullName(emp.firstName, emp.middleName, emp.lastName);
       userIdToNameMap.set(emp.userId, fullName);
     });
 
@@ -311,14 +312,14 @@ export class PollsService {
       creatorIds.length > 0
         ? await this.employeeRepo.find({
             where: { userId: In(creatorIds) },
-            select: ['userId', 'firstName', 'lastName'],
+            select: ['userId', 'firstName', 'middleName', 'lastName'],
           })
         : [];
 
     // Create a map of userId to employee name
     const creatorIdToNameMap = new Map<string, string>();
     employees.forEach((emp) => {
-      const fullName = `${emp.firstName} ${emp.lastName || ''}`.trim();
+      const fullName = getFullName(emp.firstName, emp.middleName, emp.lastName);
       creatorIdToNameMap.set(emp.userId, fullName);
     });
 
@@ -496,7 +497,7 @@ export class PollsService {
         organizationId: orgId,
         status: 'active',
       },
-      select: ['id', 'userId', 'firstName', 'lastName'], // Only select needed fields
+      select: ['id', 'userId', 'firstName', 'middleName', 'lastName'], // Only select needed fields
       order: { firstName: 'ASC' },
     });
 
@@ -515,8 +516,11 @@ export class PollsService {
     const employeeStatuses: SimpleEmployeeResponseDto[] = employees.map(
       (employee) => ({
         employee_id: employee.id,
-        employee_name:
-          `${employee.firstName} ${employee.lastName || ''}`.trim(),
+        employee_name: getFullName(
+          employee.firstName,
+          employee.middleName,
+          employee.lastName,
+        ),
         has_responded: respondedUserSet.has(employee.userId),
       }),
     );

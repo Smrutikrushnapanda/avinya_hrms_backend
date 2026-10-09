@@ -69,6 +69,12 @@ export class WfhMonitoringController {
     return this.service.getMyToday(user.userId);
   }
 
+  /** Employee's own interactive work-session timeline (self-service). */
+  @Get('timeline')
+  getMyTimeline(@GetUser() user: JwtPayload, @Query('date') date?: string) {
+    return this.service.getMyTimeline(user.userId, date);
+  }
+
   @Get('employee/:userId')
   @Roles('ADMIN', 'MANAGER')
   async getEmployeeActivity(

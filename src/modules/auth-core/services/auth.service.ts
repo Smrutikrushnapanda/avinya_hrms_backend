@@ -27,6 +27,7 @@ import { UserPushToken } from '../entities/user-push-token.entity';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import { StorageService } from 'src/modules/attendance/storage.service';
+import { getFullName } from 'src/shared/name.util';
 import { MailService } from 'src/modules/mail/mail.service';
 
 export interface UserWithRoles extends User {
@@ -538,7 +539,7 @@ export class AuthService {
           organizationId: user.organizationId,
           email: otpEmail,
           name:
-            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+            getFullName(user.firstName, user.middleName, user.lastName) ||
             user.userName,
           otp,
           expiresInMinutes: 10,

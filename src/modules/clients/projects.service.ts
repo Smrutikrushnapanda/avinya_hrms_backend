@@ -24,6 +24,7 @@ import { User } from 'src/modules/auth-core/entities/user.entity';
 import { Timesheet } from 'src/modules/workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
 import { LogReportService } from '../log-report/log-report.service';
+import { getFullName } from '../../shared/name.util';
 import {
   ProjectTestSheetTab,
   ProjectTestSheetSource,
@@ -131,6 +132,109 @@ export class ProjectsService implements OnModuleInit {
     return normalized;
   }
 
+  private async validateParentProject(
+    parentProjectId: string,
+    organizationId: string,
+  ) {
+    const parent = await this.projectRepo.findOne({
+      where: { id: parentProjectId },
+      select: ['id', 'organizationId', 'parentProjectId'],
+    });
+    if (!parent || parent.organizationId !== organizationId) {
+      throw new BadRequestException(
+        'Parent project (work stream base) not found in this organization',
+      );
+    }
+    if (parent.parentProjectId) {
+      throw new BadRequestException(
+        'Only top-level projects can have work streams (no nested work streams)',
+      );
+    }
+  }
+
+  private async validateAdditionalManagers(
+    additionalManagerIds: string[] | undefined,
+    organizationId: string,
+  ) {
+    if (!additionalManagerIds || additionalManagerIds.length === 0) return;
+    const employees = await this.employeeRepo.find({
+      where: { userId: In(additionalManagerIds), organizationId },
+      select: ['id', 'userId'],
+    });
+    const foundUserIds = new Set(employees.map((e) => e.userId));
+    const missing = additionalManagerIds.filter(
+      (id) => !foundUserIds.has(id),
+    );
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        'Every additional manager must belong to the same organization',
+      );
+    }
+  }
+
+  private async copyParentMembersToChild(
+    parentProjectId: string,
+    childProjectId: string,
+  ) {
+    const parentMembers = await this.memberRepo.find({
+      where: { projectId: parentProjectId },
+      select: ['userId', 'role'],
+    });
+    for (const member of parentMembers) {
+      const exists = await this.memberRepo.findOne({
+        where: { projectId: childProjectId, userId: member.userId },
+      });
+      if (!exists) {
+        await this.memberRepo.save(
+          this.memberRepo.create({
+            projectId: childProjectId,
+            userId: member.userId,
+            role: member.role,
+          }),
+        );
+      }
+    }
+  }
+
+  private async syncManagerMembers(
+    projectId: string,
+    managerId: string | undefined,
+    additionalManagerIds: string[] | undefined,
+    organizationId: string,
+  ) {
+    const managerUserIds = new Set<string>();
+
+    // managerId is an employee id; resolve it to a user id (member identity).
+    if (managerId) {
+      const mgr = await this.employeeRepo.findOne({
+        where: { id: managerId, organizationId },
+        select: ['id', 'userId'],
+      });
+      if (mgr?.userId) managerUserIds.add(mgr.userId);
+    }
+
+    // additionalManagerIds are user ids (matching client_project_members.user_id).
+    for (const userId of additionalManagerIds ?? []) {
+      if (userId) managerUserIds.add(userId);
+    }
+
+    for (const userId of managerUserIds) {
+      const exists = await this.memberRepo.findOne({
+        where: { projectId, userId },
+      });
+      if (exists) {
+        if (exists.role !== 'manager') {
+          exists.role = 'manager';
+          await this.memberRepo.save(exists);
+        }
+      } else {
+        await this.memberRepo.save(
+          this.memberRepo.create({ projectId, userId, role: 'manager' }),
+        );
+      }
+    }
+  }
+
   private async generateProjectCode(): Promise<string> {
     for (let i = 0; i < 5; i += 1) {
       const code = `PRJ-${Date.now().toString(36).toUpperCase()}-${Math.random()
@@ -159,6 +263,18 @@ export class ProjectsService implements OnModuleInit {
         }
       }
 
+      if (dto.parentProjectId) {
+        await this.validateParentProject(
+          dto.parentProjectId,
+          dto.organizationId,
+        );
+      }
+
+      await this.validateAdditionalManagers(
+        dto.additionalManagerIds,
+        dto.organizationId,
+      );
+
       const projectCode =
         dto.projectCode?.trim() || (await this.generateProjectCode());
       const project = this.projectRepo.create({
@@ -166,7 +282,26 @@ export class ProjectsService implements OnModuleInit {
         projectCode,
         status: dto.status || 'ACTIVE',
       });
-      return this.projectRepo.save(project);
+      const savedProject = await this.projectRepo.save(project);
+
+      // Work streams (child projects) inherit the parent project's team so
+      // streams start with their own members.
+      if (dto.parentProjectId) {
+        await this.copyParentMembersToChild(
+          dto.parentProjectId,
+          savedProject.id,
+        );
+      }
+
+      // Additional managers become 'manager' members on the project.
+      await this.syncManagerMembers(
+        savedProject.id,
+        dto.managerId,
+        dto.additionalManagerIds,
+        dto.organizationId,
+      );
+
+      return savedProject;
     };
 
     return saveProject();
@@ -245,8 +380,35 @@ export class ProjectsService implements OnModuleInit {
         );
       }
     }
+    if (dto.parentProjectId) {
+      if (dto.parentProjectId === id) {
+        throw new BadRequestException(
+          'A project cannot be its own parent (work stream)',
+        );
+      }
+      await this.validateParentProject(dto.parentProjectId, project.organizationId);
+    }
+
+    if (dto.additionalManagerIds) {
+      await this.validateAdditionalManagers(
+        dto.additionalManagerIds,
+        project.organizationId,
+      );
+    }
+
+    const managerId = dto.managerId ?? project.managerId ?? undefined;
     Object.assign(project, dto);
-    return this.projectRepo.save(project);
+
+    const savedProject = await this.projectRepo.save(project);
+
+    await this.syncManagerMembers(
+      savedProject.id,
+      managerId,
+      dto.additionalManagerIds,
+      project.organizationId,
+    );
+
+    return savedProject;
   }
 
   async remove(id: string) {
@@ -377,8 +539,11 @@ export class ProjectsService implements OnModuleInit {
           designation: emp?.designation?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
           managerName: emp?.manager
-            ? `${emp.manager.firstName} ${emp.manager.lastName}`.trim() ||
-              emp.manager.workEmail
+            ? getFullName(
+                emp.manager.firstName,
+                emp.manager.middleName,
+                emp.manager.lastName,
+              ) || emp.manager.workEmail
             : null,
         };
       }),

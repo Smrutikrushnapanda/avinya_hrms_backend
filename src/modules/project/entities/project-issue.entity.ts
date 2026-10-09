@@ -64,4 +64,11 @@ export class ProjectIssue {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+
+  @Column({
+    name: 'status_reminder_sent_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  statusReminderSentAt: Date | null;
 }

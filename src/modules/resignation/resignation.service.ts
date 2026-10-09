@@ -1,3 +1,4 @@
+import { getFullName } from '../../shared/name.util';
 import {
   BadRequestException,
   ForbiddenException,
@@ -240,10 +241,8 @@ export class ResignationService {
         approvedLastWorkingDay: saved.approvedLastWorkingDay,
         allowEarlyRelieving: saved.allowEarlyRelieving,
         reviewerName: reviewer
-          ? [reviewer.firstName, reviewer.lastName]
-              .filter(Boolean)
-              .join(' ')
-              .trim() || reviewer.userName
+          ? getFullName(reviewer.firstName, reviewer.middleName, reviewer.lastName) ||
+            reviewer.userName
           : undefined,
         resignationPolicy:
           request.organization?.settings?.resignationPolicy || undefined,

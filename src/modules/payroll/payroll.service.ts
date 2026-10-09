@@ -18,6 +18,7 @@ import {
 } from './dto/payroll.dto';
 import { Employee } from '../employee/entities/employee.entity';
 import { Organization } from '../auth-core/entities/organization.entity';
+import { getFullName } from '../../shared/name.util';
 import { MailService } from './mail.service';
 import * as puppeteer from 'puppeteer';
 import * as https from 'https';
@@ -613,7 +614,7 @@ export class PayrollService {
 
             <div class="content">
               <div class="employee-row">
-                <div class="employee-name">${`${employee.firstName} ${employee.lastName || ''}`.trim()}</div>
+                <div class="employee-name">${getFullName(employee.firstName, employee.middleName, employee.lastName)}</div>
                 <div class="status-badge">${record.status}</div>
               </div>
 
@@ -761,8 +762,11 @@ export class PayrollService {
           const pdfBuffer = await this.generateSlipPdf(id);
           emailSent = await this.mailService.sendPayslipEmail({
             to: email,
-            employeeName:
-              `${employee.firstName} ${employee.lastName || ''}`.trim(),
+            employeeName: getFullName(
+              employee.firstName,
+              employee.middleName,
+              employee.lastName,
+            ),
             payPeriod: record.payPeriod,
             netPay: fmt(record.netPay),
             pdfBuffer,

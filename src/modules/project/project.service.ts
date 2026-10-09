@@ -37,6 +37,7 @@ import { UpdateProjectTestCaseDto } from './dto/update-project-test-case.dto';
 import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
 import { LogReportService } from '../log-report/log-report.service';
+import { getFullName } from '../../shared/name.util';
 
 type OrgEmployeeFilters = {
   search?: string;
@@ -624,8 +625,11 @@ export class ProjectService implements OnModuleInit {
           designation: emp?.designation?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
           managerName: emp?.manager
-            ? `${emp.manager.firstName} ${emp.manager.lastName}`.trim() ||
-              emp.manager.workEmail
+            ? getFullName(
+                emp.manager.firstName,
+                emp.manager.middleName,
+                emp.manager.lastName,
+              ) || emp.manager.workEmail
             : null,
         };
       }),
@@ -1168,6 +1172,7 @@ export class ProjectService implements OnModuleInit {
       const normalizedAssigneeIdentifier = String(
         dto.assigneeUserId ?? '',
       ).trim();
+      const previousAssigneeUserId = issue.assigneeUserId;
       if (!normalizedAssigneeIdentifier) {
         issue.assigneeUserId = null;
       } else {
@@ -1182,6 +1187,10 @@ export class ProjectService implements OnModuleInit {
           );
         }
         issue.assigneeUserId = assigneeMembership.userId;
+      }
+      if (issue.assigneeUserId !== previousAssigneeUserId) {
+        // Reassigned work gets a fresh 24h reminder window.
+        issue.statusReminderSentAt = null;
       }
     }
     if (dto.status !== undefined) {

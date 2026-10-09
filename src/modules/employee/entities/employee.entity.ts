@@ -79,6 +79,12 @@ export class Employee {
   @Column({ name: 'passport_photo_url', type: 'text', nullable: true })
   passportPhotoUrl: string;
 
+  @Column({ name: 'pan_number', type: 'varchar', length: 20, nullable: true })
+  panNumber: string | null;
+
+  @Column({ name: 'aadhaar_number', type: 'varchar', length: 20, nullable: true })
+  aadhaarNumber: string | null;
+
   @Column({ name: 'date_of_joining', type: 'date' })
   dateOfJoining: Date;
 

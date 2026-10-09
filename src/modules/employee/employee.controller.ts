@@ -17,6 +17,7 @@ import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 import { ValidateEmployeeDto } from './dto/validate-employee.dto';
 import {
   CreateEmployeeAssetDto,
@@ -66,6 +67,52 @@ export class EmployeeController {
         'You can only access employees in your own organization.',
       );
     }
+  }
+
+  // --- SELF-SERVICE ASSET ACKNOWLEDGEMENT ---
+  @Get('me/assets/pending')
+  @ApiOperation({
+    summary: 'Get current user pending asset acknowledgement list',
+  })
+  async getMyPendingAcknowledgedAssets(@GetUser() actor: User) {
+    const userId = actor.id;
+    return this.employeeService.getMyPendingAcknowledgedAssets(
+      actor.organizationId,
+      userId,
+    );
+  }
+
+  @Post('me/assets/:assetId/acknowledge')
+  @ApiOperation({
+    summary: 'Acknowledge receipt of an assigned asset',
+  })
+  async acknowledgeAsset(
+    @Param('assetId') assetId: string,
+    @GetUser() actor: User,
+  ) {
+    const userId = actor.id;
+    return this.employeeService.acknowledgeAsset(
+      actor.organizationId,
+      userId,
+      assetId,
+    );
+  }
+
+  // --- SELF-SERVICE PROFILE (PHONE / PAN / AADHAAR) ---
+  @Put('me')
+  @ApiOperation({
+    summary: "Update current user's phone, PAN and Aadhaar",
+  })
+  async updateMyProfile(
+    @Body() dto: UpdateMyProfileDto,
+    @GetUser() actor: User,
+  ) {
+    const userId = actor.id;
+    return this.employeeService.updateMyProfile(
+      actor.organizationId,
+      userId,
+      dto,
+    );
   }
 
   // --- NEW DASHBOARD ENDPOINT ---
@@ -297,6 +344,24 @@ export class EmployeeController {
     const employee = await this.employeeService.findOne(id);
     this.assertSameOrg(actor, employee?.organizationId);
     return this.employeeService.getProjectAssignments(
+      employee.organizationId,
+      id,
+    );
+  }
+
+  @Get(':id/assigned-projects')
+  @ApiOperation({
+    summary:
+      'Get all internal and client project memberships for an employee (project history)',
+  })
+  @ApiParam({ name: 'id', type: 'string' })
+  async getEmployeeAssignedProjects(
+    @Param('id') id: string,
+    @GetUser() actor: User,
+  ) {
+    const employee = await this.employeeService.findOne(id);
+    this.assertSameOrg(actor, employee?.organizationId);
+    return this.employeeService.getEmployeeAssignedProjects(
       employee.organizationId,
       id,
     );

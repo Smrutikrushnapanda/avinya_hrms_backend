@@ -1,4 +1,6 @@
 import {
+  IsArray,
+  IsBoolean,
   IsDateString,
   IsInt,
   IsNumber,
@@ -45,6 +47,11 @@ export class CreateProjectDto {
   managerId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  additionalManagerIds?: string[];
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   projectCost?: number;
@@ -53,4 +60,12 @@ export class CreateProjectDto {
   @IsNumber()
   @Min(0)
   hourlyRate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  workOrderAssigned?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  parentProjectId?: string;
 }

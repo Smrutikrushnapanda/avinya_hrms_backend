@@ -36,6 +36,26 @@ export class ClientProject {
   @JoinColumn({ name: 'manager_id' })
   manager: Employee | null;
 
+  @Column({ name: 'parent_project_id', type: 'uuid', nullable: true })
+  parentProjectId: string | null;
+
+  @ManyToOne(() => ClientProject, (project) => project.childProjects, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'parent_project_id' })
+  parentProject: ClientProject | null;
+
+  @OneToMany(() => ClientProject, (project) => project.parentProject)
+  childProjects: ClientProject[];
+
+  @Column({
+    name: 'work_order_assigned',
+    type: 'boolean',
+    default: false,
+  })
+  workOrderAssigned: boolean;
+
   @OneToMany(() => ClientProjectMember, (member) => member.project)
   members: ClientProjectMember[];
 

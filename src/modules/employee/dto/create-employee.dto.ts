@@ -7,7 +7,9 @@ import {
   IsEnum,
   IsPhoneNumber,
   Length,
+  Matches,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateEmployeeDto {
   @IsUUID()
@@ -102,6 +104,26 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsString()
   passportPhotoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase().trim() : value,
+  )
+  @Matches(/^[A-Z]{5}[0-9]{4}[A-Z]$/, {
+    message: 'PAN number must be 10 characters in the format ABCDE1234F',
+  })
+  panNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.replace(/\s+/g, '') : value,
+  )
+  @Matches(/^[0-9]{12}$/, {
+    message: 'Aadhaar number must be exactly 12 digits',
+  })
+  aadhaarNumber?: string;
 
   @IsOptional()
   @IsString()

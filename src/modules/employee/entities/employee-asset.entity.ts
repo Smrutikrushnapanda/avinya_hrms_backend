@@ -72,6 +72,19 @@ export class EmployeeAsset {
   @Column({ name: 'is_return_required', type: 'boolean', default: true })
   isReturnRequired: boolean;
 
+  @Column({ name: 'acknowledged', type: 'boolean', default: false })
+  acknowledged: boolean;
+
+  @Column({
+    name: 'acknowledged_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  acknowledgedAt: Date | null;
+
+  @Column({ name: 'acknowledged_by_user_id', type: 'uuid', nullable: true })
+  acknowledgedByUserId: string | null;
+
   @Column({ name: 'notes', type: 'text', nullable: true })
   notes: string | null;
 

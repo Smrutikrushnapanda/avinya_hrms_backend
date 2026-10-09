@@ -15,6 +15,7 @@ import {
   MoreThan,
   QueryFailedError,
   In,
+  Not,
 } from 'typeorm';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
@@ -40,6 +41,7 @@ import { Timeslip } from '../workflow/timeslip/entities/timeslip.entity';
 import { MailService } from '../mail/mail.service';
 import { DateTime } from 'luxon';
 import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
+import { getFullName } from '../../shared/name.util';
 import { EmployeeProjectAssignment } from './entities/employee-project-assignment.entity';
 import { Project } from '../project/entities/project.entity';
 import { ClientProject } from '../clients/entities/project.entity';
@@ -531,7 +533,7 @@ export class EmployeeService implements OnModuleInit {
           organizationId: dto.organizationId,
           employeeEmail: dto.workEmail,
           employeeName:
-            [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() ||
+            getFullName(dto.firstName, dto.middleName, dto.lastName) ||
             dto.firstName,
           userName: loginUserName,
           password: loginPassword,
@@ -570,7 +572,7 @@ export class EmployeeService implements OnModuleInit {
         organizationId: dto.organizationId,
         employeeEmail: dto.workEmail,
         employeeName:
-          [dto.firstName, dto.lastName].filter(Boolean).join(' ').trim() ||
+          getFullName(dto.firstName, dto.middleName, dto.lastName) ||
           dto.firstName,
         userName: loginUserName,
         password: loginPassword,
@@ -826,6 +828,7 @@ export class EmployeeService implements OnModuleInit {
       'lastName',
       'dateOfBirth',
       'gender',
+      'contactNumber',
     ].some((key) => Object.prototype.hasOwnProperty.call(employeeUpdate, key));
 
     const statusChanged = Object.prototype.hasOwnProperty.call(
@@ -886,6 +889,11 @@ export class EmployeeService implements OnModuleInit {
         if (employeeUpdate.gender) {
           user.gender = employeeUpdate.gender;
         }
+        if (employeeUpdate.contactNumber !== undefined) {
+          user.mobileNumber = employeeUpdate.contactNumber
+            ? String(employeeUpdate.contactNumber).trim()
+            : null;
+        }
       }
 
       await this.userRepository.save(user);
@@ -907,10 +915,11 @@ export class EmployeeService implements OnModuleInit {
 
     if (credentialsUpdated && loginPassword) {
       const employeeName =
-        [employee.firstName, employee.lastName]
-          .filter(Boolean)
-          .join(' ')
-          .trim() ||
+        getFullName(
+          employee.firstName,
+          employee.middleName,
+          employee.lastName,
+        ) ||
         employee.firstName ||
         'Employee';
 
@@ -1820,7 +1829,7 @@ export class EmployeeService implements OnModuleInit {
         manager: {
           id: manager.id,
           name:
-            `${manager.firstName} ${manager.lastName || ''}`.trim() ||
+            getFullName(manager.firstName, manager.middleName, manager.lastName) ||
             manager.workEmail,
           currentDirectReports: directReports,
           employeeCount: directReports + (employeeId ? 1 : 0),
@@ -2226,7 +2235,7 @@ export class EmployeeService implements OnModuleInit {
     }
     if (manager.status !== 'active') {
       throw new BadRequestException(
-        `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+        `Cannot assign inactive employee (${getFullName(manager.firstName, manager.middleName, manager.lastName)}) as manager`,
       );
     }
     if (manager.id === employeeId) {
@@ -2488,6 +2497,127 @@ export class EmployeeService implements OnModuleInit {
     }
 
     return this.assetRepository.save(asset);
+  }
+
+  async getMyPendingAcknowledgedAssets(organizationId: string, userId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { userId, organizationId },
+      select: ['id'],
+    });
+    if (!employee) {
+      throw new NotFoundException('Employee record not found for this user');
+    }
+
+    return this.assetRepository.find({
+      where: {
+        organizationId,
+        employeeId: employee.id,
+        acknowledged: false,
+        status: Not(AssetStatus.RETURNED),
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async acknowledgeAsset(
+    organizationId: string,
+    userId: string,
+    assetId: string,
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { userId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException('Employee record not found for this user');
+    }
+
+    const asset = await this.assetRepository.findOne({
+      where: { id: assetId, organizationId, employeeId: employee.id },
+    });
+    if (!asset) {
+      throw new NotFoundException('Asset not found for this employee');
+    }
+
+    if (asset.acknowledged) {
+      return asset;
+    }
+
+    asset.acknowledged = true;
+    asset.acknowledgedAt = new Date();
+    asset.acknowledgedByUserId = userId;
+    const saved = await this.assetRepository.save(asset);
+
+    // Notify the admin (org email or HR mail) with the acknowledgement.
+    try {
+      const org = await this.organizationRepository.findOne({
+        where: { id: organizationId },
+        select: ['organizationName', 'email', 'hrMail'],
+      });
+      const adminEmail = org?.email || org?.hrMail;
+      if (adminEmail) {
+        await this.mailService.sendAssetAcknowledgementEmail({
+          organizationId,
+          recipientEmail: adminEmail,
+          employeeName:
+            getFullName(
+              employee.firstName,
+              employee.middleName,
+              employee.lastName,
+            ) || employee.firstName,
+          assetName: saved.assetName,
+          assetId: saved.assetId,
+          issuedDate: saved.issueDate,
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to send asset acknowledgement email:', err);
+    }
+
+    return saved;
+  }
+
+  async updateMyProfile(
+    organizationId: string,
+    userId: string,
+    dto: { contactNumber?: string; panNumber?: string; aadhaarNumber?: string },
+  ) {
+    const employee = await this.employeeRepository.findOne({
+      where: { userId, organizationId },
+    });
+    if (!employee) {
+      throw new NotFoundException('Employee record not found for this user');
+    }
+
+    if (dto.contactNumber !== undefined) {
+      employee.contactNumber = dto.contactNumber.trim() || null;
+    }
+    if (dto.panNumber !== undefined) {
+      employee.panNumber = dto.panNumber.trim() || null;
+    }
+    if (dto.aadhaarNumber !== undefined) {
+      employee.aadhaarNumber = dto.aadhaarNumber.trim() || null;
+    }
+
+    const saved = await this.employeeRepository.save(employee);
+
+    // Keep the login-identity mobile number in sync with the employee phone.
+    if (dto.contactNumber !== undefined && employee.userId) {
+      try {
+        const user = await this.userRepository.findOne({
+          where: { id: employee.userId },
+        });
+        if (user) {
+          user.mobileNumber = saved.contactNumber
+            ? String(saved.contactNumber).trim()
+            : null;
+          await this.userRepository.save(user);
+        }
+      } catch (err) {
+        console.warn('Failed to sync user mobile number:', err);
+      }
+    }
+
+    return saved;
   }
 
   async deleteEmployeeAsset(
@@ -3688,7 +3818,11 @@ export class EmployeeService implements OnModuleInit {
     const orgLogo = org?.logoUrl || '';
 
     const managerName = employee.manager
-      ? `${employee.manager.firstName} ${employee.manager.lastName || ''}`.trim()
+      ? getFullName(
+          employee.manager.firstName,
+          employee.manager.middleName,
+          employee.manager.lastName,
+        )
       : '';
 
     const clearanceLabel =
@@ -3704,7 +3838,7 @@ export class EmployeeService implements OnModuleInit {
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Full & Final Settlement - ${employee.firstName} ${employee.lastName || ''}</title>
+        <title>Full & Final Settlement - ${getFullName(employee.firstName, employee.middleName, employee.lastName)}</title>
         <style>
           ${this.buildProfessionalPdfStyles({ brandColor, footerText: footerLeft })}
         </style>
@@ -3721,7 +3855,7 @@ export class EmployeeService implements OnModuleInit {
           <div class="info-card">
             <div class="info-card-title">Employee Information</div>
             <table class="info-table">
-              <tr><td class="label">Employee Name:</td><td class="value">${employee.firstName} ${employee.lastName || ''}</td></tr>
+              <tr><td class="label">Employee Name:</td><td class="value">${getFullName(employee.firstName, employee.middleName, employee.lastName)}</td></tr>
               <tr><td class="label">Employee Code / ID:</td><td class="value">${employee.employeeCode || ''}</td></tr>
               <tr><td class="label">Designation:</td><td class="value">${employee.designation?.name || ''}</td></tr>
               <tr><td class="label">Department:</td><td class="value">${employee.department?.name || ''}</td></tr>
@@ -3832,7 +3966,7 @@ export class EmployeeService implements OnModuleInit {
         <div class="sig-grid">
           <div class="sig-box">
             <div class="sig-title">Employee Signature</div>
-            <div class="sig-name">Name: ${employee.firstName} ${employee.lastName || ''}</div>
+            <div class="sig-name">Name: ${getFullName(employee.firstName, employee.middleName, employee.lastName)}</div>
             <div class="sig-date-line">Date: __________________</div>
           </div>
           <div class="sig-box">
@@ -3886,7 +4020,7 @@ export class EmployeeService implements OnModuleInit {
         {
           title: 'Employee Information',
           lines: [
-            `Employee Name: ${employee.firstName} ${employee.lastName || ''}`,
+            `Employee Name: ${getFullName(employee.firstName, employee.middleName, employee.lastName)}`,
             `Employee ID: ${employee.employeeCode || ''}`,
             `Designation: ${employee.designation?.name || ''}`,
             `Department: ${employee.department?.name || ''}`,
@@ -4222,7 +4356,11 @@ export class EmployeeService implements OnModuleInit {
     const exp = this.calculateExperience(employee.dateOfJoining, lastWorkDate);
 
     const managerName = employee.manager
-      ? `${employee.manager.firstName} ${employee.manager.lastName || ''}`.trim()
+      ? getFullName(
+          employee.manager.firstName,
+          employee.manager.middleName,
+          employee.manager.lastName,
+        )
       : '';
 
     const orgName = org?.organizationName || 'Avinya HRMS Organization';
@@ -4233,8 +4371,11 @@ export class EmployeeService implements OnModuleInit {
 
     const variables: Record<string, string> = {
       // Employee variables
-      '{{employee_name}}':
-        `${employee.firstName} ${employee.lastName || ''}`.trim(),
+      '{{employee_name}}': getFullName(
+        employee.firstName,
+        employee.middleName,
+        employee.lastName,
+      ),
       '{{employee_id}}': employee.employeeCode || '',
       '{{employee_code}}': employee.employeeCode || '',
       '{{designation}}': employee.designation?.name || '',
@@ -4357,7 +4498,7 @@ export class EmployeeService implements OnModuleInit {
       renderedHtml,
       employee: {
         id: employee.id,
-        name: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+        name: getFullName(employee.firstName, employee.middleName, employee.lastName),
         employeeCode: employee.employeeCode,
         designation: employee.designation?.name || '',
         department: employee.department?.name || '',
@@ -4495,6 +4636,62 @@ export class EmployeeService implements OnModuleInit {
   }
 
   // --- PROJECT ASSIGNMENTS CRUD ---
+  async getEmployeeAssignedProjects(organizationId: string, employeeId: string) {
+    const employee = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+      select: ['id', 'userId'],
+    });
+    if (!employee) {
+      throw new NotFoundException(`Employee with ID ${employeeId} not found`);
+    }
+    if (!employee.userId) {
+      return [];
+    }
+
+    const userId = employee.userId;
+    const [internalMembers, clientMembers] = await Promise.all([
+      this.projectMemberRepository.find({
+        where: { userId, project: { organizationId } },
+        relations: ['project'],
+        order: { assignedAt: 'DESC' },
+      }),
+      this.clientProjectMemberRepository.find({
+        where: { userId, project: { organizationId } },
+        relations: ['project'],
+        order: { assignedAt: 'DESC' },
+      }),
+    ]);
+
+    const emp = await this.employeeRepository.findOne({
+      where: { id: employeeId, organizationId },
+      select: ['id'],
+      relations: ['designation'],
+    });
+    const designation = emp?.designation?.name ?? null;
+
+    const internal = internalMembers.map((m) => ({
+      id: m.id,
+      projectId: m.projectId,
+      source: 'internal',
+      name: m.project?.name || '',
+      role: m.role,
+      designation,
+      assignedAt: m.assignedAt,
+    }));
+
+    const client = clientMembers.map((m) => ({
+      id: m.id,
+      projectId: m.projectId,
+      source: 'client',
+      name: m.project?.projectName || '',
+      role: m.role,
+      designation,
+      assignedAt: m.assignedAt,
+    }));
+
+    return internal.concat(client);
+  }
+
   async getProjectAssignments(organizationId: string, employeeId: string) {
     const employee = await this.employeeRepository.findOne({
       where: { id: employeeId, organizationId },
@@ -4671,7 +4868,7 @@ export class EmployeeService implements OnModuleInit {
       }
       if (manager.status !== 'active') {
         throw new BadRequestException(
-          `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+          `Cannot assign inactive employee (${getFullName(manager.firstName, manager.middleName, manager.lastName)}) as manager`,
         );
       }
       if (manager.id === employeeId) {
@@ -4790,7 +4987,7 @@ export class EmployeeService implements OnModuleInit {
         }
         if (manager.status !== 'active') {
           throw new BadRequestException(
-            `Cannot assign inactive employee (${manager.firstName} ${manager.lastName || ''}) as manager`,
+            `Cannot assign inactive employee (${getFullName(manager.firstName, manager.middleName, manager.lastName)}) as manager`,
           );
         }
         if (manager.id === employeeId) {

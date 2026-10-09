@@ -1,3 +1,4 @@
+import { getFullName } from '../../shared/name.util';
 import {
   BadRequestException,
   ForbiddenException,
@@ -143,11 +144,23 @@ export class WfhMonitoringService {
     organizationId: string,
     date: string,
   ): Promise<
-    Array<{ id: string; email?: string; firstName?: string; lastName?: string }>
+    Array<{
+      id: string;
+      email?: string;
+      firstName?: string;
+      middleName?: string;
+      lastName?: string;
+    }>
   > {
     const byUserId = new Map<
       string,
-      { id: string; email?: string; firstName?: string; lastName?: string }
+      {
+        id: string;
+        email?: string;
+        firstName?: string;
+        middleName?: string;
+        lastName?: string;
+      }
     >();
 
     const approvedRequests = await this.wfhRequestRepo
@@ -162,6 +175,7 @@ export class WfhMonitoringService {
         'user.id',
         'user.email',
         'user.firstName',
+        'user.middleName',
         'user.lastName',
       ])
       .getMany();
@@ -334,6 +348,177 @@ export class WfhMonitoringService {
     };
   }
 
+  /**
+   * Interactive work-session timeline for the signed-in employee.
+   *
+   * Buckets today's heartbeat snapshots into 30-minute slots across the work
+   * session and tags each slot with active/lunch minutes so the frontend can
+   * render an explorable "Work Session Graph" (hover, click, drill-down).
+   */
+  async getMyTimeline(userId: string, date?: string) {
+    const targetDate = date ?? (await this.todayForUser(userId));
+    const log = await this.activityRepo.findOne({
+      where: { user: { id: userId }, date: targetDate },
+    });
+
+    const base = {
+      date: targetDate,
+      workStartedAt: log?.workStartedAt ?? null,
+      workEndedAt: log?.workEndedAt ?? null,
+      isWorking: !!(log?.workStartedAt && !log.workEndedAt),
+      lunchStart: log?.lunchStart ?? null,
+      lunchEnd: log?.lunchEnd ?? null,
+      isLunch: !!log?.isLunch,
+      lastActiveAt: log?.lastActiveAt ?? null,
+      totals: {
+        mouse: 0,
+        keyboard: 0,
+        tabs: 0,
+        activeMinutes: 0,
+        breakMinutes: 0,
+      },
+      buckets: [] as Array<{
+        time: string;
+        start: string;
+        end: string;
+        mouse: number;
+        keyboard: number;
+        tabs: number;
+        total: number;
+        activeMinutes: number;
+        breakMinutes: number;
+        status: 'active' | 'break' | 'outside';
+      }>,
+    };
+
+    if (!log?.workStartedAt) return base;
+
+    const sessionStart = new Date(log.workStartedAt).getTime();
+    const sessionEnd = log.workEndedAt
+      ? new Date(log.workEndedAt).getTime()
+      : Date.now();
+    const lunchStart = log.lunchStart
+      ? new Date(log.lunchStart).getTime()
+      : null;
+    const lunchEnd = log.lunchStart
+      ? log.lunchEnd
+        ? new Date(log.lunchEnd).getTime()
+        : log.isLunch
+          ? sessionEnd // lunch currently running → counts until now
+          : null
+      : null;
+
+    const snapshots = await this.snapshotRepo
+      .createQueryBuilder('snap')
+      .innerJoin('snap.user', 'user')
+      .where('user.id = :userId', { userId })
+      .andWhere('snap.date = :date', { date: targetDate })
+      .orderBy('snap.createdAt', 'ASC')
+      .getMany();
+
+    // Aggregate snapshots per local 30-min slot ("HH:MM" keyed by :00/:30)
+    const eventMap = new Map<
+      string,
+      { mouse: number; keyboard: number; tabs: number }
+    >();
+    for (const snap of snapshots) {
+      const d = new Date(snap.createdAt);
+      const key = `${String(d.getHours()).padStart(2, '0')}:${
+        d.getMinutes() < 30 ? '00' : '30'
+      }`;
+      const cur = eventMap.get(key) ?? { mouse: 0, keyboard: 0, tabs: 0 };
+      cur.mouse += snap.mouseEvents;
+      cur.keyboard += snap.keyboardEvents;
+      cur.tabs += snap.tabSwitches;
+      eventMap.set(key, cur);
+    }
+
+    const overlapMinutes = (
+      aStart: number,
+      aEnd: number,
+      bStart: number,
+      bEnd: number,
+    ) => {
+      const s = Math.max(aStart, bStart);
+      const e = Math.min(aEnd, bEnd);
+      return e > s ? Math.round((e - s) / 60000) : 0;
+    };
+
+    // Bucket range: floor session start to the nearest :00/:30, ceil the end
+    const rangeStart = new Date(sessionStart);
+    rangeStart.setMinutes(rangeStart.getMinutes() < 30 ? 0 : 30, 0, 0);
+    const rangeEnd = new Date(sessionEnd);
+    rangeEnd.setMinutes(rangeEnd.getMinutes() < 30 ? 30 : 60, 0, 0);
+
+    const buckets: typeof base.buckets = [];
+    const totals = {
+      mouse: 0,
+      keyboard: 0,
+      tabs: 0,
+      activeMinutes: 0,
+      breakMinutes: 0,
+    };
+    const BUCKET_MS = 30 * 60 * 1000;
+
+    for (
+      let cursor = rangeStart.getTime(), guard = 0;
+      cursor < rangeEnd.getTime() && guard < 48;
+      cursor += BUCKET_MS, guard++
+    ) {
+      const start = cursor;
+      const end = cursor + BUCKET_MS;
+      const d = new Date(start);
+      const time = `${String(d.getHours()).padStart(2, '0')}:${String(
+        d.getMinutes(),
+      ).padStart(2, '0')}`;
+      const ev = eventMap.get(time) ?? { mouse: 0, keyboard: 0, tabs: 0 };
+
+      const sessionMinutes = overlapMinutes(
+        start,
+        end,
+        sessionStart,
+        sessionEnd,
+      );
+      const breakMinutes =
+        lunchStart != null && lunchEnd != null
+          ? Math.min(
+              overlapMinutes(start, end, lunchStart, lunchEnd),
+              sessionMinutes,
+            )
+          : 0;
+      const activeMinutes = Math.max(0, sessionMinutes - breakMinutes);
+      const total = ev.mouse + ev.keyboard + ev.tabs;
+
+      const status: 'active' | 'break' | 'outside' =
+        breakMinutes > activeMinutes
+          ? 'break'
+          : activeMinutes > 0
+            ? 'active'
+            : 'outside';
+
+      buckets.push({
+        time,
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+        mouse: ev.mouse,
+        keyboard: ev.keyboard,
+        tabs: ev.tabs,
+        total,
+        activeMinutes,
+        breakMinutes,
+        status,
+      });
+
+      totals.mouse += ev.mouse;
+      totals.keyboard += ev.keyboard;
+      totals.tabs += ev.tabs;
+      totals.activeMinutes += activeMinutes;
+      totals.breakMinutes += breakMinutes;
+    }
+
+    return { ...base, totals, buckets };
+  }
+
   async getEmployeeActivity(employeeUserId: string, date?: string) {
     const targetDate = date ?? (await this.todayForUser(employeeUserId));
     const log = await this.activityRepo.findOne({
@@ -387,6 +572,7 @@ export class WfhMonitoringService {
         'user.id',
         'user.email',
         'user.firstName',
+        'user.middleName',
         'user.lastName',
       ])
       .orderBy('snap.createdAt', 'ASC')
@@ -412,9 +598,8 @@ export class WfhMonitoringService {
         userMap.set(uid, {
           userId: uid,
           name:
-            [snap.user.firstName, snap.user.lastName]
-              .filter(Boolean)
-              .join(' ') || snap.user.email,
+            getFullName(snap.user.firstName, snap.user.middleName, snap.user.lastName) ||
+            snap.user.email,
           email: snap.user.email,
           bucketData: {},
         });
@@ -482,6 +667,7 @@ export class WfhMonitoringService {
         'user.id',
         'user.email',
         'user.firstName',
+        'user.middleName',
         'user.lastName',
       ])
       .getMany();
@@ -773,9 +959,11 @@ export class WfhMonitoringService {
         userId: uid,
         name:
           displayNames.get(uid) ||
-          [approvedUser.firstName, approvedUser.lastName]
-            .filter(Boolean)
-            .join(' ') ||
+          getFullName(
+            approvedUser.firstName,
+            approvedUser.middleName,
+            approvedUser.lastName,
+          ) ||
           approvedUser.email,
         email: approvedUser.email,
         isMonitoring: session?.isActive ?? false,

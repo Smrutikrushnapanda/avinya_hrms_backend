@@ -596,6 +596,46 @@ export class MailService {
     });
   }
 
+  async sendAssetAcknowledgementEmail(details: {
+    organizationId: string;
+    recipientEmail: string;
+    employeeName: string;
+    assetName: string;
+    assetId: string;
+    issuedDate: string;
+  }): Promise<void> {
+    const org = await this.getOrg(details.organizationId);
+    const orgName = org?.organizationName ?? 'Your Organization';
+
+    const content = `
+      <h2 style="margin:0 0 8px;font-size:24px;color:#111827;">Asset Assignment Acknowledged</h2>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:15px;">
+        <strong>${details.employeeName}</strong> has acknowledged receipt of their assigned asset.
+      </p>
+
+      <div style="background:#f8f9fb;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${this.infoRow('Employee', details.employeeName)}
+          ${this.infoRow('Asset', details.assetName)}
+          ${this.infoRow('Asset ID', details.assetId)}
+          ${this.infoRow('Issued Date', details.issuedDate)}
+        </table>
+      </div>
+
+      <p style="margin:0;font-size:14px;color:#6b7280;">
+        Please update the asset register if additional details are required.
+      </p>
+    `;
+
+    await this.send({
+      from: this.fromAddress,
+      to: details.recipientEmail,
+      replyTo: org?.email,
+      subject: `[${orgName}] Asset acknowledgement received from ${details.employeeName}`,
+      html: this.buildEmailWrapper(orgName, org?.logoUrl ?? null, content),
+    });
+  }
+
   async sendPasswordResetOtp(details: PasswordResetOtpDetails): Promise<void> {
     const org = details.organizationId
       ? await this.getOrg(details.organizationId)

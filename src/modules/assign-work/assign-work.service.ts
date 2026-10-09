@@ -5,8 +5,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
+import { getFullName } from '../../shared/name.util';
 import {
   ProjectTask,
   TaskPriority,
@@ -42,11 +44,24 @@ export interface WorkAssignment {
   dueDate: string | null;
   assignedToUserId: string | null;
   assignedByUserId: string;
-  assignedToUser: { id: string; firstName: string; lastName: string } | null;
-  assignedByUser: { id: string; firstName: string; lastName: string } | null;
+  assignedToUser: {
+    id: string;
+    firstName: string;
+    middleName?: string;
+    lastName: string;
+    fullName?: string;
+  } | null;
+  assignedByUser: {
+    id: string;
+    firstName: string;
+    middleName?: string;
+    lastName: string;
+    fullName?: string;
+  } | null;
   completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date | null;
+  assignedAt: Date;
 }
 
 @Injectable()
@@ -91,13 +106,20 @@ export class AssignWorkService {
   }
 
   private toUserSummary(
-    user?: { id?: string; firstName?: string; lastName?: string } | null,
+    user?: {
+      id?: string;
+      firstName?: string;
+      middleName?: string;
+      lastName?: string;
+    } | null,
   ) {
     if (!user) return null;
     return {
       id: user.id || '',
       firstName: user.firstName || '',
+      middleName: user.middleName || '',
       lastName: user.lastName || '',
+      fullName: getFullName(user.firstName, user.middleName, user.lastName),
     };
   }
 
@@ -135,7 +157,9 @@ export class AssignWorkService {
       .map((e) => ({
         userId: e.userId,
         firstName: e.firstName,
+        middleName: e.middleName || '',
         lastName: e.lastName || '',
+        fullName: getFullName(e.firstName, e.middleName, e.lastName),
       }));
 
     return { projects, employees: employeeList };
@@ -353,6 +377,7 @@ export class AssignWorkService {
       completedAt: task.completedAt,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
+      assignedAt: task.createdAt,
     }));
 
     for (const issue of issues) {
@@ -378,6 +403,7 @@ export class AssignWorkService {
         completedAt: issue.resolvedAt,
         createdAt: issue.createdAt,
         updatedAt: issue.updatedAt,
+        assignedAt: issue.createdAt,
       });
     }
 
@@ -628,7 +654,7 @@ export class AssignWorkService {
     senderUserId: string;
     recipientUserId: string;
     organizationId: string;
-    type: 'work_assignment' | 'work_completed';
+    type: 'work_assignment' | 'work_completed' | 'work_reminder';
     title: string;
     body: string;
     data: Record<string, string>;
@@ -678,6 +704,152 @@ export class AssignWorkService {
       }
     } catch (err) {
       this.logger.error('Failed to send work-assignment push:', err);
+    }
+  }
+
+  // ─── 24h PENDING-work reminder ───────────────────────────────────────────────
+  /**
+   * Notifies the ASSIGNEE once, 24h after assignment, that the work is still
+   * pending. Runs hourly so tasks crossing the boundary are caught within the
+   * hour. The notification is sent from the assigner to the assignee, uses the
+   * assignee's full name, and only fires for items still in `pending` status.
+   * Safe to call directly with a fixed clock for tests.
+   */
+  async remindPendingWork(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    let reminded = 0;
+
+    const tasks = await this.taskRepo
+      .createQueryBuilder('task')
+      .select('task.id')
+      .addSelect('task.title')
+      .addSelect('task.assigned_by_user_id')
+      .addSelect('task.assigned_to_user_id')
+      .addSelect('task.organization_id')
+      .where('task.status = :pending', { pending: TaskStatus.PENDING })
+      .andWhere('task.progressPercent < 100')
+      .andWhere('task.statusReminderSentAt IS NULL')
+      .andWhere('task.createdAt <= :cutoff', { cutoff })
+      .getRawMany<{
+        id: string;
+        title: string;
+        assigned_by_user_id: string;
+        assigned_to_user_id: string | null;
+        organization_id: string | null;
+      }>();
+
+    const assigneeIds = Array.from(
+      new Set(
+        tasks
+          .map((row) => row.assigned_to_user_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const assigneeNameById = await this.buildAssigneeNameMap(assigneeIds);
+
+    for (const row of tasks) {
+      const assignerUserId = row.assigned_by_user_id;
+      const assigneeUserId = row.assigned_to_user_id;
+      const organizationId = row.organization_id;
+      if (!assigneeUserId || !assignerUserId || !organizationId) continue;
+      const assigneeName = assigneeNameById.get(assigneeUserId) ?? 'there';
+      await this.notify({
+        senderUserId: assignerUserId,
+        recipientUserId: assigneeUserId,
+        organizationId,
+        type: 'work_reminder',
+        title: `Work Still Pending: ${row.title}`,
+        body: `Hi ${assigneeName}, the work "${row.title}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
+        data: { workId: row.id, projectName: '' },
+      }).catch((err) =>
+        this.logger.error('Failed to send pending-work reminder:', err),
+      );
+      await this.taskRepo.update(row.id, { statusReminderSentAt: now });
+      reminded += 1;
+    }
+
+    const issues = await this.issueRepo
+      .createQueryBuilder('issue')
+      .select('issue.id')
+      .addSelect('issue.issue_title')
+      .addSelect('issue.created_by_user_id')
+      .addSelect('issue.assignee_user_id')
+      .addSelect('issue.organization_id')
+      .where('issue.status = :pending', { pending: 'pending' })
+      .andWhere('issue.progressPercent < 100')
+      .andWhere('issue.statusReminderSentAt IS NULL')
+      .andWhere('issue.createdAt <= :cutoff', { cutoff })
+      .getRawMany<{
+        id: string;
+        issue_title: string;
+        created_by_user_id: string;
+        assignee_user_id: string | null;
+        organization_id: string;
+      }>();
+
+    const issueAssigneeIds = Array.from(
+      new Set(
+        issues
+          .map((row) => row.assignee_user_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const issueAssigneeNameById = await this.buildAssigneeNameMap(
+      issueAssigneeIds,
+    );
+
+    for (const row of issues) {
+      const assignerUserId = row.created_by_user_id;
+      const assigneeUserId = row.assignee_user_id;
+      const organizationId = row.organization_id;
+      if (!assigneeUserId || !assignerUserId || !organizationId) continue;
+      const assigneeName =
+        issueAssigneeNameById.get(assigneeUserId) ?? 'there';
+      await this.notify({
+        senderUserId: assignerUserId,
+        recipientUserId: assigneeUserId,
+        organizationId,
+        type: 'work_reminder',
+        title: `Work Still Pending: ${row.issue_title}`,
+        body: `Hi ${assigneeName}, the work "${row.issue_title}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
+        data: { workId: row.id, projectName: '' },
+      }).catch((err) =>
+        this.logger.error('Failed to send pending-work reminder:', err),
+      );
+      await this.issueRepo.update(row.id, { statusReminderSentAt: now });
+      reminded += 1;
+    }
+
+    if (reminded > 0) {
+      this.logger.log(
+        `Pending-work reminder sent for ${reminded} work item(s)`,
+      );
+    }
+    return reminded;
+  }
+
+  private async buildAssigneeNameMap(
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    if (userIds.length === 0) return new Map();
+    const employees = await this.employeeRepo.find({
+      where: { userId: In(userIds) },
+      select: ['userId', 'firstName', 'middleName', 'lastName'],
+    });
+    return new Map(
+      employees.map((emp) => [
+        emp.userId,
+        getFullName(emp.firstName, emp.middleName, emp.lastName),
+      ]),
+    );
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async handlePendingWorkReminderHourly(): Promise<void> {
+    try {
+      await this.remindPendingWork(new Date());
+    } catch (err) {
+      this.logger.error(`Pending-work reminder cron failed: ${err}`);
     }
   }
 }
