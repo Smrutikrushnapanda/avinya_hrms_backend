@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { AttendanceService } from './attendance.service';
 import {
   CreateAttendanceLogDto,
+  BypassAttendanceLogDto,
   CreateBiometricDeviceDto,
   CreateWifiLocationDto,
   UpdateWifiLocationDto,
@@ -430,6 +431,91 @@ export class AttendanceController {
     reasons?: string[];
   }> {
     return this.attendanceService.logAttendance(dto, photo);
+  }
+
+  // 🔓 Admin Bypass: Log attendance with explicit punch type
+  @Post('bypass')
+  @UseInterceptors(FileInterceptor('photo'))
+  @ApiOperation({ summary: 'Admin bypass: Log attendance with explicit punch type' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Log attendance with explicit punch type (admin bypass)',
+    schema: {
+      type: 'object',
+      properties: {
+        organizationId: { type: 'string', format: 'uuid' },
+        userId: { type: 'string', format: 'uuid' },
+        type: { type: 'string', enum: ['check-in', 'check-out'] },
+        source: {
+          type: 'string',
+          enum: ['mobile', 'web', 'biometric', 'wifi', 'manual'],
+          default: 'manual',
+        },
+        timestamp: { type: 'string', format: 'date-time' },
+        latitude: { type: 'number' },
+        longitude: { type: 'number' },
+        locationAddress: { type: 'string' },
+        wifiSsid: { type: 'string' },
+        wifiBssid: { type: 'string' },
+        biometricDeviceId: { type: 'string', format: 'uuid' },
+        deviceInfo: { type: 'string' },
+        reason: { type: 'string', description: 'Reason for bypass entry (audit trail)' },
+        photo: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+      required: ['organizationId', 'userId', 'type', 'timestamp'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Attendance log submitted via bypass (success or anomaly)',
+  })
+  async logAttendanceBypass(
+    @Body() dto: BypassAttendanceLogDto,
+    @UploadedFile() photo?: Express.Multer.File,
+    @GetUser() actor?: User,
+  ): Promise<{
+    status: 'success' | 'anomaly';
+    data: AttendanceLog;
+    reasons?: string[];
+  }> {
+    // Authorization: support both employee self-service and admin/HR org-wide access
+    if (actor) {
+      const actorOrgId = actor.organizationId;
+      const actorRoles = (actor as any)?.roles?.map((r: { roleName: string }) => r.roleName) || [];
+
+      // Check for EMPLOYEE role first (most specific)
+      const isEmployee = actorRoles.some((r: string) => r === 'EMPLOYEE');
+
+      if (isEmployee) {
+        // Employee can only punch for themselves - validate employee record matches
+        const empBelongsToActor = await this.attendanceService.findEmployeeByUserAndOrg(
+          dto.userId,
+          actorOrgId
+        );
+        if (!empBelongsToActor) {
+          throw new ForbiddenException('Access denied: employee record does not belong to your organization');
+        }
+      } else {
+        // Non-employee: check for admin/HR/SUPERADMIN roles
+        const hasAdminRole = actorRoles.some((r: string) =>
+          ['ADMIN', 'HR', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(r.toUpperCase())
+        );
+
+        if (!hasAdminRole) {
+          throw new ForbiddenException('Access denied: insufficient permissions');
+        }
+
+        // Admin/HR can punch for any employee in their organization
+        if (dto.organizationId !== actorOrgId) {
+          throw new ForbiddenException('Access denied: organization mismatch');
+        }
+        // SUPERADMIN has full access - no additional org check needed beyond the above
+      }
+    }
+    return this.attendanceService.logAttendanceBypass(dto, photo, actor?.id);
   }
 
   @Get('today-logs')

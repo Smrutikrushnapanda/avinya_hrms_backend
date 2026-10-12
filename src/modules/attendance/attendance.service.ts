@@ -27,6 +27,7 @@ import {
 } from './entities';
 import {
   CreateAttendanceLogDto,
+  BypassAttendanceLogDto,
   ToggleBreakDto,
   CreateBiometricDeviceDto,
   CreateWifiLocationDto,
@@ -819,6 +820,400 @@ export class AttendanceService {
           });
         }
         // If no logs at all, leave as 'pending' (truly no data)
+      }
+    });
+
+    // 6️⃣ Respond to frontend
+    const responseData = {
+      ...saved,
+      photoUrl: photoUrl ?? null,
+    };
+
+    return anomalyFlag
+      ? {
+          status: 'anomaly',
+          data: responseData,
+          reasons: anomalyReasons,
+        }
+      : {
+          status: 'success',
+          data: responseData,
+        };
+  }
+
+  /**
+   * Bypass attendance logging - allows admin to explicitly record a punch
+   * with a specific type (check-in or check-out) for any employee in their organization.
+   * This bypasses the automatic punch type determination and validation rules.
+   */
+  async logAttendanceBypass(
+    dto: BypassAttendanceLogDto,
+    photoFile?: Express.Multer.File,
+    actorId?: string,
+  ): Promise<{
+    status: 'success' | 'anomaly';
+    data: AttendanceLog;
+    reasons?: string[];
+  }> {
+    const {
+      userId,
+      organizationId,
+      timestamp,
+      latitude,
+      longitude,
+      wifiBssid,
+      type: explicitType,
+      reason,
+      source,
+    } = dto;
+
+    // 0️⃣ Cross-org validation: verify the target user belongs to this organization
+    const empBelongsToOrg = await this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      select: ['id'],
+    });
+    if (!empBelongsToOrg) {
+      throw new ForbiddenException('Target user does not belong to this organization');
+    }
+
+    // Validation toggles are always derived from the org's stored
+    // AttendanceSettings, never trusted from the client
+    const settings = await this.getOrCreateAttendanceSettings(organizationId);
+    let enableFaceValidation = settings.enableFaceValidation;
+    let enableWifiValidation = settings.enableWifiValidation;
+    let enableGPSValidation = settings.enableGpsValidation;
+
+    const punchTime = new Date(timestamp);
+    const shiftConfig = await this.resolveShiftConfig(organizationId, userId);
+    const shiftTz =
+      (shiftConfig as any).timezone || settings.timezone || 'Asia/Kolkata';
+    const { windowStart, windowEnd, attendanceDate } = this.computeShiftWindow(
+      punchTime,
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+      shiftTz,
+    );
+    const isOvernight = this.isOvernightShift(
+      shiftConfig.workStartTime,
+      shiftConfig.workEndTime,
+    );
+    const dayBounds = this.getDayBoundsInZone(punchTime, shiftTz);
+    const logsWindowStart = isOvernight ? windowStart : dayBounds.start;
+    const logsWindowEnd = isOvernight ? windowEnd : dayBounds.end;
+    const branchId = shiftConfig.branchId || null;
+
+    // An active Office Trip / Client Visit request bypasses Wi-Fi/GPS/geofence anomaly checks
+    const activeTrip = await this.findActiveOfficeTrip(
+      organizationId,
+      userId,
+      attendanceDate,
+      punchTime,
+      shiftTz,
+    );
+
+    // An approved WFH request covering this date similarly bypasses GPS/Wi-Fi/geofence checks
+    const activeWfh = await this.findActiveWfhRequest(
+      organizationId,
+      userId,
+      attendanceDate,
+    );
+
+    // 1️⃣ Use explicit punch type from bypass request (no auto-determination)
+    const type: 'check-in' | 'check-out' | 'break-start' | 'break-end' = explicitType;
+
+    // 2️⃣ Respect check-in / check-out specific validation toggles
+    const punchType: string = type;
+    if (
+      (punchType === 'check-in' && !settings.enableCheckinValidation) ||
+      (punchType === 'check-out' && !settings.enableCheckoutValidation)
+    ) {
+      enableFaceValidation = false;
+      enableWifiValidation = false;
+      enableGPSValidation = false;
+    }
+
+    // 3️⃣ Anomaly Detection (same as regular log)
+    let anomalyFlag = false;
+    const anomalyReasons: string[] = [];
+
+    const locationExempt = !!activeTrip || !!activeWfh;
+
+    if (enableWifiValidation && !locationExempt) {
+      if (!wifiBssid) {
+        anomalyFlag = true;
+        anomalyReasons.push('WiFi validation required but no WiFi network detected');
+      } else {
+        const knownWifis = await this.wifiRepo.find({
+          where: {
+            organization: { id: organizationId },
+            isActive: true,
+          },
+          select: ['bssid', 'latitude', 'longitude', 'allowedRadiusMeters'],
+        });
+
+        const matchedWifi = knownWifis.find((wifi) => wifi.bssid === wifiBssid);
+
+        if (!matchedWifi) {
+          anomalyFlag = true;
+          anomalyReasons.push('Unrecognized Wi-Fi');
+        } else if (
+          enableGPSValidation &&
+          latitude != null &&
+          longitude != null &&
+          matchedWifi.latitude != null &&
+          matchedWifi.longitude != null
+        ) {
+          const distance = this.calculateDistance(
+            latitude,
+            longitude,
+            matchedWifi.latitude,
+            matchedWifi.longitude,
+          );
+          if (
+            distance >
+            this.resolveGeofenceRadius(matchedWifi.allowedRadiusMeters, 50)
+          ) {
+            anomalyFlag = true;
+            anomalyReasons.push('GPS location mismatch for Wi-Fi');
+          }
+        }
+      }
+    }
+
+    if (enableGPSValidation && !locationExempt) {
+      if (latitude == null || longitude == null) {
+        anomalyFlag = true;
+        anomalyReasons.push('GPS location required but not provided');
+      } else {
+        const gpsOk = this.isWithinAllowedLocations(
+          latitude,
+          longitude,
+          shiftConfig.officeLatitude,
+          shiftConfig.officeLongitude,
+          shiftConfig.allowedRadiusMeters,
+          shiftConfig.altLocations ?? [],
+        );
+        if (!gpsOk) {
+          anomalyFlag = true;
+          anomalyReasons.push('GPS outside allowed office radius');
+        }
+      }
+    }
+
+    // 3b. Upload photo to Cloudinary Storage
+    let photoKey: string | undefined;
+    let signedPhotoUrl: string | undefined;
+    let match: { score: number; verified: boolean } | undefined;
+
+    if (photoFile) {
+      photoKey = await this.storageService.uploadAttendancePhoto(
+        photoFile,
+        organizationId,
+        userId,
+        type === 'check-in'
+          ? AttendancePhotoType.CHECKIN
+          : AttendancePhotoType.CHECKOUT,
+      );
+      signedPhotoUrl = await this.storageService.getSignedUrl(photoKey);
+    }
+
+    if (enableFaceValidation) {
+      if (!signedPhotoUrl) {
+        anomalyFlag = true;
+        anomalyReasons.push('Face verification required but no photo provided');
+      } else {
+        match = await this.performFaceMatch(userId, signedPhotoUrl);
+        if (!match.verified) {
+          anomalyFlag = true;
+          anomalyReasons.push(`Face mismatch (score: ${match.score})`);
+        }
+      }
+    }
+
+    // 4️⃣ Save attendance log
+    const log: DeepPartial<AttendanceLog> = {
+      user: { id: userId },
+      organization: { id: organizationId },
+      timestamp: new Date(timestamp),
+      type,
+      source: source || 'manual',
+      photoUrl: photoKey,
+      latitude,
+      longitude,
+      locationAddress: dto.locationAddress,
+      wifiSsid: dto.wifiSsid,
+      wifiBssid: dto.wifiBssid,
+      biometricDevice: dto.biometricDeviceId
+        ? { id: dto.biometricDeviceId }
+        : undefined,
+      deviceInfo: dto.deviceInfo || `Bypass by ${actorId || 'admin'}${reason ? ` - ${reason}` : ''}`,
+      faceMatchScore: match?.score,
+      faceVerified: match?.verified,
+      anomalyFlag,
+      anomalyReason: anomalyFlag ? anomalyReasons.join(', ') : null,
+      branch: branchId ? { id: branchId } : undefined,
+      officeTrip: activeTrip ? { id: activeTrip.id } : undefined,
+      officeTripId: activeTrip?.id ?? null,
+      tripType: activeTrip?.tripType ?? null,
+    };
+
+    const created = this.attendanceLogRepo.create(log);
+    const saved = await this.attendanceLogRepo.save(created);
+    const photoUrl = saved.photoUrl
+      ? await this.storageService.getSignedUrl(saved.photoUrl)
+      : undefined;
+
+    // 5️⃣ Update attendance summary for the day
+    await this.dataSource.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(Attendance)
+        .values({
+          user: { id: userId } as any,
+          organization: { id: organizationId } as any,
+          attendanceDate,
+          status: 'pending' as any,
+          processedAt: new Date(),
+        })
+        .orUpdate({
+          conflict_target: ['user_id', 'attendance_date'],
+          overwrite: ['processed_at'],
+        })
+        .execute();
+
+      const existingAttendance = await manager.findOne(Attendance, {
+        where: { user: { id: userId }, attendanceDate },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!existingAttendance) return;
+
+      const dayLogs = await manager.find(AttendanceLog, {
+        where: {
+          user: { id: userId },
+          organization: { id: organizationId },
+          timestamp: Between(logsWindowStart, logsWindowEnd),
+          anomalyFlag: false,
+        },
+        order: { timestamp: 'ASC' },
+      });
+
+      if (dayLogs.length > 0) {
+        const sortedLogs = [...dayLogs].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        const punchLogs = sortedLogs.filter(
+          (l) => l.type === 'check-in' || l.type === 'check-out',
+        );
+
+        const inLog = sortedLogs[0];
+
+        let timeslipCorrectedIn: Date | null = null;
+        let timeslipCorrectedOut: Date | null = null;
+        let timeslipMissingType: 'IN' | 'OUT' | 'BOTH' | null = null;
+        try {
+          const approvedTimeslip = await manager.findOne(Timeslip, {
+            where: {
+              employee: { userId },
+              date: attendanceDate,
+              status: 'APPROVED' as any,
+            },
+          });
+          if (approvedTimeslip) {
+            timeslipMissingType = approvedTimeslip.missing_type;
+            if (approvedTimeslip.corrected_in) {
+              timeslipCorrectedIn = new Date(approvedTimeslip.corrected_in);
+            }
+            if (approvedTimeslip.corrected_out) {
+              timeslipCorrectedOut = new Date(approvedTimeslip.corrected_out);
+            }
+          }
+        } catch {
+          // Timeslip table may not exist in all deployments
+        }
+
+        const { effectiveIn, effectiveOut, hasClockOut } =
+          this.attendanceCalculation.resolveEffectivePunches(
+            sortedLogs,
+            timeslipCorrectedIn,
+            timeslipCorrectedOut,
+            timeslipMissingType,
+          );
+
+        const punchOutLog =
+          punchLogs.length > 1 ? punchLogs[punchLogs.length - 1] : null;
+
+        const workingMinutes =
+          this.attendanceCalculation.calculateWorkingMinutes(
+            effectiveIn,
+            effectiveOut,
+          );
+
+        const tripLog = [...sortedLogs].reverse().find((l) => l.officeTripId);
+
+        const calcResult = this.attendanceCalculation.determineAttendanceStatus(
+          workingMinutes,
+          hasClockOut,
+          shiftConfig,
+          effectiveIn,
+        );
+
+        await manager.update(Attendance, existingAttendance.id, {
+          inTime: effectiveIn,
+          outTime: effectiveOut,
+          workingMinutes: Math.max(0, workingMinutes),
+          status: calcResult.status,
+          completionStatus: calcResult.completionStatus,
+          punctualityStatus: calcResult.punctualityStatus,
+          inPhotoUrl: inLog.photoUrl ?? undefined,
+          inLatitude: inLog.latitude,
+          inLongitude: inLog.longitude,
+          inLocationAddress: inLog.locationAddress,
+          inWifiSsid: inLog.wifiSsid,
+          inWifiBssid: inLog.wifiBssid,
+          inDeviceInfo: inLog.deviceInfo,
+          outPhotoUrl:
+            hasClockOut && punchOutLog?.photoUrl
+              ? punchOutLog.photoUrl
+              : undefined,
+          outLatitude: hasClockOut ? punchOutLog?.latitude : undefined,
+          outLongitude: hasClockOut ? punchOutLog?.longitude : undefined,
+          outLocationAddress: hasClockOut
+            ? punchOutLog?.locationAddress
+            : undefined,
+          outWifiSsid: hasClockOut ? punchOutLog?.wifiSsid : undefined,
+          outWifiBssid: hasClockOut ? punchOutLog?.wifiBssid : undefined,
+          outDeviceInfo: hasClockOut ? punchOutLog?.deviceInfo : undefined,
+          anomalyFlag: false,
+          anomalyReason: undefined,
+          branch: branchId ? { id: branchId } : undefined,
+          officeTrip: tripLog?.officeTripId
+            ? { id: tripLog.officeTripId }
+            : undefined,
+          officeTripId: tripLog?.officeTripId ?? null,
+          tripType: tripLog?.tripType ?? null,
+          processedAt: new Date(),
+        });
+      } else {
+        const anyLogsExist = await manager.findOne(AttendanceLog, {
+          where: {
+            user: { id: userId },
+            organization: { id: organizationId },
+            timestamp: Between(logsWindowStart, logsWindowEnd),
+          },
+        });
+
+        if (anyLogsExist) {
+          await manager.update(Attendance, existingAttendance.id, {
+            status: 'absent' as any,
+            anomalyFlag: true,
+            anomalyReason: 'All attendance logs flagged as anomalous',
+            processedAt: new Date(),
+          });
+        }
       }
     });
 
