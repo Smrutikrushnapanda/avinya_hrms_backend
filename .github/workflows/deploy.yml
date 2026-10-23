@@ -27,5 +27,7 @@ jobs:
             git reset --hard origin/main
             npm install
             NODE_OPTIONS="--max-old-space-size=2048" npm run build
-            pm2 restart backend || pm2 restart all
+            NODE_ENV=production DB_SYNCHRONIZE=false npm run migrate:assign-work-checklist
+            NODE_ENV=production DB_SYNCHRONIZE=false npm run check:assign-work-schema
+            NODE_ENV=production DB_SYNCHRONIZE=false pm2 restart backend --update-env
           EOF

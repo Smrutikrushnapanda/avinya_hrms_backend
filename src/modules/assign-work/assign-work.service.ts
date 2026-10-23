@@ -2,12 +2,13 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Between } from 'typeorm';
+import { Repository, In, Brackets } from 'typeorm';
 import { getFullName } from '../../shared/name.util';
 import {
   ProjectTask,
@@ -332,37 +333,92 @@ export class AssignWorkService {
   }
 
   // ─── List ─────────────────────────────────────────────────────────────────────────
-  async listAll(organizationId: string, month?: number, year?: number): Promise<WorkAssignment[]> {
+  async listAll(
+    organizationId: string,
+    month?: number,
+    year?: number,
+    scope?: { userId: string; direction: 'to' | 'by' },
+  ): Promise<WorkAssignment[]> {
+    if (!organizationId || (scope && !scope.userId)) {
+      throw new ForbiddenException('Organization and user context required');
+    }
+    const hasMonth = month !== undefined;
+    const hasYear = year !== undefined;
+    if (
+      hasMonth !== hasYear ||
+      (hasMonth && (!Number.isInteger(month) || month < 1 || month > 12)) ||
+      (hasYear && (!Number.isInteger(year) || year < 1000 || year > 9999))
+    ) {
+      throw new BadRequestException(
+        'Provide month (1-12) and year (1000-9999) together',
+      );
+    }
+    try {
+      return await this.loadAssignments(organizationId, month, year, scope);
+    } catch (error) {
+      this.logger.error(
+        `Assign Work list failed organizationId=${organizationId} userId=${scope?.userId ?? 'all'} direction=${scope?.direction ?? 'all'} month=${month ?? 'all'} year=${year ?? 'all'}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new InternalServerErrorException('Unable to load work assignments');
+    }
+  }
+
+  private async loadAssignments(
+    organizationId: string,
+    month?: number,
+    year?: number,
+    scope?: { userId: string; direction: 'to' | 'by' },
+  ): Promise<WorkAssignment[]> {
     const query = this.taskRepo
       .createQueryBuilder('task')
       .leftJoinAndSelect('task.assignedToUser', 'assignedToUser')
       .leftJoinAndSelect('task.assignedByUser', 'assignedByUser')
       .leftJoinAndSelect('task.project', 'project')
       .where(
-        'CAST(task.organization_id AS uuid) = :organizationId OR CAST(project.organization_id AS uuid) = :organizationId',
-        { organizationId },
+        new Brackets((qb) => {
+          qb.where('task.organizationId = CAST(:organizationId AS uuid)', {
+            organizationId,
+          }).orWhere(
+            '(task.organizationId IS NULL AND project.organizationId = CAST(:organizationId AS varchar))',
+            { organizationId },
+          );
+        }),
       );
+    const issueQuery = this.issueRepo
+      .createQueryBuilder('issue')
+      .leftJoinAndSelect('issue.project', 'project')
+      .where('issue.organizationId = :organizationId', { organizationId });
 
-    // Filter by month/year if provided
-    if (month !== undefined && year !== undefined) {
-      const startDate = new Date(year, month - 1, 1); // month is 1-based, Date month is 0-based
-      const endDate = new Date(year, month, 0); // last day of the month
-      query.andWhere('task.createdAt >= :startDate', { startDate });
-      query.andWhere('task.createdAt <= :endDate', { endDate });
+    if (scope) {
+      query.andWhere(
+        scope.direction === 'to'
+          ? 'task.assignedToUserId = :userId'
+          : 'task.assignedByUserId = :userId',
+        { userId: scope.userId },
+      );
+      issueQuery.andWhere(
+        scope.direction === 'to'
+          ? 'issue.assigneeUserId = :userId'
+          : 'issue.createdByUserId = :userId',
+        { userId: scope.userId },
+      );
     }
-
-    const issueWhere: any = { organizationId };
     if (month !== undefined && year !== undefined) {
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0, 23, 59, 59, 999);
-      issueWhere.createdAt = Between(startDate, endDate);
+      const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+      const endDate = new Date(Date.UTC(year, month, 1)).toISOString();
+      query.andWhere(
+        'task.createdAt >= :startDate AND task.createdAt < :endDate',
+        { startDate, endDate },
+      );
+      issueQuery.andWhere(
+        'issue.createdAt >= :startDate AND issue.createdAt < :endDate',
+        { startDate, endDate },
+      );
     }
     const [tasks, issues] = await Promise.all([
       query.getMany(),
-      this.issueRepo.find({
-        where: issueWhere,
-        relations: ['project'],
-      }),
+      issueQuery.getMany(),
     ]);
 
     const [clientProjects, internalProjects] = await Promise.all([
@@ -440,14 +496,28 @@ export class AssignWorkService {
     return assignments;
   }
 
-  async getMy(organizationId: string, userId: string, month?: number, year?: number) {
-    const all = await this.listAll(organizationId, month, year);
-    return all.filter((a) => a.assignedToUserId === userId);
+  async getMy(
+    organizationId: string,
+    userId: string,
+    month?: number,
+    year?: number,
+  ) {
+    return this.listAll(organizationId, month, year, {
+      userId,
+      direction: 'to',
+    });
   }
 
-  async getByMe(organizationId: string, userId: string, month?: number, year?: number) {
-    const all = await this.listAll(organizationId, month, year);
-    return all.filter((a) => a.assignedByUserId === userId);
+  async getByMe(
+    organizationId: string,
+    userId: string,
+    month?: number,
+    year?: number,
+  ) {
+    return this.listAll(organizationId, month, year, {
+      userId,
+      direction: 'by',
+    });
   }
 
   // ─── Update ───────────────────────────────────────────────────────────────────────

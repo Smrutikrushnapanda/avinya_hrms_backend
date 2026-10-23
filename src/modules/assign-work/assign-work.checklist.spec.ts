@@ -54,12 +54,19 @@ function makeService(source: WorkSource = WorkSource.CLIENT) {
     createQueryBuilder: jest.fn().mockReturnValue({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([task]),
     }),
   };
   const issueRepo = {
     findOne: jest.fn().mockResolvedValue(issue),
     find: jest.fn().mockResolvedValue([issue]),
+    createQueryBuilder: jest.fn().mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([issue]),
+    }),
     create: jest.fn((input: Partial<ProjectIssue>) => input),
     save: jest.fn((input: ProjectIssue) => Promise.resolve(input)),
   };
