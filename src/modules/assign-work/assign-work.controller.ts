@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   Put,
   Query,
@@ -41,19 +42,31 @@ export class AssignWorkController {
 
   @Get()
   @ApiOperation({ summary: 'All work assignments in the organization' })
-  listAll(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+  listAll(
+    @GetUser() user: JwtPayload,
+    @Query('month', new ParseIntPipe({ optional: true })) month?: number,
+    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
+  ) {
     return this.assignWorkService.listAll(user.organizationId, month, year);
   }
 
   @Get('my')
   @ApiOperation({ summary: 'Work assigned to me' })
-  getMy(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+  getMy(
+    @GetUser() user: JwtPayload,
+    @Query('month', new ParseIntPipe({ optional: true })) month?: number,
+    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
+  ) {
     return this.assignWorkService.getMy(user.organizationId, user.userId, month, year);
   }
 
   @Get('assigned-by-me')
   @ApiOperation({ summary: 'Work assigned by me' })
-  getByMe(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+  getByMe(
+    @GetUser() user: JwtPayload,
+    @Query('month', new ParseIntPipe({ optional: true })) month?: number,
+    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
+  ) {
     return this.assignWorkService.getByMe(user.organizationId, user.userId, month, year);
   }
 

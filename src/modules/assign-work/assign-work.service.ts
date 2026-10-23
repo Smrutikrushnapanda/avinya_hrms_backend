@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Between } from 'typeorm';
 import { getFullName } from '../../shared/name.util';
 import {
   ProjectTask,
@@ -273,7 +273,7 @@ export class AssignWorkService {
     if (type === WorkSource.INTERNAL) {
       const issue = this.issueRepo.create({
         organizationId,
-        projectId: dto.projectId,
+        projectId: dto.projectId || null,
         pageName: dto.otherProjectName || 'General',
         issueTitle: dto.title,
         description: dto.description.trim(),
@@ -351,10 +351,16 @@ export class AssignWorkService {
       query.andWhere('task.createdAt <= :endDate', { endDate });
     }
 
+    const issueWhere: any = { organizationId };
+    if (month !== undefined && year !== undefined) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+      issueWhere.createdAt = Between(startDate, endDate);
+    }
     const [tasks, issues] = await Promise.all([
       query.getMany(),
       this.issueRepo.find({
-        where: { organizationId },
+        where: issueWhere,
         relations: ['project'],
       }),
     ]);

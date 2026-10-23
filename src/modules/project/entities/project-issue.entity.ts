@@ -16,12 +16,12 @@ export class ProjectIssue {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'project_id', type: 'uuid' })
-  projectId: string;
+  @Column({ name: 'project_id', type: 'uuid', nullable: true })
+  projectId: string | null;
 
-  @ManyToOne(() => Project, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Project, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'project_id' })
-  project: Project;
+  project: Project | null;
 
   @Column({ name: 'organization_id', type: 'uuid' })
   organizationId: string;
