@@ -82,6 +82,20 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
     findOne: jest.fn(),
   };
 
+  const mockProjectMemberRepo = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn().mockResolvedValue(null),
+    create: jest.fn(),
+    save: jest.fn(),
+  };
+
+  const mockClientProjectMemberRepo = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn().mockResolvedValue(null),
+    create: jest.fn(),
+    save: jest.fn(),
+  };
+
   const mockCacheManager = {
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue(undefined),
@@ -100,6 +114,8 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
     mockProjectRepo.find.mockResolvedValue([]);
     mockClientProjectRepo.find.mockResolvedValue([]);
     mockAssignmentRepo.find.mockResolvedValue([]);
+    mockProjectMemberRepo.find.mockResolvedValue([]);
+    mockClientProjectMemberRepo.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -139,19 +155,11 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
         },
         {
           provide: getRepositoryToken(ProjectMember),
-          useValue: {
-            findOne: jest.fn().mockResolvedValue(null),
-            create: jest.fn(),
-            save: jest.fn(),
-          },
+          useValue: mockProjectMemberRepo,
         },
         {
           provide: getRepositoryToken(ClientProjectMember),
-          useValue: {
-            findOne: jest.fn().mockResolvedValue(null),
-            create: jest.fn(),
-            save: jest.fn(),
-          },
+          useValue: mockClientProjectMemberRepo,
         },
         { provide: getRepositoryToken(EmployeeAsset), useValue: {} },
         { provide: getRepositoryToken(EmployeeDocument), useValue: {} },
@@ -179,6 +187,172 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
     }).compile();
 
     service = module.get<EmployeeService>(EmployeeService);
+  });
+
+  describe('Assigned project history', () => {
+    const USER_ID = 'user-1111-2222-3333-444444444444';
+    const assignedAt = new Date('2026-10-15T09:00:00Z');
+
+    beforeEach(() => {
+      mockEmployeeRepo.findOne.mockResolvedValue({
+        id: EMP_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        designation: { name: 'Software Engineer' },
+      });
+    });
+
+    it('resolves employee to user memberships and retains source and designation', async () => {
+      mockProjectMemberRepo.find.mockResolvedValue([
+        {
+          id: 'internal-membership',
+          projectId: PROJ_A_ID,
+          role: 'developer',
+          assignedAt,
+          project: { name: 'Internal project', status: 'active' },
+        },
+      ]);
+      mockClientProjectMemberRepo.find.mockResolvedValue([
+        {
+          id: 'client-membership',
+          projectId: PROJ_A_ID,
+          role: 'tester',
+          assignedAt,
+          project: { projectName: 'Client project', status: 'COMPLETED' },
+        },
+      ]);
+
+      const result = await service.getEmployeeAssignedProjects(ORG_ID, EMP_ID);
+
+      expect(result).toEqual([
+        {
+          id: 'internal-membership',
+          projectId: PROJ_A_ID,
+          source: 'internal',
+          name: 'Internal project',
+          status: 'active',
+          role: 'developer',
+          designation: 'Software Engineer',
+          assignedAt,
+        },
+        {
+          id: 'client-membership',
+          projectId: PROJ_A_ID,
+          source: 'client',
+          name: 'Client project',
+          status: 'COMPLETED',
+          role: 'tester',
+          designation: 'Software Engineer',
+          assignedAt,
+        },
+      ]);
+      for (const repo of [mockProjectMemberRepo, mockClientProjectMemberRepo]) {
+        expect(repo.find).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { userId: USER_ID, project: { organizationId: ORG_ID } },
+          }),
+        );
+      }
+      expect(mockEmployeeRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: EMP_ID, organizationId: ORG_ID },
+        }),
+      );
+      expect(mockClientProjectRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { organizationId: ORG_ID, managerId: EMP_ID },
+        }),
+      );
+    });
+
+    it('includes client projects assigned through managerId without a membership', async () => {
+      mockClientProjectRepo.find.mockResolvedValue([
+        {
+          id: CLIENT_PROJ_ID,
+          projectName: 'Managed project',
+          status: 'ACTIVE',
+          createdAt: assignedAt,
+        },
+      ]);
+
+      await expect(
+        service.getEmployeeAssignedProjects(ORG_ID, EMP_ID),
+      ).resolves.toEqual([
+        {
+          id: CLIENT_PROJ_ID,
+          projectId: CLIENT_PROJ_ID,
+          source: 'client',
+          name: 'Managed project',
+          status: 'ACTIVE',
+          role: 'manager',
+          designation: 'Software Engineer',
+          assignedAt,
+        },
+      ]);
+    });
+
+    it('counts a manager who is also a member once and keeps membership date', async () => {
+      mockClientProjectMemberRepo.find.mockResolvedValue([
+        {
+          id: 'membership',
+          projectId: CLIENT_PROJ_ID,
+          role: 'member',
+          assignedAt,
+          project: { projectName: 'Managed project' },
+        },
+      ]);
+      mockClientProjectRepo.find.mockResolvedValue([
+        {
+          id: CLIENT_PROJ_ID,
+          projectName: 'Managed project',
+          createdAt: new Date('2026-01-01T09:00:00Z'),
+        },
+      ]);
+
+      const result = await service.getEmployeeAssignedProjects(ORG_ID, EMP_ID);
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        id: 'membership',
+        role: 'manager',
+        assignedAt,
+      });
+    });
+
+    it('does not query unscoped user memberships for employees without a login', async () => {
+      mockEmployeeRepo.findOne.mockResolvedValue({ id: EMP_ID, userId: null });
+      mockClientProjectRepo.find.mockResolvedValue([
+        {
+          id: CLIENT_PROJ_ID,
+          projectName: 'Managed project',
+          createdAt: assignedAt,
+        },
+      ]);
+
+      const result = await service.getEmployeeAssignedProjects(ORG_ID, EMP_ID);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].role).toBe('manager');
+      expect(mockProjectMemberRepo.find).not.toHaveBeenCalled();
+      expect(mockClientProjectMemberRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('rejects unknown employees before loading any project data', async () => {
+      mockEmployeeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getEmployeeAssignedProjects(ORG_ID, USER_ID),
+      ).rejects.toThrow(`Employee with ID ${USER_ID} not found`);
+      expect(mockProjectMemberRepo.find).not.toHaveBeenCalled();
+      expect(mockClientProjectMemberRepo.find).not.toHaveBeenCalled();
+      expect(mockClientProjectRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list for employees without project assignments', async () => {
+      await expect(
+        service.getEmployeeAssignedProjects(ORG_ID, EMP_ID),
+      ).resolves.toEqual([]);
+    });
   });
 
   describe('Part 1-4: Project Assignment and Multi-Manager Validation', () => {

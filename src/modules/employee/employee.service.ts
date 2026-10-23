@@ -4653,40 +4653,42 @@ export class EmployeeService implements OnModuleInit {
     const employee = await this.employeeRepository.findOne({
       where: { id: employeeId, organizationId },
       select: ['id', 'userId'],
+      relations: ['designation'],
     });
     if (!employee) {
       throw new NotFoundException(`Employee with ID ${employeeId} not found`);
     }
-    if (!employee.userId) {
-      return [];
-    }
-
     const userId = employee.userId;
-    const [internalMembers, clientMembers] = await Promise.all([
-      this.projectMemberRepository.find({
-        where: { userId, project: { organizationId } },
-        relations: ['project'],
-        order: { assignedAt: 'DESC' },
-      }),
-      this.clientProjectMemberRepository.find({
-        where: { userId, project: { organizationId } },
-        relations: ['project'],
-        order: { assignedAt: 'DESC' },
-      }),
-    ]);
-
-    const emp = await this.employeeRepository.findOne({
-      where: { id: employeeId, organizationId },
-      select: ['id'],
-      relations: ['designation'],
-    });
-    const designation = emp?.designation?.name ?? null;
+    const [internalMembers, clientMembers, managedClientProjects] =
+      await Promise.all([
+        userId
+          ? this.projectMemberRepository.find({
+              where: { userId, project: { organizationId } },
+              relations: ['project'],
+              order: { assignedAt: 'DESC' },
+            })
+          : [],
+        userId
+          ? this.clientProjectMemberRepository.find({
+              where: { userId, project: { organizationId } },
+              relations: ['project'],
+              order: { assignedAt: 'DESC' },
+            })
+          : [],
+        this.clientProjectRepository.find({
+          where: { organizationId, managerId: employeeId },
+          select: ['id', 'projectName', 'status', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        }),
+      ]);
+    const designation = employee.designation?.name ?? null;
 
     const internal = internalMembers.map((m) => ({
       id: m.id,
       projectId: m.projectId,
       source: 'internal',
       name: m.project?.name || '',
+      status: m.project?.status ?? null,
       role: m.role,
       designation,
       assignedAt: m.assignedAt,
@@ -4697,12 +4699,31 @@ export class EmployeeService implements OnModuleInit {
       projectId: m.projectId,
       source: 'client',
       name: m.project?.projectName || '',
+      status: m.project?.status ?? null,
       role: m.role,
       designation,
       assignedAt: m.assignedAt,
     }));
 
-    return internal.concat(client);
+    const projects = new Map(
+      internal.concat(client).map((row) => [`${row.source}:${row.projectId}`, row]),
+    );
+    for (const project of managedClientProjects) {
+      const key = `client:${project.id}`;
+      const membership = projects.get(key);
+      projects.set(key, {
+        id: membership?.id ?? project.id,
+        projectId: project.id,
+        source: 'client',
+        name: project.projectName,
+        status: project.status ?? null,
+        role: 'manager',
+        designation,
+        assignedAt: membership?.assignedAt ?? project.createdAt,
+      });
+    }
+
+    return Array.from(projects.values());
   }
 
   async getProjectAssignments(organizationId: string, employeeId: string) {

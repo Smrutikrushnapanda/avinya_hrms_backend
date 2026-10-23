@@ -506,7 +506,7 @@ export class ProjectsService implements OnModuleInit {
   async getProjectEmployees(projectId: string, organizationId?: string) {
     const project = await this.projectRepo.findOne({
       where: { id: projectId },
-      relations: ['manager', 'manager.user'],
+      relations: ['manager', 'manager.user', 'manager.designation'],
     });
     if (!project) throw new NotFoundException('Project not found');
     if (organizationId && project.organizationId !== organizationId) {
@@ -567,7 +567,7 @@ export class ProjectsService implements OnModuleInit {
           email:
             managerEmployee?.user?.email ?? managerEmployee?.workEmail ?? '',
           workEmail: managerEmployee?.workEmail ?? '',
-          designation: null,
+          designation: managerEmployee?.designation?.name ?? null,
           reportingTo: managerEmployee?.reportingTo ?? null,
           managerName: null,
         }
