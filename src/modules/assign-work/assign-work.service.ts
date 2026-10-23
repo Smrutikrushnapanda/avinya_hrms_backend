@@ -28,6 +28,7 @@ import {
   UpdateWorkProgressDto,
   WorkSource,
 } from './dto/create-assign-work.dto';
+import { extractWorkPoints, hasWorkDescription } from './work-points.util';
 
 export interface WorkAssignment {
   id: string;
@@ -39,6 +40,7 @@ export interface WorkAssignment {
   status: string;
   priority: string;
   progressPercent: number;
+  completedPointIndexes: number[] | null;
   workReport: string | null;
   imageUrl: string | null;
   dueDate: string | null;
@@ -171,6 +173,10 @@ export class AssignWorkService {
     organizationId: string,
     dto: CreateAssignWorkDto,
   ) {
+    if (!hasWorkDescription(dto.description)) {
+      throw new BadRequestException('Description is required');
+    }
+
     const assigneeIds = [
       ...new Set(
         dto.assignedToUserIds?.length
@@ -270,7 +276,10 @@ export class AssignWorkService {
         projectId: dto.projectId,
         pageName: dto.otherProjectName || 'General',
         issueTitle: dto.title,
-        description: dto.description || null,
+        description: dto.description.trim(),
+        completedPointIndexes: extractWorkPoints(dto.description).length
+          ? []
+          : null,
         imageUrl: dto.imageUrl || null,
         status: 'pending',
         createdByUserId: assignedByUserId,
@@ -296,7 +305,10 @@ export class AssignWorkService {
       organizationId: dto.projectId ? undefined : organizationId,
       otherProjectName: dto.projectId ? null : dto.otherProjectName || null,
       title: dto.title,
-      description: dto.description || null,
+      description: dto.description.trim(),
+      completedPointIndexes: extractWorkPoints(dto.description).length
+        ? []
+        : null,
       assignedToUserId,
       assignedByUserId,
       dueDate: dto.dueDate || null,
@@ -320,18 +332,27 @@ export class AssignWorkService {
   }
 
   // ─── List ─────────────────────────────────────────────────────────────────────────
-  async listAll(organizationId: string): Promise<WorkAssignment[]> {
+  async listAll(organizationId: string, month?: number, year?: number): Promise<WorkAssignment[]> {
+    const query = this.taskRepo
+      .createQueryBuilder('task')
+      .leftJoinAndSelect('task.assignedToUser', 'assignedToUser')
+      .leftJoinAndSelect('task.assignedByUser', 'assignedByUser')
+      .leftJoinAndSelect('task.project', 'project')
+      .where(
+        'CAST(task.organization_id AS uuid) = :organizationId OR CAST(project.organization_id AS uuid) = :organizationId',
+        { organizationId },
+      );
+
+    // Filter by month/year if provided
+    if (month !== undefined && year !== undefined) {
+      const startDate = new Date(year, month - 1, 1); // month is 1-based, Date month is 0-based
+      const endDate = new Date(year, month, 0); // last day of the month
+      query.andWhere('task.createdAt >= :startDate', { startDate });
+      query.andWhere('task.createdAt <= :endDate', { endDate });
+    }
+
     const [tasks, issues] = await Promise.all([
-      this.taskRepo
-        .createQueryBuilder('task')
-        .leftJoinAndSelect('task.assignedToUser', 'assignedToUser')
-        .leftJoinAndSelect('task.assignedByUser', 'assignedByUser')
-        .leftJoinAndSelect('task.project', 'project')
-        .where(
-          'CAST(task.organization_id AS uuid) = :organizationId OR CAST(project.organization_id AS uuid) = :organizationId',
-          { organizationId },
-        )
-        .getMany(),
+      query.getMany(),
       this.issueRepo.find({
         where: { organizationId },
         relations: ['project'],
@@ -367,6 +388,7 @@ export class AssignWorkService {
       status: task.status,
       priority: task.priority || 'medium',
       progressPercent: task.progressPercent || 0,
+      completedPointIndexes: task.completedPointIndexes ?? null,
       workReport: task.workReport,
       imageUrl: task.imageUrl,
       dueDate: task.dueDate,
@@ -393,6 +415,7 @@ export class AssignWorkService {
         status: issue.status,
         priority: 'medium',
         progressPercent: issue.progressPercent || 0,
+        completedPointIndexes: issue.completedPointIndexes ?? null,
         workReport: issue.workReport,
         imageUrl: issue.imageUrl,
         dueDate: null,
@@ -411,13 +434,13 @@ export class AssignWorkService {
     return assignments;
   }
 
-  async getMy(organizationId: string, userId: string) {
-    const all = await this.listAll(organizationId);
+  async getMy(organizationId: string, userId: string, month?: number, year?: number) {
+    const all = await this.listAll(organizationId, month, year);
     return all.filter((a) => a.assignedToUserId === userId);
   }
 
-  async getByMe(organizationId: string, userId: string) {
-    const all = await this.listAll(organizationId);
+  async getByMe(organizationId: string, userId: string, month?: number, year?: number) {
+    const all = await this.listAll(organizationId, month, year);
     return all.filter((a) => a.assignedByUserId === userId);
   }
 
@@ -459,16 +482,39 @@ export class AssignWorkService {
 
     const wasDone =
       task.status === TaskStatus.COMPLETED || task.progressPercent >= 100;
-    if (dto.status !== undefined) task.status = dto.status as TaskStatus;
-    if (dto.progressPercent !== undefined)
-      task.progressPercent = dto.progressPercent;
+    if (dto.completedPointIndexes !== undefined) {
+      const completion = this.calculatePointCompletion(
+        task.description,
+        dto.completedPointIndexes,
+      );
+      task.completedPointIndexes = completion.indexes;
+      task.progressPercent = completion.percent;
+      const requestedStatus = (dto.status ?? task.status) as TaskStatus;
+      if (completion.percent === 100) {
+        task.status = TaskStatus.COMPLETED;
+      } else if (
+        requestedStatus === TaskStatus.ISSUE ||
+        requestedStatus === TaskStatus.CANCELLED
+      ) {
+        task.status = requestedStatus;
+      } else {
+        task.status =
+          completion.percent > 0 ? TaskStatus.IN_PROGRESS : TaskStatus.PENDING;
+      }
+    } else {
+      if (dto.status !== undefined) task.status = dto.status as TaskStatus;
+      if (dto.progressPercent !== undefined)
+        task.progressPercent = dto.progressPercent;
+      if (dto.status !== undefined || dto.progressPercent !== undefined)
+        task.completedPointIndexes = null;
+    }
     if (dto.workReport !== undefined) task.workReport = dto.workReport;
 
     const isDone =
       task.status === TaskStatus.COMPLETED || task.progressPercent >= 100;
     if (isDone) {
       task.status = TaskStatus.COMPLETED;
-      task.completedAt = new Date();
+      task.completedAt = task.completedAt || new Date();
     } else {
       task.completedAt = null;
     }
@@ -494,6 +540,7 @@ export class AssignWorkService {
       type: 'client' as const,
       status: saved.status,
       progressPercent: saved.progressPercent,
+      completedPointIndexes: saved.completedPointIndexes ?? null,
       workReport: saved.workReport,
       completedAt: saved.completedAt,
     };
@@ -519,16 +566,28 @@ export class AssignWorkService {
     }
 
     const wasDone = issue.status === 'resolved' || issue.progressPercent >= 100;
-    if (dto.status !== undefined) {
-      issue.status = dto.status === 'resolved' ? 'resolved' : 'pending';
+    if (dto.completedPointIndexes !== undefined) {
+      const completion = this.calculatePointCompletion(
+        issue.description,
+        dto.completedPointIndexes,
+      );
+      issue.completedPointIndexes = completion.indexes;
+      issue.progressPercent = completion.percent;
+      issue.status = completion.percent === 100 ? 'resolved' : 'pending';
+    } else {
+      if (dto.status !== undefined) {
+        issue.status = dto.status === 'resolved' ? 'resolved' : 'pending';
+      }
+      if (dto.progressPercent !== undefined)
+        issue.progressPercent = dto.progressPercent;
+      if (dto.status !== undefined || dto.progressPercent !== undefined)
+        issue.completedPointIndexes = null;
     }
-    if (dto.progressPercent !== undefined)
-      issue.progressPercent = dto.progressPercent;
     if (dto.workReport !== undefined) issue.workReport = dto.workReport;
 
     const isDone = issue.status === 'resolved' || issue.progressPercent >= 100;
     issue.status = isDone ? 'resolved' : 'pending';
-    issue.resolvedAt = isDone ? new Date() : null;
+    issue.resolvedAt = isDone ? issue.resolvedAt || new Date() : null;
 
     const saved = await this.issueRepo.save(issue);
 
@@ -551,8 +610,36 @@ export class AssignWorkService {
       source: 'internal' as const,
       status: saved.status,
       progressPercent: saved.progressPercent,
+      completedPointIndexes: saved.completedPointIndexes ?? null,
       workReport: saved.workReport,
       completedAt: saved.resolvedAt,
+    };
+  }
+
+  private calculatePointCompletion(
+    description: string | null,
+    indexes: number[],
+  ): { indexes: number[]; percent: number } {
+    const points = extractWorkPoints(description || '');
+    if (!points.length) {
+      throw new BadRequestException('This assignment has no checklist points');
+    }
+    if (
+      !Array.isArray(indexes) ||
+      new Set(indexes).size !== indexes.length ||
+      indexes.some(
+        (index) =>
+          !Number.isInteger(index) || index < 0 || index >= points.length,
+      )
+    ) {
+      throw new BadRequestException('Invalid completed point indexes');
+    }
+    return {
+      indexes: [...indexes].sort((a, b) => a - b),
+      percent:
+        indexes.length === points.length
+          ? 100
+          : Math.min(99, Math.round((indexes.length / points.length) * 100)),
     };
   }
 
@@ -794,17 +881,15 @@ export class AssignWorkService {
           .filter((id): id is string => Boolean(id)),
       ),
     );
-    const issueAssigneeNameById = await this.buildAssigneeNameMap(
-      issueAssigneeIds,
-    );
+    const issueAssigneeNameById =
+      await this.buildAssigneeNameMap(issueAssigneeIds);
 
     for (const row of issues) {
       const assignerUserId = row.created_by_user_id;
       const assigneeUserId = row.assignee_user_id;
       const organizationId = row.organization_id;
       if (!assigneeUserId || !assignerUserId || !organizationId) continue;
-      const assigneeName =
-        issueAssigneeNameById.get(assigneeUserId) ?? 'there';
+      const assigneeName = issueAssigneeNameById.get(assigneeUserId) ?? 'there';
       await this.notify({
         senderUserId: assignerUserId,
         recipientUserId: assigneeUserId,

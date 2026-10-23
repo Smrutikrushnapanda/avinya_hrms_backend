@@ -44,6 +44,9 @@ export class ProjectIssue {
   @Column({ name: 'progress_percent', type: 'int', default: 0 })
   progressPercent: number;
 
+  @Column({ name: 'completed_point_indexes', type: 'jsonb', nullable: true })
+  completedPointIndexes: number[] | null;
+
   @Column({ name: 'work_report', type: 'text', nullable: true })
   workReport: string | null;
 

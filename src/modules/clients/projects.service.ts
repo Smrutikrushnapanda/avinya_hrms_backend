@@ -1353,6 +1353,15 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
+    if (status !== task.status) {
+      task.completedPointIndexes = null;
+      task.progressPercent =
+        status === TaskStatus.COMPLETED
+          ? 100
+          : task.progressPercent >= 100
+            ? 0
+            : task.progressPercent;
+    }
     task.status = status;
     if (status === TaskStatus.COMPLETED) {
       task.completedAt = new Date();

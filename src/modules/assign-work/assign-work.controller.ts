@@ -41,20 +41,20 @@ export class AssignWorkController {
 
   @Get()
   @ApiOperation({ summary: 'All work assignments in the organization' })
-  listAll(@GetUser() user: JwtPayload) {
-    return this.assignWorkService.listAll(user.organizationId);
+  listAll(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+    return this.assignWorkService.listAll(user.organizationId, month, year);
   }
 
   @Get('my')
   @ApiOperation({ summary: 'Work assigned to me' })
-  getMy(@GetUser() user: JwtPayload) {
-    return this.assignWorkService.getMy(user.organizationId, user.userId);
+  getMy(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+    return this.assignWorkService.getMy(user.organizationId, user.userId, month, year);
   }
 
   @Get('assigned-by-me')
   @ApiOperation({ summary: 'Work assigned by me' })
-  getByMe(@GetUser() user: JwtPayload) {
-    return this.assignWorkService.getByMe(user.organizationId, user.userId);
+  getByMe(@GetUser() user: JwtPayload, @Query('month') month?: number, @Query('year') year?: number) {
+    return this.assignWorkService.getByMe(user.organizationId, user.userId, month, year);
   }
 
   @Put(':id/progress')

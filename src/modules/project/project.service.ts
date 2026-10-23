@@ -38,6 +38,7 @@ import { Timesheet } from '../workflow/timesheet/entities/timesheet.entity';
 import { MessageService } from '../message/message.service';
 import { LogReportService } from '../log-report/log-report.service';
 import { getFullName } from '../../shared/name.util';
+import { extractWorkPoints } from '../assign-work/work-points.util';
 
 type OrgEmployeeFilters = {
   search?: string;
@@ -1162,10 +1163,25 @@ export class ProjectService implements OnModuleInit {
     });
     if (!issue) throw new NotFoundException('Issue not found');
 
+    let checklistChanged = false;
     if (dto.pageName !== undefined) issue.pageName = dto.pageName.trim();
     if (dto.issueTitle !== undefined) issue.issueTitle = dto.issueTitle.trim();
-    if (dto.description !== undefined)
-      issue.description = dto.description?.trim() || null;
+    if (dto.description !== undefined) {
+      const description = dto.description?.trim() || null;
+      const previousPoints = extractWorkPoints(issue.description || '');
+      const nextPoints = extractWorkPoints(description || '');
+      checklistChanged =
+        (previousPoints.length > 0 || nextPoints.length > 0) &&
+        JSON.stringify(previousPoints) !== JSON.stringify(nextPoints);
+      if (checklistChanged) {
+        issue.completedPointIndexes = nextPoints.length ? [] : null;
+        issue.progressPercent = 0;
+        issue.status = 'pending';
+        issue.resolvedAt = null;
+        issue.resolvedByUserId = null;
+      }
+      issue.description = description;
+    }
     if (dto.imageUrl !== undefined)
       issue.imageUrl = dto.imageUrl?.trim() || null;
     if (dto.assigneeUserId !== undefined) {
@@ -1193,7 +1209,16 @@ export class ProjectService implements OnModuleInit {
         issue.statusReminderSentAt = null;
       }
     }
-    if (dto.status !== undefined) {
+    if (dto.status !== undefined && !checklistChanged) {
+      if (dto.status !== issue.status) {
+        issue.completedPointIndexes = null;
+        issue.progressPercent =
+          dto.status === 'resolved'
+            ? 100
+            : issue.progressPercent >= 100
+              ? 0
+              : issue.progressPercent;
+      }
       issue.status = dto.status;
       if (dto.status === 'resolved') {
         issue.resolvedByUserId = userId;

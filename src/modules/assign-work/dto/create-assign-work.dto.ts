@@ -1,4 +1,5 @@
 import {
+  ArrayUnique,
   IsArray,
   IsDateString,
   IsEnum,
@@ -7,6 +8,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  Matches,
   Min,
 } from 'class-validator';
 
@@ -31,9 +33,9 @@ export class CreateAssignWorkDto {
   @IsString()
   title: string;
 
-  @IsOptional()
   @IsString()
-  description?: string;
+  @Matches(/\S/, { message: 'Description is required' })
+  description: string;
 
   @IsOptional()
   @IsUUID()
@@ -74,6 +76,13 @@ export class UpdateWorkProgressDto {
   @Min(0)
   @Max(100)
   progressPercent?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  completedPointIndexes?: number[];
 
   @IsOptional()
   @IsString()
