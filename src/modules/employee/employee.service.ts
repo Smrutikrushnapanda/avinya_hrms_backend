@@ -1726,6 +1726,8 @@ export class EmployeeService implements OnModuleInit {
       .innerJoin('employee.user', 'activeUser', 'activeUser.isActive = true')
       .select([
         'employee.id',
+        'employee.status',
+        'activeUser.isActive',
         'employee.firstName',
         'employee.lastName',
         'employee.employeeCode',

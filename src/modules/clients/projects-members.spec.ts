@@ -25,9 +25,10 @@ describe('Client project team members', () => {
     id: 'employee-manager',
     userId: 'user-manager',
     firstName: 'Rahul',
+    status: 'active',
     lastName: 'Patro',
     designation: { name: 'Project Manager' },
-    user: { email: 'manager@example.test' },
+    user: { email: 'manager@example.test', isActive: true },
   };
 
   beforeEach(async () => {

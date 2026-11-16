@@ -613,6 +613,8 @@ export class ProjectService implements OnModuleInit {
             : [{ userId: m.userId }, { id: m.userId }],
           relations: ['manager', 'designation', 'user'],
         });
+        if (!emp || emp.status !== 'active' || emp.user?.isActive !== true)
+          return null;
         return {
           userId: emp?.userId ?? m.userId,
           role: m.role,
@@ -636,7 +638,7 @@ export class ProjectService implements OnModuleInit {
       }),
     );
 
-    return employeesWithInfo;
+    return employeesWithInfo.filter((employee) => employee !== null);
   }
 
   private async isProjectManagerOrLead(
@@ -1305,6 +1307,7 @@ export class ProjectService implements OnModuleInit {
       .leftJoinAndSelect('emp.designation', 'designation')
       .where('emp.organizationId = :organizationId', { organizationId })
       .andWhere("emp.status = 'active'")
+      .andWhere('user.isActive = true')
       .andWhere('emp.userId <> :requestingUserId', { requestingUserId })
       .andWhere('emp.userId IS NOT NULL')
       .andWhere(
@@ -1384,7 +1387,8 @@ export class ProjectService implements OnModuleInit {
       .leftJoinAndSelect('emp.department', 'department')
       .leftJoinAndSelect('emp.designation', 'designation')
       .where('emp.organizationId = :organizationId', { organizationId })
-      .andWhere("emp.status = 'active'");
+      .andWhere("emp.status = 'active'")
+      .andWhere('user.isActive = true');
 
     if (assignedEmpIds.length > 0) {
       qb.andWhere(

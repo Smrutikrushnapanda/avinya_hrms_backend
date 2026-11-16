@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
@@ -32,6 +33,7 @@ export class AssignWorkController {
   constructor(private readonly assignWorkService: AssignWorkService) {}
 
   @Get('options')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Projects + employees for the Assign Work form' })
   getOptions(@GetUser() user: JwtPayload) {
     return this.assignWorkService.getOptions(user.organizationId, user);

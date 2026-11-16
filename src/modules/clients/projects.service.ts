@@ -525,8 +525,10 @@ export class ProjectsService implements OnModuleInit {
           where: project.organizationId
             ? [{ userId: m.userId, organizationId: project.organizationId }]
             : [{ userId: m.userId }],
-          relations: ['manager', 'designation'],
+          relations: ['manager', 'designation', 'user'],
         });
+        if (!emp || emp.status !== 'active' || emp.user?.isActive !== true)
+          return null;
         return {
           userId: m.userId,
           role: m.role,
@@ -551,7 +553,11 @@ export class ProjectsService implements OnModuleInit {
     );
 
     const managerEmployee = project.manager;
-    const managerUserId = managerEmployee?.userId ?? null;
+    const managerUserId =
+      managerEmployee?.status === 'active' &&
+      managerEmployee.user?.isActive === true
+        ? managerEmployee.userId
+        : null;
     const managerRecord = managerUserId
       ? {
           userId: managerUserId,
@@ -580,6 +586,7 @@ export class ProjectsService implements OnModuleInit {
     }
 
     employeesWithInfo.forEach((row) => {
+      if (!row) return;
       const existing = mergedByUserId.get(row.userId);
       if (existing?.role === 'manager') {
         mergedByUserId.set(row.userId, {

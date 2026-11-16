@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Post,
   Body,
   Param,
@@ -218,6 +219,7 @@ export class EmployeeController {
   }
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Get all employees by organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   @ApiQuery({
@@ -236,6 +238,7 @@ export class EmployeeController {
   }
 
   @Get('selector')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({
     summary: 'Lightweight employee selector with search and filters',
   })

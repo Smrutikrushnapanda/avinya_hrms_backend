@@ -152,6 +152,15 @@ export class AssignWorkService {
       }),
       this.employeeRepo.find({
         where: activeEmployeeWhere({ organizationId }),
+        relations: ['user'],
+        select: {
+          userId: true,
+          firstName: true,
+          middleName: true,
+          lastName: true,
+          status: true,
+          user: { isActive: true },
+        },
       }),
     ]);
 
@@ -169,13 +178,17 @@ export class AssignWorkService {
     ];
 
     const employeeList = employees
-      .filter((e) => e.userId)
+      .filter(
+        (e) => e.userId && e.status === 'active' && e.user?.isActive === true,
+      )
       .map((e) => ({
         userId: e.userId,
         firstName: e.firstName,
         middleName: e.middleName || '',
         lastName: e.lastName || '',
         fullName: getFullName(e.firstName, e.middleName, e.lastName),
+        status: e.status,
+        isActive: e.user.isActive,
       }));
 
     return {
@@ -261,7 +274,7 @@ export class AssignWorkService {
     const missing = assigneeIds.filter((id) => !validIds.has(id));
     if (missing.length) {
       throw new BadRequestException(
-        'One or more assignees are not employees of this organization',
+        'One or more assignees are inactive or do not belong to this organization',
       );
     }
 
@@ -775,7 +788,7 @@ export class AssignWorkService {
         !employees.some((employee) => employee.userId === dto.assignedToUserId)
       ) {
         throw new BadRequestException(
-          'Assignee is not an employee of this organization',
+          'Assignee must be an active employee of this organization',
         );
       }
       if (internal) issue.assigneeUserId = dto.assignedToUserId;
