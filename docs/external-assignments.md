@@ -12,6 +12,9 @@ API additions are backward compatible:
 - `PUT /assign-work/:id` edits details. `source: "internal"` targets existing internal issue; default targets client task. It preserves project and creator relationships. Checklist description edits match completed point text to new indexes rather than marking unrelated points complete. Legacy manual progress and work reports remain intact.
 - Existing `PUT /assign-work/:id/progress` still manages status, checklist completion and work reports.
 - Existing `DELETE /assign-work/:id?source=client|internal` is reused by confirmation dialog.
+- Deletion is allowed only during first 48 elapsed hours after immutable creation timestamp, including management users. External assignment date and later edits do not reset this window. Same cutoff applies to project task delete endpoint. Expired work remains editable under current permissions; UI disables Delete and open confirmations at cutoff, and backend rechecks every delete request.
+
+Deletion-window verification: 20 backend suites / 355 tests passed, including just before, exactly at, and after 48 hours for regular/internal/external work and all existing participant/management roles. Both production builds passed. Mocked browser checks confirmed Delete and an already-open confirmation expire automatically while Edit remains available. No schema changes or production assignment writes were required.
 - `GET /assign-work` now enforces existing management roles server-side (`ADMIN`, `SUPER_ADMIN`, `ORG_ADMIN`, `MANAGER`, `HR`). It accepts `search`, `assignmentKind`, `status`, `priority`, `assignedToUserId`, and existing paired `month`/`year` filters. Tenant scope always comes from authenticated user.
 - Options include authenticated user ID and management visibility flag. List results include edit/delete permissions using existing assignee, assigner, or management rules.
 

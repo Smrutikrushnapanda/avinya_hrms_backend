@@ -600,11 +600,14 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
         .body as WorkAssignment[];
       expect(rows.length).toBeGreaterThan(0);
       expect(
-        rows.every(
-          (row) =>
-            row.assignmentKind === 'regular' && row.canEdit && row.canDelete,
-        ),
+        rows.every((row) => row.assignmentKind === 'regular' && row.canEdit),
       ).toBe(true);
+      expect(
+        rows.find((row) => row.id === ids['project_tasks-first'])?.canDelete,
+      ).toBe(false);
+      expect(
+        rows.find((row) => row.id === ids['project_issues-first'])?.canDelete,
+      ).toBe(false);
       expect(rows.some((row) => row.title === 'foreign')).toBe(false);
     });
 
@@ -794,6 +797,7 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
         { assignedByUserId: outsider },
         { organizationId: otherOrg },
         { assignmentKind: 'regular' },
+        { createdAt: new Date().toISOString() },
       ]) {
         await http('put', `/${externalId}`).send(fields).expect(400);
       }
@@ -922,6 +926,14 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
           .send({ source, externalAssignerName: 'Cannot convert' })
           .expect(400);
         await http('delete', endpoint, empty).expect(403);
+        const expired = await http('delete', endpoint, me).expect(403);
+        expect((expired.body as { message: string }).message).toContain(
+          '48 hours',
+        );
+        await db.query(
+          `UPDATE "${schema}"."${internal ? 'project_issues' : 'project_tasks'}" SET created_at = $1 WHERE id = $2`,
+          [new Date(), id],
+        );
         await http('delete', endpoint, me).expect(200);
         await http('delete', endpoint, me).expect(404);
       },

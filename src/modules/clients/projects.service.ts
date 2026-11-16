@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { assertAssignmentDeletionOpen } from '../../shared/work-assignment-deletion.util';
 import { ClientProject } from './entities/project.entity';
 import { ClientProjectMember } from './entities/client-project-member.entity';
 import {
@@ -1391,6 +1392,7 @@ export class ProjectsService implements OnModuleInit {
       throw new ForbiddenException('You cannot delete this task');
     }
 
+    assertAssignmentDeletionOpen(task.createdAt);
     await this.taskRepo.remove(task);
     return { success: true };
   }

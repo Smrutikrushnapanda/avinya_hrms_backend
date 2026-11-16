@@ -33,6 +33,10 @@ import {
 import { extractWorkPoints, hasWorkDescription } from './work-points.util';
 import { AssignmentFiltersDto } from './dto/assignment-filters.dto';
 import { activeEmployeeWhere } from '../../shared/active-employees.util';
+import {
+  assertAssignmentDeletionOpen,
+  isAssignmentDeletionOpen,
+} from '../../shared/work-assignment-deletion.util';
 
 export interface WorkAssignment {
   id: string;
@@ -439,11 +443,12 @@ export class AssignWorkService {
               item.assignedByUserId,
               item.assignedToUserId,
             ),
-            canDelete: this.canDelete(
-              actor,
-              item.assignedByUserId,
-              item.assignedToUserId,
-            ),
+            canDelete:
+              this.canDelete(
+                actor,
+                item.assignedByUserId,
+                item.assignedToUserId,
+              ) && isAssignmentDeletionOpen(item.createdAt),
           }))
         : assignments;
     } catch (error) {
@@ -1081,6 +1086,7 @@ export class AssignWorkService {
       if (!this.canDelete(user, issue.createdByUserId, issue.assigneeUserId)) {
         throw new ForbiddenException('You cannot delete this assignment');
       }
+      assertAssignmentDeletionOpen(issue.createdAt);
       await this.issueRepo.remove(issue);
     } else {
       const task = await this.taskRepo.findOne({ where: { id: workId } });
@@ -1096,6 +1102,7 @@ export class AssignWorkService {
       if (!this.canDelete(user, task.assignedByUserId, task.assignedToUserId)) {
         throw new ForbiddenException('You cannot delete this assignment');
       }
+      assertAssignmentDeletionOpen(task.createdAt);
       await this.taskRepo.remove(task);
     }
     return { success: true };
