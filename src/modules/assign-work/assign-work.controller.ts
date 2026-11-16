@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Put,
   Query,
@@ -17,9 +18,11 @@ import { JwtPayload } from '../auth-core/dto/auth.dto';
 import { AssignWorkService } from './assign-work.service';
 import {
   CreateAssignWorkDto,
+  UpdateAssignWorkDto,
   UpdateWorkProgressDto,
   WorkSource,
 } from './dto/create-assign-work.dto';
+import { AssignmentFiltersDto } from './dto/assignment-filters.dto';
 
 @ApiTags('Assign Work')
 @ApiBearerAuth()
@@ -31,7 +34,7 @@ export class AssignWorkController {
   @Get('options')
   @ApiOperation({ summary: 'Projects + employees for the Assign Work form' })
   getOptions(@GetUser() user: JwtPayload) {
-    return this.assignWorkService.getOptions(user.organizationId);
+    return this.assignWorkService.getOptions(user.organizationId, user);
   }
 
   @Post()
@@ -42,12 +45,8 @@ export class AssignWorkController {
 
   @Get()
   @ApiOperation({ summary: 'All work assignments in the organization' })
-  listAll(
-    @GetUser() user: JwtPayload,
-    @Query('month', new ParseIntPipe({ optional: true })) month?: number,
-    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
-  ) {
-    return this.assignWorkService.listAll(user.organizationId, month, year);
+  listAll(@GetUser() user: JwtPayload, @Query() filters: AssignmentFiltersDto) {
+    return this.assignWorkService.getOrganizationAssignments(user, filters);
   }
 
   @Get('my')
@@ -57,7 +56,13 @@ export class AssignWorkController {
     @Query('month', new ParseIntPipe({ optional: true })) month?: number,
     @Query('year', new ParseIntPipe({ optional: true })) year?: number,
   ) {
-    return this.assignWorkService.getMy(user.organizationId, user.userId, month, year);
+    return this.assignWorkService.getMy(
+      user.organizationId,
+      user.userId,
+      month,
+      year,
+      user,
+    );
   }
 
   @Get('assigned-by-me')
@@ -67,14 +72,33 @@ export class AssignWorkController {
     @Query('month', new ParseIntPipe({ optional: true })) month?: number,
     @Query('year', new ParseIntPipe({ optional: true })) year?: number,
   ) {
-    return this.assignWorkService.getByMe(user.organizationId, user.userId, month, year);
+    return this.assignWorkService.getByMe(
+      user.organizationId,
+      user.userId,
+      month,
+      year,
+      user,
+    );
+  }
+
+  @Put(':id')
+  @ApiOperation({
+    summary:
+      'Edit assignment details using existing participant and management permissions',
+  })
+  updateAssignment(
+    @GetUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAssignWorkDto,
+  ) {
+    return this.assignWorkService.updateAssignment(user, id, dto);
   }
 
   @Put(':id/progress')
   @ApiOperation({ summary: 'Update status / progress / work report' })
   updateProgress(
     @GetUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateWorkProgressDto,
   ) {
     return this.assignWorkService.updateProgress(
@@ -89,7 +113,7 @@ export class AssignWorkController {
   @ApiOperation({ summary: 'Delete a work assignment' })
   remove(
     @GetUser() user: JwtPayload,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('source') source?: string,
   ) {
     return this.assignWorkService.remove(

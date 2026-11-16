@@ -1,8 +1,18 @@
 import { PartialType } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true, message: 'Each roleId must be a valid UUID' })

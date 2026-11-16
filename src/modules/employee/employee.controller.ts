@@ -9,11 +9,9 @@ import {
   Delete,
   Query,
   UseGuards,
-  UseInterceptors,
   ForbiddenException,
   Res,
 } from '@nestjs/common';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -51,7 +49,6 @@ import { User } from '../auth-core/entities/user.entity';
 @ApiTags('Employees')
 @Controller('employees')
 @UseGuards(JwtAuthGuard)
-@UseInterceptors(CacheInterceptor)
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
 
@@ -117,7 +114,6 @@ export class EmployeeController {
 
   // --- NEW DASHBOARD ENDPOINT ---
   @Get('dashboard-stats')
-  @CacheTTL(120) // 2 minutes cache for dashboard stats
   @ApiOperation({ summary: 'Get dashboard stats for the organization' })
   @ApiResponse({ status: 200, description: 'Return dashboard stats.' })
   async getDashboardStats(@GetUser() user: User) {
@@ -144,7 +140,6 @@ export class EmployeeController {
   // -----------------------------
 
   @Get('birthdays/upcoming')
-  @CacheTTL(3600) // 1 hour cache for birthdays (they don't change frequently)
   @ApiOperation({ summary: 'Get upcoming employee birthdays' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   @ApiQuery({
@@ -223,7 +218,6 @@ export class EmployeeController {
   }
 
   @Get()
-  @CacheTTL(300) // 5 minutes cache for employee list
   @ApiOperation({ summary: 'Get all employees by organization' })
   @ApiQuery({ name: 'organizationId', type: 'string', required: true })
   @ApiQuery({
@@ -242,7 +236,6 @@ export class EmployeeController {
   }
 
   @Get('selector')
-  @CacheTTL(60)
   @ApiOperation({
     summary: 'Lightweight employee selector with search and filters',
   })
@@ -439,7 +432,6 @@ export class EmployeeController {
   }
 
   @Get(':id')
-  @CacheTTL(600) // 10 minutes cache for single employee
   @ApiOperation({ summary: 'Get employee by employee ID' })
   @ApiParam({ name: 'id', type: 'string' })
   async findOne(@Param('id') id: string, @GetUser() actor: User) {
@@ -449,7 +441,6 @@ export class EmployeeController {
   }
 
   @Get('by-user/:userId')
-  @CacheTTL(600) // 10 minutes cache for user lookup
   @ApiOperation({ summary: 'Get employee by user ID' })
   @ApiParam({ name: 'userId', type: 'string' })
   async findByUserId(@Param('userId') userId: string, @GetUser() actor: User) {
@@ -469,7 +460,6 @@ export class EmployeeController {
   }
 
   @Get('managers')
-  @CacheTTL(300)
   @ApiOperation({ summary: 'Get all potential managers for organization' })
   @ApiQuery({ name: 'organizationId', required: true })
   async getManagers(

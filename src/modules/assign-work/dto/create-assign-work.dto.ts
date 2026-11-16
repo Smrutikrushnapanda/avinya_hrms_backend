@@ -10,7 +10,10 @@ import {
   Max,
   Matches,
   Min,
+  MaxLength,
 } from 'class-validator';
+import { PartialType, PickType } from '@nestjs/mapped-types';
+import { TaskStatus } from '../../clients/entities/project-task.entity';
 
 export enum WorkSource {
   CLIENT = 'client',
@@ -18,6 +21,29 @@ export enum WorkSource {
 }
 
 export class CreateAssignWorkDto {
+  @IsOptional()
+  @IsEnum(['regular', 'external'])
+  assignmentKind?: 'regular' | 'external';
+
+  @IsOptional()
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(200)
+  externalAssignerName?: string;
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  assignmentDate?: string;
+
+  @IsOptional()
+  @IsString()
+  assignmentRemarks?: string;
+
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
+
   @IsOptional()
   @IsUUID()
   projectId?: string;
@@ -31,6 +57,8 @@ export class CreateAssignWorkDto {
   otherProjectName?: string;
 
   @IsString()
+  @Matches(/\S/)
+  @MaxLength(500)
   title: string;
 
   @IsString()
@@ -47,7 +75,7 @@ export class CreateAssignWorkDto {
   assignedToUserIds?: string[];
 
   @IsOptional()
-  @IsDateString()
+  @IsDateString({ strict: true })
   dueDate?: string;
 
   @IsOptional()
@@ -57,6 +85,25 @@ export class CreateAssignWorkDto {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+}
+
+export class UpdateAssignWorkDto extends PartialType(
+  PickType(CreateAssignWorkDto, [
+    'title',
+    'description',
+    'assignedToUserId',
+    'dueDate',
+    'priority',
+    'imageUrl',
+    'externalAssignerName',
+    'assignmentDate',
+    'assignmentRemarks',
+  ] as const),
+  { skipNullProperties: false },
+) {
+  @IsOptional()
+  @IsEnum(WorkSource)
+  source?: WorkSource;
 }
 
 export class UpdateWorkProgressDto {

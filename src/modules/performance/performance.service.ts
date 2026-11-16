@@ -5,6 +5,7 @@ import { PerformanceSettings } from './entities/performance-settings.entity';
 import { PerformanceQuestion } from './entities/performance-question.entity';
 import { PerformanceReview } from './entities/performance-review.entity';
 import { Employee } from '../employee/entities/employee.entity';
+import { activeEmployeeWhere } from '../../shared/active-employees.util';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { SubmitReviewDto } from './dto/submit-review.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -93,7 +94,10 @@ export class PerformanceService {
     });
     if (!emp) return { isManager: false };
     const count = await this.employeeRepo.count({
-      where: { reportingTo: emp.id, organizationId: orgId },
+      where: activeEmployeeWhere({
+        reportingTo: emp.id,
+        organizationId: orgId,
+      }),
     });
     return { isManager: count > 0 };
   }
@@ -119,7 +123,10 @@ export class PerformanceService {
     if (!managerEmp) return [];
 
     const teamMembers = await this.employeeRepo.find({
-      where: { reportingTo: managerEmp.id, organizationId: orgId },
+      where: activeEmployeeWhere({
+        reportingTo: managerEmp.id,
+        organizationId: orgId,
+      }),
       select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
       order: { firstName: 'ASC' },
     });
@@ -182,7 +189,7 @@ export class PerformanceService {
 
     const employees = (
       await this.employeeRepo.find({
-        where: whereClause,
+        where: activeEmployeeWhere(whereClause),
         select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
         order: { firstName: 'ASC' },
       })
@@ -340,7 +347,7 @@ export class PerformanceService {
   async getAllReviewsAggregated(orgId: string) {
     const [employees, settings] = await Promise.all([
       this.employeeRepo.find({
-        where: { organizationId: orgId },
+        where: activeEmployeeWhere({ organizationId: orgId }),
         select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
         order: { firstName: 'ASC' },
       }),

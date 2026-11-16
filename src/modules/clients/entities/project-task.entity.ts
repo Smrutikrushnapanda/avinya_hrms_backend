@@ -51,6 +51,20 @@ export class ProjectTask {
   })
   otherProjectName: string | null;
 
+  @Column({
+    name: 'external_assigner_name',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  externalAssignerName: string | null;
+
+  @Column({ name: 'assignment_date', type: 'date', nullable: true })
+  assignmentDate: string | null;
+
+  @Column({ name: 'assignment_remarks', type: 'text', nullable: true })
+  assignmentRemarks: string | null;
+
   @Column({ name: 'title', type: 'varchar', length: 500 })
   title: string;
 

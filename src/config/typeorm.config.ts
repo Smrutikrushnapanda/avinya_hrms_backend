@@ -41,7 +41,6 @@ const dataSource = new DataSource({
   schema: dbSchema,
 
   entities: [path.join(__dirname, '/../modules/**/entities/*.entity{.ts,.js}')],
-  migrations: [path.join(__dirname, '/../migrations/*{.ts,.js}')],
 
   // Schema auto-sync is a dangerous, irreversible operation (drops columns).
   // It stays on for local dev, but in production it must be explicitly

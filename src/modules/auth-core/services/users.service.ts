@@ -29,6 +29,7 @@ import { LeaveRequest } from 'src/modules/leave/entities/leave-request.entity';
 import { WfhRequest } from 'src/modules/wfh/entities/wfh-request.entity';
 import { Attendance } from 'src/modules/attendance/entities/attendance.entity';
 import { MailService } from 'src/modules/mail/mail.service';
+import { invalidateEmployeeLists } from '../../../shared/active-employees.util';
 
 const REGISTER_OTP_TTL_MS = 10 * 60 * 1000;
 const REGISTER_OTP_MAX_ATTEMPTS = 5;
@@ -172,14 +173,19 @@ export class UsersService {
 
   private async countOrganizationAdmins(
     organizationId: string,
+    activeOnly = false,
   ): Promise<number> {
-    return this.userRoleRepository
+    const query = this.userRoleRepository
       .createQueryBuilder('userRole')
       .innerJoin('userRole.role', 'role')
       .innerJoin('userRole.user', 'user')
       .where('user.organization_id = :organizationId', { organizationId })
-      .andWhere('role.role_name = :roleName', { roleName: 'ADMIN' })
-      .getCount();
+      .andWhere('role.role_name = :roleName', { roleName: 'ADMIN' });
+    if (activeOnly)
+      query
+        .andWhere('user.isActive = true')
+        .andWhere('userRole.isActive = true');
+    return query.getCount();
   }
 
   private registerOtpKey(channel: 'mobile' | 'email', value: string): string {
@@ -436,6 +442,7 @@ export class UsersService {
     },
   ): Promise<User> {
     const user = await this.findOne(userId);
+    const wasActive = user.isActive;
 
     const callerId = actor?.userId || actor?.id;
     const isSuperadmin = actor?.roles?.some((r) => r.roleName === 'SUPERADMIN');
@@ -537,7 +544,41 @@ export class UsersService {
       user.mustChangePassword = false;
     }
 
-    return this.userRepository.save(user);
+    if (user.isActive === wasActive) return this.userRepository.save(user);
+    if (
+      !user.isActive &&
+      (await this.isUserAdmin(userId)) &&
+      (await this.countOrganizationAdmins(user.organizationId, true)) <= 1
+    ) {
+      throw new BadRequestException(
+        'At least one active admin account is required.',
+      );
+    }
+    const employees = await this.employeeRepository.find({
+      where: { userId, organizationId: user.organizationId },
+      select: ['id'],
+    });
+    const saved = await this.userRepository.manager.transaction(
+      async (manager) => {
+        const result = await manager.save(User, user);
+        await manager.update(
+          Employee,
+          {
+            userId,
+            organizationId: user.organizationId,
+            status: In(['active', 'inactive']),
+          },
+          { status: user.isActive ? 'active' : 'inactive' },
+        );
+        return result;
+      },
+    );
+    await invalidateEmployeeLists(
+      this.cacheManager,
+      user.organizationId,
+      employees.map((employee) => employee.id),
+    );
+    return saved;
   }
 
   async updateFcmToken(

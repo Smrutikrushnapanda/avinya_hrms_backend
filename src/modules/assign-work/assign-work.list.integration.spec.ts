@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, TableColumn } from 'typeorm';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
 import * as path from 'path';
@@ -18,7 +18,6 @@ import { ProjectTask } from '../clients/entities/project-task.entity';
 import { ProjectIssue } from '../project/entities/project-issue.entity';
 import { ClientProject } from '../clients/entities/project.entity';
 import { Project } from '../project/entities/project.entity';
-import { AddAssignWorkCompletedPointIndexes1800000000001 } from '../../migrations/1800000000001-AddAssignWorkCompletedPointIndexes';
 
 const databaseUrl = process.env.ASSIGN_WORK_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
@@ -34,6 +33,7 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
   const colleague: string = randomUUID();
   const outsider: string = randomUUID();
   const empty: string = randomUUID();
+  const admin: string = randomUUID();
   const ids: Record<string, string> = {};
   const schema = `assign_work_${Date.now()}`;
   const originalSecret = process.env.JWT_SECRET_KEY;
@@ -61,6 +61,14 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
       issueRepo: db.getRepository(ProjectIssue),
       clientProjectRepo: db.getRepository(ClientProject),
       internalProjectRepo: db.getRepository(Project),
+      employeeRepo: {
+        find: () =>
+          Promise.resolve([
+            { id: randomUUID(), userId: colleague },
+            { id: randomUUID(), userId: empty },
+          ]),
+      },
+      notifyAssignee: jest.fn().mockResolvedValue(undefined),
       logger: new Logger('AssignWorkIntegration'),
     });
     // Keep real Passport/JWT validation; only identity-store fixtures are mocked.
@@ -74,13 +82,25 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
           provide: getRepositoryToken(User),
           useValue: {
             findOne: ({ where }: { where: { id: string } }) => {
-              if (![me, colleague, outsider, empty].includes(where.id))
+              if (![me, colleague, outsider, empty, admin].includes(where.id))
                 return null;
               return {
                 id: where.id,
                 isActive: true,
                 organizationId: where.id === outsider ? otherOrg : org,
-                userRoles: [],
+                userRoles:
+                  where.id === admin
+                    ? [
+                        {
+                          isActive: true,
+                          role: {
+                            id: randomUUID(),
+                            roleName: 'ADMIN',
+                            rolePermissions: [],
+                          },
+                        },
+                      ]
+                    : [],
               };
             },
           },
@@ -155,7 +175,7 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
       });
   }
 
-  it('reproduces missing-column 500; additive migration fixes both tables and reruns safely', async () => {
+  it('reproduces missing-column 500 and verifies entity-compatible checklist columns fix listing', async () => {
     const logs = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
@@ -182,8 +202,16 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
     ).toBe(true);
     const runner = db.createQueryRunner();
     try {
-      const migration = new AddAssignWorkCompletedPointIndexes1800000000001();
-      await migration.up(runner);
+      for (const table of ['project_tasks', 'project_issues']) {
+        await runner.addColumn(
+          `${schema}.${table}`,
+          new TableColumn({
+            name: 'completed_point_indexes',
+            type: 'jsonb',
+            isNullable: true,
+          }),
+        );
+      }
       for (const table of ['project_tasks', 'project_issues']) {
         expect(
           await runner.hasColumn(
@@ -192,10 +220,45 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
           ),
         ).toBe(true);
       }
-      await migration.up(runner);
     } finally {
       await runner.release();
       logs.mockRestore();
+    }
+  });
+
+  it('creates paragraph and checklist work for both entity sources and multiple assignees', async () => {
+    for (const source of ['client', 'internal']) {
+      for (const description of ['Paragraph work', '- First\n- Second']) {
+        const response = await request(app.getHttpServer())
+          .post('/assign-work')
+          .auth(jwt.sign({ userId: me, organizationId: org }), {
+            type: 'bearer',
+          })
+          .send({
+            title: 'Entity schema regression',
+            description,
+            assignedToUserIds: [colleague, empty],
+            source,
+          })
+          .expect(201);
+        const created = response.body as (ProjectTask | ProjectIssue)[];
+        expect(created).toHaveLength(2);
+        for (const item of created) {
+          expect(item.projectId).toBeNull();
+          expect(item.completedPointIndexes).toEqual(
+            description.startsWith('-') ? [] : null,
+          );
+        }
+        const rows = (await get('my', colleague).expect(200))
+          .body as WorkAssignment[];
+        expect(
+          rows.some((row) => row.id === created[0].id && row.type === source),
+        ).toBe(true);
+        await db.query(
+          `DELETE FROM "${schema}"."${source === 'client' ? 'project_tasks' : 'project_issues'}" WHERE id = ANY($1::uuid[])`,
+          [created.map((item) => item.id)],
+        );
+      }
     }
   });
 
@@ -321,13 +384,9 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
       ).toBe(false);
     }
   });
-  it('records targeted migration once and verifies complete task schema before restart', async () => {
-    for (const [command, expected] of [
-      ['migrate:assign-work-checklist', 'Assign Work migrations applied: 1'],
-      ['migrate:assign-work-checklist', 'Assign Work migrations applied: 0'],
-      ['check:assign-work-schema', 'Assign Work schema verified'],
-    ]) {
-      const result = spawnSync('npm', ['run', command], {
+  it('checks entity schema without applying changes or creating schema history', async () => {
+    const check = () =>
+      spawnSync('npm', ['run', 'check:assign-work-schema'], {
         cwd: path.resolve(__dirname, '../../..'),
         env: {
           ...process.env,
@@ -340,23 +399,45 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
         encoding: 'utf8',
         timeout: 45000,
       });
-      expect({
-        status: result.status,
-        stderr: result.stderr,
-        stdout: result.stdout,
-      }).toEqual(expect.objectContaining({ status: 0 }));
-      expect(result.stdout).toContain(expected);
+    for (let run = 0; run < 2; run++) {
+      const result = check();
+      expect({ status: result.status, stderr: result.stderr }).toEqual(
+        expect.objectContaining({ status: 0 }),
+      );
+      expect(result.stdout).toContain('Assign Work schema verified');
       expect(result.stdout).toContain(`schema=${schema}`);
     }
-    const history = await db.query<{ name: string }[]>(
-      `SELECT name FROM "${schema}".migrations`,
+    await db.query(
+      `ALTER TABLE "${schema}".project_tasks DROP COLUMN external_assigner_name`,
     );
-    expect(history).toEqual([
-      { name: 'AddAssignWorkCompletedPointIndexes1800000000001' },
-    ]);
-    await expect(
-      new AddAssignWorkCompletedPointIndexes1800000000001().down(),
-    ).rejects.toThrow('without dropping');
+    try {
+      const result = check();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        'Missing columns: project_tasks.external_assigner_name',
+      );
+    } finally {
+      const runner = db.createQueryRunner();
+      try {
+        await runner.addColumn(
+          `${schema}.project_tasks`,
+          new TableColumn({
+            name: 'external_assigner_name',
+            type: 'varchar',
+            length: '200',
+            isNullable: true,
+          }),
+        );
+      } finally {
+        await runner.release();
+      }
+    }
+    const [{ history }] = await db.query<{ history: string | null }[]>(
+      'SELECT to_regclass($1) AS history',
+      [`${schema}.migrations`],
+    );
+    expect(history).toBeNull();
+    await get('my').expect(200);
   }, 120000);
 
   it('persists checklist progress, reports, image URL and completion/reopening timestamps', async () => {
@@ -454,6 +535,396 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
         progressPercent: 0,
         imageUrl: 'https://example.test/new.png',
       }),
+    );
+  });
+
+  describe('external assignments and detail editing', () => {
+    let externalId: string;
+    const payload = {
+      assignmentKind: 'external',
+      title: 'Phone review follow-up',
+      description: '- Prepare report\n- Review report',
+      externalAssignerName: 'Customer without an account',
+      assignmentDate: '2026-09-15',
+      dueDate: '2026-09-30',
+      priority: 'high',
+      assignmentRemarks: 'Agreed during phone call',
+    };
+    const http = (
+      method: 'post' | 'put' | 'delete' | 'get',
+      route: string,
+      actor = me,
+    ) =>
+      request(app.getHttpServer())
+        [method](`/assign-work${route}`)
+        .auth(
+          jwt.sign({
+            userId: actor,
+            organizationId: actor === outsider ? otherOrg : org,
+          }),
+          { type: 'bearer' },
+        );
+
+    beforeAll(() => {
+      Object.assign(service, {
+        employeeRepo: {
+          find: () =>
+            Promise.resolve([
+              {
+                id: randomUUID(),
+                userId: me,
+                firstName: 'Recorder',
+                lastName: 'Employee',
+              },
+              {
+                id: randomUUID(),
+                userId: colleague,
+                firstName: 'Recipient',
+                lastName: 'Employee',
+              },
+              {
+                id: randomUUID(),
+                userId: empty,
+                firstName: 'Unrelated',
+                lastName: 'Employee',
+              },
+            ]),
+        },
+      });
+    });
+
+    it('keeps legacy rows regular and requires management for organization-wide lists', async () => {
+      await http('get', '').expect(403);
+      await http('get', '', outsider).expect(403);
+      const rows = (await http('get', '', admin).expect(200))
+        .body as WorkAssignment[];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(
+        rows.every(
+          (row) =>
+            row.assignmentKind === 'regular' && row.canEdit && row.canDelete,
+        ),
+      ).toBe(true);
+      expect(rows.some((row) => row.title === 'foreign')).toBe(false);
+    });
+
+    it('returns authenticated defaults and permission flags; CRUD requires authentication', async () => {
+      expect((await http('get', '/options').expect(200)).body).toEqual(
+        expect.objectContaining({
+          currentUserId: me,
+          canViewAllAssignments: false,
+        }),
+      );
+      expect((await http('get', '/options', admin).expect(200)).body).toEqual(
+        expect.objectContaining({
+          currentUserId: admin,
+          canViewAllAssignments: true,
+        }),
+      );
+      for (const method of ['post', 'put', 'delete'] as const) {
+        await request(app.getHttpServer())
+          [method](`/assign-work${method === 'post' ? '' : '/' + randomUUID()}`)
+          .send({})
+          .expect(401);
+      }
+    });
+
+    it('edits legacy self-assigned project work without changing its relationships or manual progress', async () => {
+      const task = await db
+        .getRepository(ProjectTask)
+        .findOneByOrFail({ title: 'project-backed' });
+      await http('put', `/${task.id}`)
+        .send({
+          title: 'Edited project work',
+          assignedToUserId: task.assignedToUserId,
+        })
+        .expect(200);
+      const updated = await db
+        .getRepository(ProjectTask)
+        .findOneByOrFail({ id: task.id });
+      expect(updated).toEqual(
+        expect.objectContaining({
+          projectId: task.projectId,
+          organizationId: task.organizationId,
+          assignedByUserId: task.assignedByUserId,
+          assignedToUserId: task.assignedToUserId,
+          progressPercent: task.progressPercent,
+          completedPointIndexes: null,
+          externalAssignerName: null,
+        }),
+      );
+    });
+
+    it('records external person without user creation, defaults to recorder and uses assignment month', async () => {
+      const created = (await http('post', '').send(payload).expect(201))
+        .body as ProjectTask[];
+      externalId = created[0].id;
+      expect(created).toHaveLength(1);
+      expect(created[0]).toEqual(
+        expect.objectContaining({
+          externalAssignerName: payload.externalAssignerName,
+          assignedByUserId: me,
+          assignedToUserId: me,
+          assignmentDate: payload.assignmentDate,
+          assignmentRemarks: payload.assignmentRemarks,
+          projectId: null,
+          completedPointIndexes: [],
+        }),
+      );
+      const rows = (await get('my?month=9&year=2026').expect(200))
+        .body as WorkAssignment[];
+      expect(rows.find((row) => row.id === externalId)).toEqual(
+        expect.objectContaining({
+          assignmentKind: 'external',
+          canEdit: true,
+          canDelete: true,
+          assignedAt: '2026-09-15T00:00:00.000Z',
+        }),
+      );
+      expect(
+        (
+          (await get('my?month=10&year=2026').expect(200))
+            .body as WorkAssignment[]
+        ).some((row) => row.id === externalId),
+      ).toBe(false);
+      expect(
+        (
+          (await get('my', colleague).expect(200)).body as WorkAssignment[]
+        ).some((row) => row.id === externalId),
+      ).toBe(false);
+    });
+
+    it('validates external fields and leaves regular self-assignment rule intact', async () => {
+      for (const fields of [
+        { externalAssignerName: '' },
+        { assignmentDate: undefined },
+        { assignmentDate: '2026-02-30' },
+        { dueDate: '2026-02-30' },
+        { externalAssignerName: 'X'.repeat(201) },
+        { projectId: randomUUID() },
+        { source: 'internal' },
+        { assignedToUserId: outsider },
+        { assignedToUserId: colleague },
+        { assignedToUserIds: [me, colleague] },
+        { assignedToUserId: colleague, assignedToUserIds: [me] },
+      ])
+        await http('post', '')
+          .send({ ...payload, ...fields })
+          .expect(400);
+      await http('post', '')
+        .send({ title: 'Regular', description: 'Work', assignedToUserId: me })
+        .expect(400);
+      await http('post', '')
+        .send({ ...payload, assignmentKind: 'regular' })
+        .expect(400);
+    });
+
+    it('accepts explicit self assignee for older clients without creating extra assignments', async () => {
+      const rows = (
+        await http('post', '')
+          .send({
+            ...payload,
+            assignedToUserId: me,
+            assignedToUserIds: [me, me],
+          })
+          .expect(201)
+      ).body as ProjectTask[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0].assignedToUserId).toBe(me);
+      await http('delete', `/${rows[0].id}`).expect(200);
+    });
+
+    it('supports management search, combined filters and employee filters across both types', async () => {
+      for (const query of [
+        '?search=customer%20without',
+        '?search=phone%20call',
+        '?search=phone%20review',
+        '?assignmentKind=external&status=pending&priority=high&month=9&year=2026',
+        `?assignmentKind=external&assignedToUserId=${me}`,
+        '?assignmentKind=external&search=recorder',
+      ]) {
+        const rows = (await http('get', query, admin).expect(200))
+          .body as WorkAssignment[];
+        expect(rows.some((row) => row.id === externalId)).toBe(true);
+      }
+      expect(
+        (
+          (await http('get', '?assignmentKind=regular', admin).expect(200))
+            .body as WorkAssignment[]
+        ).some((row) => row.id === externalId),
+      ).toBe(false);
+      expect(
+        (
+          await http(
+            'get',
+            '?assignmentKind=external&priority=urgent',
+            admin,
+          ).expect(200)
+        ).body,
+      ).toEqual([]);
+      for (const query of [
+        '?status=unknown',
+        '?assignmentKind=unknown',
+        '?assignedToUserId=invalid',
+        '?month=13',
+        '?month=9',
+      ]) {
+        await http('get', query, admin).expect(400);
+      }
+    });
+
+    it('rejects unrelated and cross-tenant edits, deletes, reassignment and privilege fields', async () => {
+      for (const actor of [empty, outsider]) {
+        await http('put', `/${externalId}`, actor)
+          .send({ title: 'Unauthorized' })
+          .expect(403);
+        await http('delete', `/${externalId}`, actor).expect(403);
+      }
+      await http('put', `/${externalId}`)
+        .send({ assignedToUserId: outsider })
+        .expect(400);
+      for (const fields of [
+        { title: null },
+        { title: '' },
+        { description: null },
+        { assignmentDate: null },
+        { externalAssignerName: null },
+        { assignedToUserId: null },
+        { priority: null },
+        { assignedByUserId: outsider },
+        { organizationId: otherOrg },
+        { assignmentKind: 'regular' },
+      ]) {
+        await http('put', `/${externalId}`).send(fields).expect(400);
+      }
+      await http('put', '/invalid-id').send({ title: 'Invalid' }).expect(400);
+      await http('delete', '/invalid-id').expect(400);
+    });
+
+    it('edits details and reorders checklist while preserving completion identity and work report', async () => {
+      await http('put', `/${externalId}/progress`)
+        .send({ completedPointIndexes: [0], workReport: 'Draft ready' })
+        .expect(200);
+      await http('put', `/${externalId}`)
+        .send({
+          title: 'Updated phone follow-up',
+          description: '- Review report\n- Prepare report\n- Send report',
+          assignmentRemarks: 'Customer confirmed',
+          externalAssignerName: 'Customer contact',
+          dueDate: null,
+          priority: 'urgent',
+        })
+        .expect(200);
+      const row = await db
+        .getRepository(ProjectTask)
+        .findOneByOrFail({ id: externalId });
+      expect(row).toEqual(
+        expect.objectContaining({
+          title: 'Updated phone follow-up',
+          completedPointIndexes: [1],
+          progressPercent: 33,
+          workReport: 'Draft ready',
+          assignmentRemarks: 'Customer confirmed',
+          externalAssignerName: 'Customer contact',
+          dueDate: null,
+          priority: 'urgent',
+          assignedByUserId: me,
+        }),
+      );
+      await http('put', `/${externalId}`, admin)
+        .send({ assignedToUserId: colleague })
+        .expect(400);
+      expect(
+        (
+          await db
+            .getRepository(ProjectTask)
+            .findOneByOrFail({ id: externalId })
+        ).assignedToUserId,
+      ).toBe(me);
+      // Preserve recipients of records created before external work became self-only.
+      await db
+        .getRepository(ProjectTask)
+        .update(externalId, { assignedToUserId: colleague });
+      expect(
+        (
+          (await get('my', colleague).expect(200)).body as WorkAssignment[]
+        ).some((item) => item.id === externalId),
+      ).toBe(true);
+      expect(
+        ((await get('my').expect(200)).body as WorkAssignment[]).some(
+          (item) => item.id === externalId,
+        ),
+      ).toBe(false);
+      await http('put', `/${externalId}`, colleague)
+        .send({ assignmentRemarks: 'Received' })
+        .expect(200);
+      expect(
+        (
+          await db
+            .getRepository(ProjectTask)
+            .findOneByOrFail({ id: externalId })
+        ).assignedToUserId,
+      ).toBe(colleague);
+      await http('delete', `/${externalId}`, colleague).expect(200);
+      await http('delete', `/${externalId}`, colleague).expect(404);
+      expect(
+        await db.getRepository(ProjectTask).findOneBy({ id: externalId }),
+      ).toBeNull();
+    });
+
+    it('supports external completion at creation and existing reopen/progress workflow', async () => {
+      const created = (
+        await http('post', '')
+          .send({ ...payload, status: 'completed' })
+          .expect(201)
+      ).body as ProjectTask[];
+      const item = created[0];
+      expect(item.progressPercent).toBe(100);
+      expect(item.completedPointIndexes).toEqual([0, 1]);
+      expect(item.completedAt).toEqual(expect.any(String));
+      await http('put', `/${item.id}/progress`)
+        .send({ completedPointIndexes: [1] })
+        .expect(200);
+      const reopened = await db
+        .getRepository(ProjectTask)
+        .findOneByOrFail({ id: item.id });
+      expect(reopened.progressPercent).toBe(50);
+      expect(reopened.completedAt).toBeNull();
+      await http('delete', `/${item.id}`, admin).expect(200);
+    });
+
+    it.each(['client', 'internal'])(
+      'edits and deletes existing %s assignments with participant permissions',
+      async (source) => {
+        const internal = source === 'internal';
+        const id =
+          ids[`${internal ? 'project_issues' : 'project_tasks'}-first`];
+        const endpoint = `/${id}${internal ? '?source=internal' : ''}`;
+        await http('put', `/${id}`, empty)
+          .send({ source, title: 'Denied' })
+          .expect(403);
+        await http('put', `/${id}`)
+          .send({ source, title: 'Edited legacy work' })
+          .expect(200);
+        await http('put', `/${id}`, colleague)
+          .send({ source, description: 'Updated by assigner' })
+          .expect(200);
+        await http('put', `/${id}`, admin)
+          .send({ source, imageUrl: 'https://example.test/updated.png' })
+          .expect(200);
+        await http('put', `/${id}`, admin)
+          .send({ source, assignedToUserId: empty })
+          .expect(200);
+        await http('put', `/${id}`, admin)
+          .send({ source, assignedToUserId: me })
+          .expect(200);
+        await http('put', `/${id}`)
+          .send({ source, externalAssignerName: 'Cannot convert' })
+          .expect(400);
+        await http('delete', endpoint, empty).expect(403);
+        await http('delete', endpoint, me).expect(200);
+        await http('delete', endpoint, me).expect(404);
+      },
     );
   });
 });

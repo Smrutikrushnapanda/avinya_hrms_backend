@@ -780,10 +780,12 @@ describe('EmployeeService — Multiple Managers & Deactivation', () => {
       const result = await service.findAll(ORG_ID, 'inactive');
       expect(mockEmployeeRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            organizationId: ORG_ID,
-            status: 'inactive',
-          }),
+          where: expect.arrayContaining([
+            expect.objectContaining({
+              organizationId: ORG_ID,
+              status: 'inactive',
+            }),
+          ]),
         }),
       );
       expect(result).toHaveLength(1);

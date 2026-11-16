@@ -16,7 +16,13 @@ import {
   QueryFailedError,
   In,
   Not,
+  Brackets,
 } from 'typeorm';
+import {
+  activeEmployeeWhere,
+  employeeListCacheKey,
+  invalidateEmployeeLists,
+} from '../../shared/active-employees.util';
 import { Cache } from 'cache-manager';
 import { Employee } from './entities/employee.entity';
 import { Department } from './entities/department.entity';
@@ -644,8 +650,13 @@ export class EmployeeService implements OnModuleInit {
   }
 
   findAll(organizationId: string, status?: string) {
-    const normalizedStatus = status ? status.toLowerCase() : 'active';
-    const cacheKey = `${CACHE_KEYS.EMPLOYEES}:${organizationId}:${normalizedStatus}`;
+    const requestedStatus =
+      typeof status === 'string'
+        ? status.trim().toLowerCase() || 'active'
+        : 'active';
+    const normalizedStatus =
+      requestedStatus === 'all' ? 'active' : requestedStatus;
+    const cacheKey = employeeListCacheKey(organizationId, normalizedStatus);
 
     return this.cacheManager.get(cacheKey).then(async (cached) => {
       if (cached) {
@@ -653,10 +664,15 @@ export class EmployeeService implements OnModuleInit {
         return cached;
       }
 
-      const whereClause: any = { organizationId };
-      if (normalizedStatus !== 'all') {
-        whereClause.status = normalizedStatus;
-      }
+      const whereClause =
+        normalizedStatus === 'active'
+          ? activeEmployeeWhere({ organizationId })
+          : normalizedStatus === 'inactive'
+            ? [
+                { organizationId, status: 'inactive' },
+                { organizationId, status: 'active', user: { isActive: false } },
+              ]
+            : { organizationId, status: normalizedStatus };
 
       const emps = await this.employeeRepository.find({
         where: whereClause,
@@ -1061,8 +1077,9 @@ export class EmployeeService implements OnModuleInit {
               COUNT(*) FILTER (WHERE date_of_joining >= $3 AND date_of_joining < $2) AS new_last_month,
               COUNT(DISTINCT department_id) FILTER (WHERE department_id IS NOT NULL) AS dept_count,
               COUNT(DISTINCT designation_id) FILTER (WHERE designation_id IS NOT NULL) AS desig_count
-            FROM employees
-            WHERE organization_id = $1
+            FROM employees e
+            JOIN users u ON u.user_id = e.user_id
+            WHERE e.organization_id = $1 AND e.status = 'active' AND u.is_active = true
           ),
           attendance_stats AS (
             SELECT
@@ -1170,6 +1187,7 @@ export class EmployeeService implements OnModuleInit {
       where: {
         organizationId,
         status: 'active',
+        user: { isActive: true },
       },
       relations: ['department'],
       select: [
@@ -1251,11 +1269,28 @@ export class EmployeeService implements OnModuleInit {
       .where('employee.organizationId = :organizationId', { organizationId });
 
     // Add status filter (default to 'active' unless 'all' or explicit)
-    const effectiveStatus = status ? status.toLowerCase() : 'active';
-    if (effectiveStatus !== 'all') {
+    const requestedStatus =
+      typeof status === 'string'
+        ? status.trim().toLowerCase() || 'active'
+        : 'active';
+    const effectiveStatus =
+      requestedStatus === 'all' ? 'active' : requestedStatus;
+    if (effectiveStatus === 'inactive') {
+      queryBuilder.andWhere(
+        new Brackets((query) => {
+          query
+            .where('employee.status = :inactive', { inactive: 'inactive' })
+            .orWhere('(employee.status = :active AND user.isActive = false)', {
+              active: 'active',
+            });
+        }),
+      );
+    } else {
       queryBuilder = queryBuilder.andWhere('employee.status = :status', {
         status: effectiveStatus,
       });
+      if (effectiveStatus === 'active')
+        queryBuilder.andWhere('user.isActive = true');
     }
 
     // Add department filter
@@ -1399,7 +1434,7 @@ export class EmployeeService implements OnModuleInit {
   // --- NEW: FIND MANAGERS ---
   async findManagers(organizationId: string) {
     try {
-      const cacheKey = `managers:${organizationId}`;
+      const cacheKey = `managers:active-login-v1:${organizationId}`;
       const cached = await this.cacheManager.get(cacheKey);
       if (cached) {
         console.log('📦 Returning cached managers for org:', organizationId);
@@ -1411,6 +1446,7 @@ export class EmployeeService implements OnModuleInit {
         where: {
           organizationId,
           status: 'active',
+          user: { isActive: true },
         },
         relations: ['designation'],
         order: { firstName: 'ASC' },
@@ -1459,6 +1495,7 @@ export class EmployeeService implements OnModuleInit {
           organizationId,
           status: 'active',
           dateOfJoining: MoreThan(startDate),
+          user: { isActive: true },
         },
         relations: ['department', 'designation'],
         order: { dateOfJoining: 'DESC' },
@@ -1639,6 +1676,7 @@ export class EmployeeService implements OnModuleInit {
         .createQueryBuilder('employee')
         .leftJoinAndSelect('employee.department', 'department')
         .leftJoinAndSelect('employee.designation', 'designation')
+        .innerJoin('employee.user', 'activeUser', 'activeUser.isActive = true')
         .select([
           'employee.id',
           'employee.firstName',
@@ -1685,6 +1723,7 @@ export class EmployeeService implements OnModuleInit {
       .createQueryBuilder('employee')
       .leftJoinAndSelect('employee.department', 'department')
       .leftJoinAndSelect('employee.designation', 'designation')
+      .innerJoin('employee.user', 'activeUser', 'activeUser.isActive = true')
       .select([
         'employee.id',
         'employee.firstName',
@@ -1726,6 +1765,7 @@ export class EmployeeService implements OnModuleInit {
         .leftJoinAndSelect('employee.department', 'department')
         .leftJoinAndSelect('employee.designation', 'designation')
         .leftJoinAndSelect('employee.manager', 'manager')
+        .innerJoin('employee.user', 'activeUser', 'activeUser.isActive = true')
         .where('employee.organizationId = :organizationId', { organizationId })
         .andWhere('employee.status = :status', { status: 'active' });
 
@@ -1745,6 +1785,7 @@ export class EmployeeService implements OnModuleInit {
             organizationId,
             reportingTo: employeeId,
             status: 'active',
+            user: { isActive: true },
           },
           relations: ['department', 'designation'],
           order: { firstName: 'ASC' },
@@ -4706,7 +4747,9 @@ export class EmployeeService implements OnModuleInit {
     }));
 
     const projects = new Map(
-      internal.concat(client).map((row) => [`${row.source}:${row.projectId}`, row]),
+      internal
+        .concat(client)
+        .map((row) => [`${row.source}:${row.projectId}`, row]),
     );
     for (const project of managedClientProjects) {
       const key = `client:${project.id}`;
@@ -5113,24 +5156,11 @@ export class EmployeeService implements OnModuleInit {
   ) {
     try {
       // Invalidate employee list caches for the organization
-      await Promise.all([
-        this.cacheManager.del(`${CACHE_KEYS.EMPLOYEES}:${organizationId}`),
-        this.cacheManager.del(
-          `${CACHE_KEYS.EMPLOYEES}:${organizationId}:active`,
-        ),
-        this.cacheManager.del(
-          `${CACHE_KEYS.EMPLOYEES}:${organizationId}:inactive`,
-        ),
-        this.cacheManager.del(`${CACHE_KEYS.EMPLOYEES}:${organizationId}:all`),
-        this.cacheManager.del(`managers:${organizationId}`),
-        this.cacheManager.del(
-          `${CACHE_KEYS.DASHBOARD_STATS}:${organizationId}`,
-        ),
-      ]);
-
-      if (employeeId) {
-        await this.cacheManager.del(`${CACHE_KEYS.EMPLOYEE}:${employeeId}`);
-      }
+      await invalidateEmployeeLists(
+        this.cacheManager,
+        organizationId,
+        employeeId ? [employeeId] : [],
+      );
       console.log(
         '🗑️ Invalidated all employee caches for org:',
         organizationId,

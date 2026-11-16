@@ -82,7 +82,12 @@ export class MessageService {
     }
 
     const employees = await this.employeeRepo.find({
-      where: { id: In(employeeIds), organizationId },
+      where: {
+        id: In(employeeIds),
+        organizationId,
+        status: 'active',
+        user: { isActive: true },
+      },
       select: ['id', 'userId'],
     });
     if (employees.length === 0) {

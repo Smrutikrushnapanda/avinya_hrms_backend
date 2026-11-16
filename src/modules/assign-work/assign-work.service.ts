@@ -26,10 +26,13 @@ import { MessageGateway } from '../message/message.gateway';
 import { FirebaseService } from '../firebase/firebase.service';
 import {
   CreateAssignWorkDto,
+  UpdateAssignWorkDto,
   UpdateWorkProgressDto,
   WorkSource,
 } from './dto/create-assign-work.dto';
 import { extractWorkPoints, hasWorkDescription } from './work-points.util';
+import { AssignmentFiltersDto } from './dto/assignment-filters.dto';
+import { activeEmployeeWhere } from '../../shared/active-employees.util';
 
 export interface WorkAssignment {
   id: string;
@@ -65,6 +68,12 @@ export interface WorkAssignment {
   createdAt: Date;
   updatedAt: Date | null;
   assignedAt: Date;
+  assignmentKind?: 'regular' | 'external';
+  externalAssignerName?: string | null;
+  assignmentDate?: string | null;
+  assignmentRemarks?: string | null;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 @Injectable()
@@ -127,7 +136,7 @@ export class AssignWorkService {
   }
 
   // ─── Options (dropdown data for the Assign Work form) ────────────────────────────
-  async getOptions(organizationId: string) {
+  async getOptions(organizationId: string, user?: JwtPayload) {
     const [clientProjects, internalProjects, employees] = await Promise.all([
       this.clientProjectRepo.find({
         where: { organizationId },
@@ -138,7 +147,7 @@ export class AssignWorkService {
         select: ['id', 'name'],
       }),
       this.employeeRepo.find({
-        where: { organizationId },
+        where: activeEmployeeWhere({ organizationId }),
       }),
     ]);
 
@@ -165,7 +174,12 @@ export class AssignWorkService {
         fullName: getFullName(e.firstName, e.middleName, e.lastName),
       }));
 
-    return { projects, employees: employeeList };
+    return {
+      projects,
+      employees: employeeList,
+      currentUserId: user?.userId,
+      canViewAllAssignments: user ? this.isAdmin(user) : false,
+    };
   }
 
   // ─── Create ──────────────────────────────────────────────────────────────────────
@@ -178,13 +192,47 @@ export class AssignWorkService {
       throw new BadRequestException('Description is required');
     }
 
+    const external = dto.assignmentKind === 'external';
+    if (external) {
+      if (!dto.externalAssignerName?.trim() || !dto.assignmentDate) {
+        throw new BadRequestException(
+          'Assigned by name and assignment date are required',
+        );
+      }
+      if (dto.projectId || dto.source === WorkSource.INTERNAL) {
+        throw new BadRequestException(
+          'External assignments cannot be linked to a project',
+        );
+      }
+      if (
+        [
+          ...(dto.assignedToUserIds || []),
+          ...(dto.assignedToUserId ? [dto.assignedToUserId] : []),
+        ].some((id) => id !== assignedByUserId)
+      ) {
+        throw new BadRequestException(
+          'External assignments can only be recorded for yourself',
+        );
+      }
+    } else if (
+      dto.externalAssignerName !== undefined ||
+      dto.assignmentDate !== undefined ||
+      dto.assignmentRemarks !== undefined
+    ) {
+      throw new BadRequestException(
+        'External details require an external assignment',
+      );
+    }
+
     const assigneeIds = [
       ...new Set(
-        dto.assignedToUserIds?.length
-          ? dto.assignedToUserIds
-          : dto.assignedToUserId
-            ? [dto.assignedToUserId]
-            : [],
+        external
+          ? [assignedByUserId]
+          : dto.assignedToUserIds?.length
+            ? dto.assignedToUserIds
+            : dto.assignedToUserId
+              ? [dto.assignedToUserId]
+              : [],
       ),
     ];
     if (!assigneeIds.length) {
@@ -194,17 +242,18 @@ export class AssignWorkService {
     // Prevent employee from assigning work to themselves
     const assignerUserId = assignedByUserId;
     const selfAssignments = assigneeIds.filter((id) => id === assignerUserId);
-    if (selfAssignments.length) {
+    if (!external && selfAssignments.length) {
       throw new BadRequestException(
         `Work cannot be assigned to the assigner (user ID: ${assignerUserId})`,
       );
     }
 
     const employees = await this.employeeRepo.find({
-      where: { userId: In(assigneeIds), organizationId },
+      where: activeEmployeeWhere({ userId: In(assigneeIds), organizationId }),
       select: ['id', 'userId'],
     });
     const validIds = new Set(employees.map((e) => e.userId));
+    if (external) validIds.add(assignedByUserId);
     const missing = assigneeIds.filter((id) => !validIds.has(id));
     if (missing.length) {
       throw new BadRequestException(
@@ -213,7 +262,7 @@ export class AssignWorkService {
     }
 
     let projectName = '';
-    let type: WorkSource = WorkSource.CLIENT;
+    let type: WorkSource = dto.source ?? WorkSource.CLIENT;
 
     if (dto.projectId) {
       if (dto.source === WorkSource.INTERNAL) {
@@ -237,6 +286,11 @@ export class AssignWorkService {
         projectName = project.projectName;
         type = WorkSource.CLIENT;
       }
+    }
+    if (type === WorkSource.INTERNAL && dto.title.length > 250) {
+      throw new BadRequestException(
+        'Internal work title must be at most 250 characters',
+      );
     }
 
     const created: (ProjectTask | ProjectIssue)[] = [];
@@ -316,6 +370,22 @@ export class AssignWorkService {
       priority: (dto.priority || 'medium') as TaskPriority,
       imageUrl: dto.imageUrl || null,
       status: TaskStatus.PENDING,
+      ...(dto.assignmentKind === 'external'
+        ? {
+            externalAssignerName: dto.externalAssignerName.trim(),
+            assignmentDate: dto.assignmentDate,
+            assignmentRemarks: dto.assignmentRemarks?.trim() || null,
+            status: dto.status || TaskStatus.PENDING,
+            progressPercent: dto.status === TaskStatus.COMPLETED ? 100 : 0,
+            completedAt:
+              dto.status === TaskStatus.COMPLETED ? new Date() : null,
+            completedPointIndexes: extractWorkPoints(dto.description).length
+              ? dto.status === TaskStatus.COMPLETED
+                ? extractWorkPoints(dto.description).map((_, index) => index)
+                : []
+              : null,
+          }
+        : {}),
     });
     const savedTask = await this.taskRepo.save(task);
     await this.notifyAssignee({
@@ -338,6 +408,7 @@ export class AssignWorkService {
     month?: number,
     year?: number,
     scope?: { userId: string; direction: 'to' | 'by' },
+    actor?: JwtPayload,
   ): Promise<WorkAssignment[]> {
     if (!organizationId || (scope && !scope.userId)) {
       throw new ForbiddenException('Organization and user context required');
@@ -354,7 +425,27 @@ export class AssignWorkService {
       );
     }
     try {
-      return await this.loadAssignments(organizationId, month, year, scope);
+      const assignments = await this.loadAssignments(
+        organizationId,
+        month,
+        year,
+        scope,
+      );
+      return actor
+        ? assignments.map((item) => ({
+            ...item,
+            canEdit: this.canDelete(
+              actor,
+              item.assignedByUserId,
+              item.assignedToUserId,
+            ),
+            canDelete: this.canDelete(
+              actor,
+              item.assignedByUserId,
+              item.assignedToUserId,
+            ),
+          }))
+        : assignments;
     } catch (error) {
       this.logger.error(
         `Assign Work list failed organizationId=${organizationId} userId=${scope?.userId ?? 'all'} direction=${scope?.direction ?? 'all'} month=${month ?? 'all'} year=${year ?? 'all'}`,
@@ -408,7 +499,7 @@ export class AssignWorkService {
       const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString();
       const endDate = new Date(Date.UTC(year, month, 1)).toISOString();
       query.andWhere(
-        'task.createdAt >= :startDate AND task.createdAt < :endDate',
+        'COALESCE(task.assignmentDate, task.createdAt) >= :startDate AND COALESCE(task.assignmentDate, task.createdAt) < :endDate',
         { startDate, endDate },
       );
       issueQuery.andWhere(
@@ -461,7 +552,13 @@ export class AssignWorkService {
       completedAt: task.completedAt,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
-      assignedAt: task.createdAt,
+      assignedAt: task.assignmentDate
+        ? new Date(`${task.assignmentDate}T00:00:00.000Z`)
+        : task.createdAt,
+      assignmentKind: task.externalAssignerName ? 'external' : 'regular',
+      externalAssignerName: task.externalAssignerName ?? null,
+      assignmentDate: task.assignmentDate ?? null,
+      assignmentRemarks: task.assignmentRemarks ?? null,
     }));
 
     for (const issue of issues) {
@@ -489,6 +586,7 @@ export class AssignWorkService {
         createdAt: issue.createdAt,
         updatedAt: issue.updatedAt,
         assignedAt: issue.createdAt,
+        assignmentKind: 'regular',
       });
     }
 
@@ -501,11 +599,18 @@ export class AssignWorkService {
     userId: string,
     month?: number,
     year?: number,
+    actor?: JwtPayload,
   ) {
-    return this.listAll(organizationId, month, year, {
-      userId,
-      direction: 'to',
-    });
+    return this.listAll(
+      organizationId,
+      month,
+      year,
+      {
+        userId,
+        direction: 'to',
+      },
+      actor,
+    );
   }
 
   async getByMe(
@@ -513,11 +618,253 @@ export class AssignWorkService {
     userId: string,
     month?: number,
     year?: number,
+    actor?: JwtPayload,
   ) {
-    return this.listAll(organizationId, month, year, {
-      userId,
-      direction: 'by',
-    });
+    return this.listAll(
+      organizationId,
+      month,
+      year,
+      {
+        userId,
+        direction: 'by',
+      },
+      actor,
+    );
+  }
+
+  async getOrganizationAssignments(
+    user: JwtPayload,
+    filters: AssignmentFiltersDto,
+  ) {
+    if (!this.isAdmin(user))
+      throw new ForbiddenException('Only management can view all assignments');
+    const items = await this.listAll(
+      user.organizationId,
+      filters.month,
+      filters.year,
+      undefined,
+      user,
+    );
+    const search = filters.search?.trim().toLowerCase();
+    const matchingEmployees = search
+      ? await this.employeeRepo.find({
+          where: { organizationId: user.organizationId },
+          select: ['userId', 'firstName', 'middleName', 'lastName'],
+        })
+      : [];
+    const matchingUserIds = new Set(
+      matchingEmployees
+        .filter((employee) =>
+          getFullName(
+            employee.firstName,
+            employee.middleName,
+            employee.lastName,
+          )
+            .toLowerCase()
+            .includes(search),
+        )
+        .map((employee) => employee.userId),
+    );
+    return items.filter(
+      (item) =>
+        (!filters.assignmentKind ||
+          item.assignmentKind === filters.assignmentKind) &&
+        (!filters.status || item.status === filters.status) &&
+        (!filters.priority || item.priority === filters.priority) &&
+        (!filters.assignedToUserId ||
+          item.assignedToUserId === filters.assignedToUserId) &&
+        (!search ||
+          matchingUserIds.has(item.assignedToUserId) ||
+          matchingUserIds.has(item.assignedByUserId) ||
+          [
+            item.title,
+            item.description,
+            item.projectName,
+            item.externalAssignerName,
+            item.assignmentRemarks,
+            item.assignedToUser?.fullName,
+            item.assignedByUser?.fullName,
+          ].some((value) => value?.toLowerCase().includes(search))),
+    );
+  }
+
+  async updateAssignment(
+    user: JwtPayload,
+    workId: string,
+    dto: UpdateAssignWorkDto,
+  ) {
+    const internal = dto.source === WorkSource.INTERNAL;
+    const item = internal
+      ? await this.issueRepo.findOne({ where: { id: workId } })
+      : await this.taskRepo.findOne({
+          where: { id: workId },
+          relations: ['project'],
+        });
+    if (!item) throw new NotFoundException('Assignment work not found');
+    const task = item as ProjectTask;
+    const issue = item as ProjectIssue;
+    if (
+      (internal
+        ? issue.organizationId
+        : task.organizationId || task.project?.organizationId) !==
+      user.organizationId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
+    const assignerId = internal ? issue.createdByUserId : task.assignedByUserId;
+    const assigneeId = internal ? issue.assigneeUserId : task.assignedToUserId;
+    if (!this.canDelete(user, assignerId, assigneeId))
+      throw new ForbiddenException('You cannot edit this assignment');
+    const external = !internal && Boolean(task.externalAssignerName);
+    if (
+      external &&
+      dto.assignedToUserId !== undefined &&
+      dto.assignedToUserId !== assigneeId
+    ) {
+      throw new BadRequestException(
+        'External assignments cannot be reassigned',
+      );
+    }
+    if (
+      !external &&
+      [
+        dto.externalAssignerName,
+        dto.assignmentDate,
+        dto.assignmentRemarks,
+      ].some((value) => value !== undefined)
+    ) {
+      throw new BadRequestException(
+        'External details require an external assignment',
+      );
+    }
+    if (internal && (dto.dueDate !== undefined || dto.priority !== undefined)) {
+      throw new BadRequestException(
+        'Internal issues do not support due date or priority',
+      );
+    }
+    if (dto.title !== undefined) {
+      if (!dto.title?.trim() || dto.title.length > (internal ? 250 : 500))
+        throw new BadRequestException('Invalid work title');
+      if (internal) issue.issueTitle = dto.title.trim();
+      else task.title = dto.title.trim();
+    }
+    if (
+      dto.assignedToUserId !== undefined &&
+      dto.assignedToUserId !== assigneeId
+    ) {
+      if (
+        !dto.assignedToUserId ||
+        (!external && dto.assignedToUserId === assignerId)
+      ) {
+        throw new BadRequestException('Invalid assignee');
+      }
+      const employees = await this.employeeRepo.find({
+        where: activeEmployeeWhere({
+          organizationId: user.organizationId,
+          userId: In([dto.assignedToUserId]),
+        }),
+        select: ['id', 'userId'],
+      });
+      if (
+        !(external && dto.assignedToUserId === assignerId) &&
+        !employees.some((employee) => employee.userId === dto.assignedToUserId)
+      ) {
+        throw new BadRequestException(
+          'Assignee is not an employee of this organization',
+        );
+      }
+      if (internal) issue.assigneeUserId = dto.assignedToUserId;
+      else task.assignedToUserId = dto.assignedToUserId;
+    }
+    if (dto.externalAssignerName !== undefined) {
+      if (!dto.externalAssignerName?.trim())
+        throw new BadRequestException('Assigned by name is required');
+      task.externalAssignerName = dto.externalAssignerName.trim();
+    }
+    if (dto.assignmentDate !== undefined) {
+      if (!dto.assignmentDate)
+        throw new BadRequestException('Assignment date is required');
+      task.assignmentDate = dto.assignmentDate;
+    }
+    if (dto.assignmentRemarks !== undefined)
+      task.assignmentRemarks = dto.assignmentRemarks?.trim() || null;
+    if (dto.dueDate !== undefined) task.dueDate = dto.dueDate || null;
+    if (dto.priority !== undefined) {
+      if (!dto.priority) throw new BadRequestException('Priority is required');
+      task.priority = dto.priority as TaskPriority;
+    }
+    if (dto.imageUrl !== undefined) item.imageUrl = dto.imageUrl || null;
+    if (dto.description !== undefined && dto.description !== item.description) {
+      if (!hasWorkDescription(dto.description || ''))
+        throw new BadRequestException('Description is required');
+      const oldPoints = extractWorkPoints(item.description || '');
+      const newPoints = extractWorkPoints(dto.description);
+      if (item.completedPointIndexes != null) {
+        const remaining = new Map<string, number>();
+        for (const index of item.completedPointIndexes) {
+          const point = oldPoints[index];
+          if (point !== undefined)
+            remaining.set(point, (remaining.get(point) || 0) + 1);
+        }
+        const indexes = newPoints.flatMap((point, index) => {
+          const count = remaining.get(point) || 0;
+          if (!count) return [];
+          remaining.set(point, count - 1);
+          return [index];
+        });
+        item.completedPointIndexes = newPoints.length ? indexes : null;
+        if (newPoints.length) {
+          item.progressPercent = this.calculatePointCompletion(
+            dto.description,
+            indexes,
+          ).percent;
+          if (internal) {
+            issue.status =
+              item.progressPercent === 100 ? 'resolved' : 'pending';
+            issue.resolvedAt =
+              item.progressPercent === 100
+                ? issue.resolvedAt || new Date()
+                : null;
+          } else {
+            task.status =
+              item.progressPercent === 100
+                ? TaskStatus.COMPLETED
+                : [TaskStatus.ISSUE, TaskStatus.CANCELLED].includes(task.status)
+                  ? task.status
+                  : item.progressPercent > 0
+                    ? TaskStatus.IN_PROGRESS
+                    : TaskStatus.PENDING;
+            task.completedAt =
+              item.progressPercent === 100
+                ? task.completedAt || new Date()
+                : null;
+          }
+        }
+      }
+      item.description = dto.description.trim();
+    }
+    const saved = internal
+      ? await this.issueRepo.save(issue)
+      : await this.taskRepo.save(task);
+    const newAssigneeId = internal
+      ? issue.assigneeUserId
+      : task.assignedToUserId;
+    if (newAssigneeId && newAssigneeId !== assigneeId) {
+      await this.notifyAssignee({
+        assignedByUserId: assignerId,
+        assignedToUserId: newAssigneeId,
+        organizationId: user.organizationId,
+        title: internal ? issue.issueTitle : task.title,
+        description: item.description,
+        dueDate: internal ? undefined : task.dueDate,
+        priority: internal ? undefined : task.priority,
+        projectName: internal
+          ? ''
+          : task.project?.projectName || task.otherProjectName || '',
+        workId: saved.id,
+      });
+    }
+    return saved;
   }
 
   // ─── Update ───────────────────────────────────────────────────────────────────────

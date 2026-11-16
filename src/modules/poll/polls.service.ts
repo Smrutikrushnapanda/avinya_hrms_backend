@@ -496,6 +496,7 @@ export class PollsService {
       where: {
         organizationId: orgId,
         status: 'active',
+        user: { isActive: true },
       },
       select: ['id', 'userId', 'firstName', 'middleName', 'lastName'], // Only select needed fields
       order: { firstName: 'ASC' },
