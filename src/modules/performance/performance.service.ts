@@ -127,7 +127,7 @@ export class PerformanceService {
         reportingTo: managerEmp.id,
         organizationId: orgId,
       }),
-      select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
+      select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
       order: { firstName: 'ASC' },
     });
 
@@ -190,7 +190,7 @@ export class PerformanceService {
     const employees = (
       await this.employeeRepo.find({
         where: activeEmployeeWhere(whereClause),
-        select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
+        select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
         order: { firstName: 'ASC' },
       })
     ).filter((emp) => emp.userId !== reviewerUserId);
@@ -348,7 +348,7 @@ export class PerformanceService {
     const [employees, settings] = await Promise.all([
       this.employeeRepo.find({
         where: activeEmployeeWhere({ organizationId: orgId }),
-        select: ['id', 'userId', 'firstName', 'lastName', 'workEmail'],
+        select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
         order: { firstName: 'ASC' },
       }),
       this.getSettings(orgId),

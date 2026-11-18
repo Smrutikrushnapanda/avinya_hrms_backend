@@ -21,7 +21,13 @@ export class LogReportService {
     private readonly settingsRepo: Repository<LogReportSettings>,
   ) {}
 
-  async create(dto: CreateLogReportDto): Promise<LogReport> {
+  async create(dto: CreateLogReportDto): Promise<LogReport | null> {
+    if (dto.organizationId) {
+      const enabled = await this.isEnabled(dto.organizationId);
+      if (!enabled) {
+        return null;
+      }
+    }
     const log = this.logRepo.create(dto);
     return this.logRepo.save(log);
   }
@@ -41,14 +47,18 @@ export class LogReportService {
     organizationId: string,
     isEnabled: boolean,
   ): Promise<LogReportSettings> {
-    this.enabledCache.delete(organizationId); // invalidate cache on update
+    const boolVal = Boolean(isEnabled);
+    this.enabledCache.set(organizationId, {
+      value: boolVal,
+      expiresAt: Date.now() + this.CACHE_TTL_MS,
+    });
     let settings = await this.settingsRepo.findOne({
       where: { organizationId },
     });
     if (!settings) {
-      settings = this.settingsRepo.create({ organizationId, isEnabled });
+      settings = this.settingsRepo.create({ organizationId, isEnabled: boolVal });
     } else {
-      settings.isEnabled = isEnabled;
+      settings.isEnabled = boolVal;
     }
     return this.settingsRepo.save(settings);
   }
@@ -60,7 +70,10 @@ export class LogReportService {
     const settings = await this.settingsRepo.findOne({
       where: { organizationId },
     });
-    const value = settings ? settings.isEnabled : true;
+    const value =
+      settings !== null && settings !== undefined
+        ? Boolean(settings.isEnabled)
+        : true;
     this.enabledCache.set(organizationId, {
       value,
       expiresAt: Date.now() + this.CACHE_TTL_MS,

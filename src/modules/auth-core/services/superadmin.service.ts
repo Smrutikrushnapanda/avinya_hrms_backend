@@ -13,6 +13,7 @@ import { OrganizationService } from './organization.service';
 import { PricingService } from '../../pricing/pricing.service';
 import { RenewalEmailLog } from '../entities/renewal-email-log.entity';
 import { MailService } from '../../mail/mail.service';
+import { getFullName } from '../../../shared/name.util';
 
 @Injectable()
 export class SuperadminService {
@@ -199,7 +200,14 @@ export class SuperadminService {
     const data = rawData.map((activity) => ({
       id: activity.id,
       userName: activity.user?.userName,
-      name: `${activity.user?.firstName ?? ''} ${activity.user?.lastName ?? ''}`.trim(),
+      name:
+        getFullName(
+          activity.user?.firstName,
+          activity.user?.middleName,
+          activity.user?.lastName,
+        ) ||
+        activity.user?.userName ||
+        '',
       organizationName:
         activity.user?.organization?.organizationName || 'System',
       activityType: activity.activityType,

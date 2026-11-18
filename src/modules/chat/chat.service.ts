@@ -17,6 +17,7 @@ import { CreateGroupConversationDto } from './dto/create-group-conversation.dto'
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { MessageGateway } from '../message/message.gateway';
 import { FirebaseService } from '../firebase/firebase.service';
+import { getFullName } from '../../shared/name.util';
 import { Express } from 'express';
 import { Response } from 'express';
 
@@ -414,8 +415,11 @@ export class ChatService {
       if (!tokens.length) return;
 
       const senderName =
-        `${message?.sender?.firstName || ''} ${message?.sender?.lastName || ''}`.trim() ||
-        'New message';
+        getFullName(
+          message?.sender?.firstName,
+          message?.sender?.middleName,
+          message?.sender?.lastName,
+        ) || 'New message';
       const body = message?.text
         ? message.text
         : message?.attachments?.length

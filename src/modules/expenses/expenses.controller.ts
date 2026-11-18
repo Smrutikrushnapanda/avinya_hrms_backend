@@ -9,8 +9,10 @@ import {
   Query,
   ParseUUIDPipe,
   UseGuards,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { Response } from 'express';
 import { ExpensesService } from './expenses.service';
 import {
   CreateExpenseDto,
@@ -48,6 +50,28 @@ export class ExpensesController {
   @ApiQuery({ name: 'organizationId', type: 'string' })
   async getAllExpenses(@Query('organizationId') organizationId: string) {
     return this.expensesService.getAllExpenses(organizationId);
+  }
+
+  @Get('export')
+  @ApiOperation({ summary: 'Export expenses to Excel serverside (admin)' })
+  @ApiQuery({ name: 'organizationId', type: 'string' })
+  @ApiQuery({ name: 'status', type: 'string', required: false })
+  async exportExpenses(
+    @Query('organizationId') organizationId: string,
+    @Query('status') status: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.expensesService.exportExpensesExcel(
+      organizationId,
+      status,
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.length);
+    return res.end(buffer);
   }
 
   @Put(':id/status')

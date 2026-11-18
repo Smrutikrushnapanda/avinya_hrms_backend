@@ -516,6 +516,7 @@ export class ProjectService implements OnModuleInit {
               id: m.user.id,
               email: m.user.email,
               firstName: m.user.firstName,
+              middleName: m.user.middleName,
               lastName: m.user.lastName,
             }
           : null,
@@ -525,6 +526,7 @@ export class ProjectService implements OnModuleInit {
             id: p.createdBy.id,
             email: p.createdBy.email,
             firstName: p.createdBy.firstName,
+            middleName: p.createdBy.middleName,
             lastName: p.createdBy.lastName,
           }
         : null,
@@ -622,6 +624,7 @@ export class ProjectService implements OnModuleInit {
           employeeId: emp?.id ?? null,
           employeeCode: emp?.employeeCode ?? null,
           firstName: emp?.firstName ?? m.user?.firstName ?? '',
+          middleName: emp?.middleName ?? m.user?.middleName ?? '',
           lastName: emp?.lastName ?? m.user?.lastName ?? '',
           email: emp?.user?.email ?? m.user?.email ?? '',
           workEmail: emp?.workEmail ?? '',
@@ -1351,6 +1354,7 @@ export class ProjectService implements OnModuleInit {
       employeeCode: tm.employeeCode ?? null,
       userId: tm.userId,
       firstName: tm.firstName,
+      middleName: tm.middleName,
       lastName: tm.lastName,
       email: tm.user?.email ?? '',
       workEmail: tm.workEmail ?? '',
@@ -1409,6 +1413,7 @@ export class ProjectService implements OnModuleInit {
       employeeId: tm.id,
       userId: tm.userId,
       firstName: tm.firstName,
+      middleName: tm.middleName,
       lastName: tm.lastName,
       email: tm.user?.email ?? '',
       workEmail: tm.workEmail ?? '',
@@ -1498,11 +1503,14 @@ export class ProjectService implements OnModuleInit {
   private async resolveActorName(userId: string, organizationId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
-      select: ['firstName', 'lastName', 'workEmail'],
+      select: ['firstName', 'middleName', 'lastName', 'workEmail'],
     });
     if (!employee) return null;
-    const fullName =
-      `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
+    const fullName = getFullName(
+      employee.firstName,
+      employee.middleName,
+      employee.lastName,
+    );
     return fullName || employee.workEmail || null;
   }
 

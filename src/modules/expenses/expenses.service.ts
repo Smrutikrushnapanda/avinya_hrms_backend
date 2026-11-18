@@ -7,6 +7,8 @@ import {
   CreateExpenseDto,
   UpdateExpenseStatusDto,
 } from './dto/create-expense.dto';
+import * as XLSX from 'xlsx';
+import { format } from 'date-fns';
 
 @Injectable()
 export class ExpensesService {
@@ -138,5 +140,107 @@ export class ExpensesService {
     const expense = await this.expenseRepo.findOne({ where: { id, userId } });
     if (!expense) throw new NotFoundException('Expense not found');
     await this.expenseRepo.delete(id);
+  }
+
+  async exportExpensesExcel(
+    organizationId: string,
+    status?: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    let query = this.expenseRepo
+      .createQueryBuilder('e')
+      .leftJoinAndSelect('e.user', 'user')
+      .where('e.organization_id = :organizationId', { organizationId })
+      .orderBy('e.createdAt', 'DESC');
+
+    if (status && status.toLowerCase() !== 'all') {
+      query = query.andWhere('LOWER(e.status) = :status', {
+        status: status.toLowerCase(),
+      });
+    }
+
+    const expenses = await query.getMany();
+    await this.overlayEmployeeNames(expenses.map((e) => e.user));
+
+    const rows = expenses.map((exp, index) => {
+      let employeeName = 'Employee';
+      if (exp.user) {
+        const parts = [exp.user.firstName, exp.user.middleName, exp.user.lastName].filter(Boolean);
+        employeeName = parts.length ? parts.join(' ') : exp.user.email || 'Employee';
+      }
+
+      let formattedDate = '-';
+      try {
+        if (exp.expenseDate) {
+          formattedDate = format(new Date(exp.expenseDate), 'yyyy-MM-dd');
+        }
+      } catch {
+        formattedDate = String(exp.expenseDate || '-');
+      }
+
+      let formattedCreated = '-';
+      try {
+        if (exp.createdAt) {
+          formattedCreated = format(new Date(exp.createdAt), 'yyyy-MM-dd HH:mm');
+        }
+      } catch {
+        formattedCreated = String(exp.createdAt || '-');
+      }
+
+      return {
+        'Sl#': index + 1,
+        'Employee Name': employeeName,
+        'Employee Email': exp.user?.email || '-',
+        'Title': exp.title || '-',
+        'Category': exp.category || '-',
+        'Expense Type': exp.expenseType || '-',
+        'Project Name': exp.projectName || '-',
+        'Expense Date': formattedDate,
+        'Currency': exp.currency || 'INR',
+        'Amount': Number(exp.amount) || 0,
+        'Status': exp.status || 'PENDING',
+        'Admin Remarks': exp.adminRemarks || '-',
+        'Receipt URL': exp.receiptUrl || '-',
+        'Created At': formattedCreated,
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    worksheet['!cols'] = [
+      { wch: 6 },
+      { wch: 22 },
+      { wch: 26 },
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 25 },
+      { wch: 35 },
+      { wch: 18 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const sheetName =
+      status && status.toLowerCase() !== 'all'
+        ? `Expenses_${status.toUpperCase()}`.slice(0, 31)
+        : 'All_Expenses';
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+    const buffer = XLSX.write(workbook, {
+      type: 'buffer',
+      bookType: 'xlsx',
+    }) as Buffer;
+
+    const statusSuffix =
+      status && status.toLowerCase() !== 'all'
+        ? `_${status.toLowerCase()}`
+        : '_all';
+    const filename = `Expense_Claims${statusSuffix}_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`;
+
+    return { buffer, filename };
   }
 }

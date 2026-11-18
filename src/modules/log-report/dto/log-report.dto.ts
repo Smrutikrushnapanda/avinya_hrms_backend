@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateLogReportDto {
   @IsUUID()
@@ -32,4 +32,9 @@ export class CreateLogReportDto {
   @IsOptional()
   @IsString()
   userAgent?: string;
+}
+
+export class UpdateLogReportSettingsDto {
+  @IsBoolean()
+  isEnabled: boolean;
 }

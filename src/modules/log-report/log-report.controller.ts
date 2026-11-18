@@ -12,7 +12,10 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { LogReportService } from './log-report.service';
-import { CreateLogReportDto } from './dto/log-report.dto';
+import {
+  CreateLogReportDto,
+  UpdateLogReportSettingsDto,
+} from './dto/log-report.dto';
 import { RequireProPlan } from '../pricing/decorators/require-plan-types.decorator';
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth-core/guards/roles.guard';
@@ -100,10 +103,11 @@ export class LogReportController {
   @ApiOperation({ summary: 'Update log report settings for organization' })
   async updateSettings(
     @Param('orgId') orgId: string,
-    @Body() body: { isEnabled: boolean },
+    @Body() body: UpdateLogReportSettingsDto,
     @GetUser() actor: User,
   ) {
     this.assertSameOrg(actor, orgId);
-    return this.logReportService.updateSettings(orgId, body.isEnabled);
+    const isEnabled = Boolean(body?.isEnabled);
+    return this.logReportService.updateSettings(orgId, isEnabled);
   }
 }

@@ -536,6 +536,7 @@ export class ProjectsService implements OnModuleInit {
           employeeId: emp?.id ?? null,
           employeeCode: emp?.employeeCode ?? null,
           firstName: emp?.firstName ?? m.user?.firstName ?? '',
+          middleName: emp?.middleName ?? m.user?.middleName ?? '',
           lastName: emp?.lastName ?? m.user?.lastName ?? '',
           email: m.user?.email ?? '',
           workEmail: emp?.workEmail ?? '',
@@ -568,6 +569,10 @@ export class ProjectsService implements OnModuleInit {
           firstName:
             managerEmployee?.firstName ??
             managerEmployee?.user?.firstName ??
+            '',
+          middleName:
+            managerEmployee?.middleName ??
+            managerEmployee?.user?.middleName ??
             '',
           lastName:
             managerEmployee?.lastName ?? managerEmployee?.user?.lastName ?? '',
@@ -1535,11 +1540,14 @@ export class ProjectsService implements OnModuleInit {
   private async resolveActorName(userId: string, organizationId: string) {
     const employee = await this.employeeRepo.findOne({
       where: { userId, organizationId },
-      select: ['firstName', 'lastName', 'workEmail'],
+      select: ['firstName', 'middleName', 'lastName', 'workEmail'],
     });
     if (!employee) return null;
-    const fullName =
-      `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
+    const fullName = getFullName(
+      employee.firstName,
+      employee.middleName,
+      employee.lastName,
+    );
     return fullName || employee.workEmail || null;
   }
 
