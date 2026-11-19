@@ -621,6 +621,9 @@ export class EmployeeService implements OnModuleInit {
     const aadharPhotoUrl = await this.signIfNeeded(employee.aadharPhotoUrl);
     const panCardPhotoUrl = await this.signIfNeeded(employee.panCardPhotoUrl);
     const passportPhotoUrl = await this.signIfNeeded(employee.passportPhotoUrl);
+    const educationCertificateUrl = await this.signIfNeeded(employee.educationCertificateUrl);
+    const experienceLetterUrl = await this.signIfNeeded(employee.experienceLetterUrl);
+    const bankProofUrl = await this.signIfNeeded(employee.bankProofUrl);
     const managerPhotoUrl = await this.signIfNeeded(
       this.getProfilePhotoKey(employee.manager as any),
     );
@@ -636,6 +639,9 @@ export class EmployeeService implements OnModuleInit {
       aadharPhotoUrl: aadharPhotoUrl ?? employee.aadharPhotoUrl ?? null,
       panCardPhotoUrl: panCardPhotoUrl ?? employee.panCardPhotoUrl ?? null,
       passportPhotoUrl: passportPhotoUrl ?? employee.passportPhotoUrl ?? null,
+      educationCertificateUrl: educationCertificateUrl ?? employee.educationCertificateUrl ?? null,
+      experienceLetterUrl: experienceLetterUrl ?? employee.experienceLetterUrl ?? null,
+      bankProofUrl: bankProofUrl ?? employee.bankProofUrl ?? null,
       manager: employee.manager
         ? { ...employee.manager, photoUrl: managerPhotoUrl }
         : employee.manager,
@@ -909,9 +915,20 @@ export class EmployeeService implements OnModuleInit {
           user.gender = employeeUpdate.gender;
         }
         if (employeeUpdate.contactNumber !== undefined) {
-          user.mobileNumber = employeeUpdate.contactNumber
+          const mobile = employeeUpdate.contactNumber
             ? String(employeeUpdate.contactNumber).trim()
             : null;
+          if (mobile) {
+            const existingMobileUser = await this.userRepository.findOne({
+              where: { mobileNumber: mobile },
+            });
+            if (existingMobileUser && existingMobileUser.id !== user.id) {
+              throw new ConflictException(
+                `Contact number ${mobile} is already registered to another user`,
+              );
+            }
+          }
+          user.mobileNumber = mobile;
         }
       }
 

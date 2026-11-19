@@ -79,6 +79,15 @@ export class Employee {
   @Column({ name: 'passport_photo_url', type: 'text', nullable: true })
   passportPhotoUrl: string;
 
+  @Column({ name: 'education_certificate_url', type: 'text', nullable: true })
+  educationCertificateUrl: string;
+
+  @Column({ name: 'experience_letter_url', type: 'text', nullable: true })
+  experienceLetterUrl: string;
+
+  @Column({ name: 'bank_proof_url', type: 'text', nullable: true })
+  bankProofUrl: string;
+
   @Column({ name: 'pan_number', type: 'varchar', length: 20, nullable: true })
   panNumber: string | null;
 

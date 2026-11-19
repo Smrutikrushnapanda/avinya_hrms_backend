@@ -34,7 +34,7 @@ const ALLOWED_MIME_TYPES = [
 /**
  * Maximum file size in bytes (2MB)
  */
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('Upload')
 @Controller('upload')

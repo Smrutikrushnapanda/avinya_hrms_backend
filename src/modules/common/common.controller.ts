@@ -29,7 +29,7 @@ import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { User } from '../auth-core/entities/user.entity';
 import { OrganizationTimezoneService } from '../../shared/organization-timezone.service';
 
-const MAX_UPLOAD_SIZE = 2 * 1024 * 1024;
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
 
 @ApiTags('Common')
 @Controller('common')

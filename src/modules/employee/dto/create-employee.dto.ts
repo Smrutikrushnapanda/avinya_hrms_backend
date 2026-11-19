@@ -107,6 +107,18 @@ export class CreateEmployeeDto {
 
   @IsOptional()
   @IsString()
+  educationCertificateUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  experienceLetterUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  bankProofUrl?: string;
+
+  @IsOptional()
+  @IsString()
   @Transform(({ value }) =>
     typeof value === 'string' ? value.toUpperCase().trim() : value,
   )
