@@ -1,6 +1,8 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { ValidationPipe } from '@nestjs/common';
 import { CreateEmployeeDto } from './create-employee.dto';
+import { UpdateEmployeeDto } from './update-employee.dto';
 
 async function violations(dto: Partial<CreateEmployeeDto>) {
   const instance = plainToInstance(CreateEmployeeDto, dto);
@@ -63,3 +65,67 @@ describe('CreateEmployeeDto PAN / Aadhaar validation', () => {
     expect(errors.aadhaarNumber).toBeUndefined();
   });
 });
+
+describe.each([CreateEmployeeDto, UpdateEmployeeDto])(
+  '%s document validation',
+  (metatype) => {
+    const documents = {
+      bankProofUrl: 'https://example.com/bank.pdf',
+      educationCertificateUrl: 'https://example.com/education.pdf',
+      experienceLetterUrl: 'https://example.com/experience.pdf',
+    };
+    const requiredFields = {
+      organizationId: '00000000-0000-4000-8000-000000000000',
+      employeeCode: 'EMP001',
+      firstName: 'Priya',
+      lastName: 'Sharma',
+      workEmail: 'priya@example.com',
+      dateOfJoining: '2026-11-19',
+      loginPassword: 'password123',
+    };
+
+    const validatePayload = (fields: Record<string, unknown>) => {
+      const pipe = new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      });
+      return pipe.transform(
+        {
+          ...(metatype === CreateEmployeeDto ? requiredFields : {}),
+          ...fields,
+        },
+        { type: 'body', metatype },
+      );
+    };
+
+    it('accepts and preserves uploaded document URLs', async () => {
+      await expect(validatePayload(documents)).resolves.toMatchObject(
+        documents,
+      );
+    });
+
+    it.each(Object.keys(documents))('rejects non-string %s', async (field) => {
+      await expect(validatePayload({ [field]: 123 })).rejects.toThrow(
+        'Bad Request Exception',
+      );
+    });
+
+    it('allows optional documents to be omitted', async () => {
+      await expect(validatePayload({})).resolves.toBeInstanceOf(metatype);
+    });
+
+    it('allows documents to be cleared', async () => {
+      const cleared = Object.fromEntries(
+        Object.keys(documents).map((field) => [field, null]),
+      );
+      await expect(validatePayload(cleared)).resolves.toMatchObject(cleared);
+    });
+
+    it('continues rejecting unknown properties', async () => {
+      await expect(
+        validatePayload({ unsupportedDocument: 'file.pdf' }),
+      ).rejects.toThrow('Bad Request Exception');
+    });
+  },
+);
