@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { WfhActivityLog } from './entities/wfh-activity-log.entity';
 import { WfhHeartbeatSnapshot } from './entities/wfh-heartbeat-snapshot.entity';
 import { WfhAppActivity } from './entities/wfh-app-activity.entity';
@@ -899,6 +899,18 @@ export class WfhMonitoringService {
     if (approvedUsers.length === 0) return [];
 
     const userIds = approvedUsers.map((u) => u.id);
+    const employees = await this.employeeRepo.find({
+      where: { organizationId, userId: In(userIds) },
+      relations: ['department', 'designation'],
+      select: {
+        userId: true,
+        department: { id: true, name: true },
+        designation: { id: true, name: true },
+      },
+    });
+    const employeeByUserId = new Map(
+      employees.map((employee) => [employee.userId, employee]),
+    );
 
     const sessions = await this.sessionRepo
       .createQueryBuilder('session')
@@ -936,6 +948,7 @@ export class WfhMonitoringService {
 
     return approvedUsers.map((approvedUser) => {
       const uid = approvedUser.id;
+      const employee = employeeByUserId.get(uid);
       const session = latestSessionByUser.get(uid);
       const appRows = appsByUser.get(uid) ?? [];
 
@@ -956,6 +969,12 @@ export class WfhMonitoringService {
       );
 
       return {
+        department: employee?.department
+          ? { id: employee.department.id, name: employee.department.name }
+          : null,
+        designation: employee?.designation
+          ? { id: employee.designation.id, name: employee.designation.name }
+          : null,
         userId: uid,
         name:
           displayNames.get(uid) ||

@@ -152,13 +152,19 @@ export class AssignWorkService {
       }),
       this.employeeRepo.find({
         where: activeEmployeeWhere({ organizationId }),
-        relations: ['user'],
+        relations: ['user', 'department', 'designation'],
         select: {
           userId: true,
+          employeeCode: true,
+          workEmail: true,
           firstName: true,
           middleName: true,
           lastName: true,
           status: true,
+          departmentId: true,
+          designationId: true,
+          department: { id: true, name: true },
+          designation: { id: true, name: true },
           user: { isActive: true },
         },
       }),
@@ -183,12 +189,22 @@ export class AssignWorkService {
       )
       .map((e) => ({
         userId: e.userId,
+        employeeCode: e.employeeCode,
+        workEmail: e.workEmail,
         firstName: e.firstName,
         middleName: e.middleName || '',
         lastName: e.lastName || '',
         fullName: getFullName(e.firstName, e.middleName, e.lastName),
         status: e.status,
         isActive: e.user.isActive,
+        departmentId: e.departmentId,
+        designationId: e.designationId,
+        department: e.department
+          ? { id: e.department.id, name: e.department.name }
+          : null,
+        designation: e.designation
+          ? { id: e.designation.id, name: e.designation.name }
+          : null,
       }));
 
     return {
@@ -1251,18 +1267,20 @@ export class AssignWorkService {
 
     const tasks = await this.taskRepo
       .createQueryBuilder('task')
-      .select('task.id')
-      .addSelect('task.title')
-      .addSelect('task.assigned_by_user_id')
-      .addSelect('task.assigned_to_user_id')
-      .addSelect('task.organization_id')
+      .select('task.id', 'id')
+      .addSelect('task.title', 'title')
+      .addSelect('task.assignedByUserId', 'assigned_by_user_id')
+      .addSelect('task.assignedToUserId', 'assigned_to_user_id')
+      .addSelect('task.organizationId', 'organization_id')
       .where('task.status = :pending', { pending: TaskStatus.PENDING })
       .andWhere('task.progressPercent < 100')
       .andWhere('task.statusReminderSentAt IS NULL')
       .andWhere('task.createdAt <= :cutoff', { cutoff })
       .getRawMany<{
-        id: string;
-        title: string;
+        id?: string;
+        task_id?: string;
+        title?: string;
+        task_title?: string;
         assigned_by_user_id: string;
         assigned_to_user_id: string | null;
         organization_id: string | null;
@@ -1278,40 +1296,44 @@ export class AssignWorkService {
     const assigneeNameById = await this.buildAssigneeNameMap(assigneeIds);
 
     for (const row of tasks) {
+      const taskId = row.id ?? row.task_id;
+      const taskTitle = row.title ?? row.task_title ?? 'Assigned work';
       const assignerUserId = row.assigned_by_user_id;
       const assigneeUserId = row.assigned_to_user_id;
       const organizationId = row.organization_id;
-      if (!assigneeUserId || !assignerUserId || !organizationId) continue;
+      if (!taskId || !assigneeUserId || !assignerUserId || !organizationId)
+        continue;
       const assigneeName = assigneeNameById.get(assigneeUserId) ?? 'there';
       await this.notify({
         senderUserId: assignerUserId,
         recipientUserId: assigneeUserId,
         organizationId,
         type: 'work_reminder',
-        title: `Work Still Pending: ${row.title}`,
-        body: `Hi ${assigneeName}, the work "${row.title}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
-        data: { workId: row.id, projectName: '' },
+        title: `Work Still Pending: ${taskTitle}`,
+        body: `Hi ${assigneeName}, the work "${taskTitle}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
+        data: { workId: taskId, projectName: '' },
       }).catch((err) =>
         this.logger.error('Failed to send pending-work reminder:', err),
       );
-      await this.taskRepo.update(row.id, { statusReminderSentAt: now });
+      await this.taskRepo.update(taskId, { statusReminderSentAt: now });
       reminded += 1;
     }
 
     const issues = await this.issueRepo
       .createQueryBuilder('issue')
-      .select('issue.id')
-      .addSelect('issue.issue_title')
-      .addSelect('issue.created_by_user_id')
-      .addSelect('issue.assignee_user_id')
-      .addSelect('issue.organization_id')
+      .select('issue.id', 'id')
+      .addSelect('issue.issueTitle', 'issue_title')
+      .addSelect('issue.createdByUserId', 'created_by_user_id')
+      .addSelect('issue.assigneeUserId', 'assignee_user_id')
+      .addSelect('issue.organizationId', 'organization_id')
       .where('issue.status = :pending', { pending: 'pending' })
       .andWhere('issue.progressPercent < 100')
       .andWhere('issue.statusReminderSentAt IS NULL')
       .andWhere('issue.createdAt <= :cutoff', { cutoff })
       .getRawMany<{
-        id: string;
-        issue_title: string;
+        id?: string;
+        issue_id?: string;
+        issue_title?: string;
         created_by_user_id: string;
         assignee_user_id: string | null;
         organization_id: string;
@@ -1328,23 +1350,26 @@ export class AssignWorkService {
       await this.buildAssigneeNameMap(issueAssigneeIds);
 
     for (const row of issues) {
+      const issueId = row.id ?? row.issue_id;
+      const issueTitle = row.issue_title ?? 'Assigned issue';
       const assignerUserId = row.created_by_user_id;
       const assigneeUserId = row.assignee_user_id;
       const organizationId = row.organization_id;
-      if (!assigneeUserId || !assignerUserId || !organizationId) continue;
+      if (!issueId || !assigneeUserId || !assignerUserId || !organizationId)
+        continue;
       const assigneeName = issueAssigneeNameById.get(assigneeUserId) ?? 'there';
       await this.notify({
         senderUserId: assignerUserId,
         recipientUserId: assigneeUserId,
         organizationId,
         type: 'work_reminder',
-        title: `Work Still Pending: ${row.issue_title}`,
-        body: `Hi ${assigneeName}, the work "${row.issue_title}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
-        data: { workId: row.id, projectName: '' },
+        title: `Work Still Pending: ${issueTitle}`,
+        body: `Hi ${assigneeName}, the work "${issueTitle}" assigned to you has been pending for more than 24 hours. Please complete it and update the progress.`,
+        data: { workId: issueId, projectName: '' },
       }).catch((err) =>
         this.logger.error('Failed to send pending-work reminder:', err),
       );
-      await this.issueRepo.update(row.id, { statusReminderSentAt: now });
+      await this.issueRepo.update(issueId, { statusReminderSentAt: now });
       reminded += 1;
     }
 

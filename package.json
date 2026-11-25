@@ -19,6 +19,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "check:assign-work-schema": "ts-node --transpile-only -r tsconfig-paths/register scripts/check-assign-work-schema.ts",
+    "repair:assign-work-schema": "ts-node --transpile-only -r tsconfig-paths/register scripts/repair-assign-work-schema.ts",
     "seed": "ts-node seed.ts",
     "seed:demo": "node scripts/seed-demo-data.js",
     "seed:attendance": "ts-node scripts/seed-today-attendance.ts",

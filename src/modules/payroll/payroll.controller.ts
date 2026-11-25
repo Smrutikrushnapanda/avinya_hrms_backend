@@ -126,6 +126,7 @@ export class PayrollController {
       );
     }
 
+    const { departmentId, designationId } = query as Record<string, unknown>;
     return this.payrollService.findAll({
       organizationId,
       month: query.month,
@@ -134,6 +135,9 @@ export class PayrollController {
       to: query.to,
       status: query.status,
       search: query.search,
+      departmentId: typeof departmentId === 'string' ? departmentId : undefined,
+      designationId:
+        typeof designationId === 'string' ? designationId : undefined,
       employeeId: query.employeeId,
       page: query.page ? parseInt(query.page, 10) : undefined,
       limit: query.limit ? parseInt(query.limit, 10) : undefined,

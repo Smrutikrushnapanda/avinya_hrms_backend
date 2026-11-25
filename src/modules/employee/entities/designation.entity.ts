@@ -4,7 +4,11 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Index,
 } from 'typeorm';
+import { Department } from './department.entity';
 
 @Entity('designations')
 export class Designation {
@@ -19,6 +23,17 @@ export class Designation {
 
   @Column({ name: 'organization_id' })
   organizationId: string;
+
+  @Index('IDX_designations_department_id')
+  @Column({ name: 'department_id', type: 'uuid', nullable: true })
+  departmentId: string | null;
+
+  @ManyToOne(() => Department, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'department_id',
+    foreignKeyConstraintName: 'FK_designations_department_id',
+  })
+  department: Department | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

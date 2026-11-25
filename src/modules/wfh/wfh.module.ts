@@ -13,6 +13,7 @@ import {
 } from './entities';
 import { MessageModule } from '../message/message.module';
 import { AuthCoreModule } from '../auth-core/auth-core.module';
+import { RequestEmailModule } from '../request-email/request-email.module';
 import { UserRole } from '../auth-core/entities/user-role.entity';
 import { Role } from '../auth-core/entities/role.entity';
 import { Employee } from '../employee/entities/employee.entity';
@@ -22,6 +23,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 
 @Module({
   imports: [
+    RequestEmailModule,
     TypeOrmModule.forFeature([
       WfhRequest,
       WfhApproval,

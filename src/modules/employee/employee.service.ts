@@ -1451,7 +1451,7 @@ export class EmployeeService implements OnModuleInit {
   // --- NEW: FIND MANAGERS ---
   async findManagers(organizationId: string) {
     try {
-      const cacheKey = `managers:active-login-v1:${organizationId}`;
+      const cacheKey = `managers:active-login-v2:${organizationId}`;
       const cached = await this.cacheManager.get(cacheKey);
       if (cached) {
         console.log('📦 Returning cached managers for org:', organizationId);
@@ -1465,7 +1465,7 @@ export class EmployeeService implements OnModuleInit {
           status: 'active',
           user: { isActive: true },
         },
-        relations: ['designation'],
+        relations: ['designation', 'department'],
         order: { firstName: 'ASC' },
       });
 

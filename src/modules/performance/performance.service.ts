@@ -127,7 +127,17 @@ export class PerformanceService {
         reportingTo: managerEmp.id,
         organizationId: orgId,
       }),
-      select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
+      select: [
+        'id',
+        'userId',
+        'firstName',
+        'middleName',
+        'lastName',
+        'workEmail',
+        'departmentId',
+        'designationId',
+      ],
+      relations: ['department', 'designation'],
       order: { firstName: 'ASC' },
     });
 
@@ -153,6 +163,12 @@ export class PerformanceService {
           firstName: member.firstName,
           lastName: member.lastName,
           workEmail: member.workEmail,
+          department: member.department
+            ? { id: member.department.id, name: member.department.name }
+            : null,
+          designation: member.designation
+            ? { id: member.designation.id, name: member.designation.name }
+            : null,
           selfReview: selfReview
             ? {
                 answers: selfReview.answers,
@@ -190,7 +206,17 @@ export class PerformanceService {
     const employees = (
       await this.employeeRepo.find({
         where: activeEmployeeWhere(whereClause),
-        select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
+        select: [
+          'id',
+          'userId',
+          'firstName',
+          'middleName',
+          'lastName',
+          'workEmail',
+          'departmentId',
+          'designationId',
+        ],
+        relations: ['department', 'designation'],
         order: { firstName: 'ASC' },
       })
     ).filter((emp) => emp.userId !== reviewerUserId);
@@ -217,6 +243,12 @@ export class PerformanceService {
           firstName: emp.firstName,
           lastName: emp.lastName,
           workEmail: emp.workEmail,
+          department: emp.department
+            ? { id: emp.department.id, name: emp.department.name }
+            : null,
+          designation: emp.designation
+            ? { id: emp.designation.id, name: emp.designation.name }
+            : null,
           selfReview: selfReview
             ? {
                 answers: selfReview.answers,
@@ -348,7 +380,17 @@ export class PerformanceService {
     const [employees, settings] = await Promise.all([
       this.employeeRepo.find({
         where: activeEmployeeWhere({ organizationId: orgId }),
-        select: ['id', 'userId', 'firstName', 'middleName', 'lastName', 'workEmail'],
+        select: [
+          'id',
+          'userId',
+          'firstName',
+          'middleName',
+          'lastName',
+          'workEmail',
+          'departmentId',
+          'designationId',
+        ],
+        relations: ['department', 'designation'],
         order: { firstName: 'ASC' },
       }),
       this.getSettings(orgId),
@@ -394,6 +436,12 @@ export class PerformanceService {
           firstName: emp.firstName,
           lastName: emp.lastName,
           workEmail: emp.workEmail,
+          department: emp.department
+            ? { id: emp.department.id, name: emp.department.name }
+            : null,
+          designation: emp.designation
+            ? { id: emp.designation.id, name: emp.designation.name }
+            : null,
           selfReview: selfReview
             ? {
                 rating: selfReview.overallRating,

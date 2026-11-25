@@ -4,6 +4,7 @@ import { LeaveController } from './leave.controller';
 import { LeaveService } from './leave.service';
 import { MessageModule } from '../message/message.module';
 import { AuthCoreModule } from '../auth-core/auth-core.module';
+import { RequestEmailModule } from '../request-email/request-email.module';
 
 import {
   Holiday,
@@ -20,6 +21,7 @@ import {
 
 @Module({
   imports: [
+    RequestEmailModule,
     TypeOrmModule.forFeature([
       LeaveType,
       LeavePolicy,

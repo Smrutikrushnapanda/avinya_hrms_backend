@@ -882,6 +882,10 @@ export class AttendanceController {
     @Query('search') search?: string,
     @Query('status') status?: Attendance['status'],
     @GetUser() actor?: User,
+    @Query('departmentId', new ParseUUIDPipe({ optional: true }))
+    departmentId?: string,
+    @Query('designationId', new ParseUUIDPipe({ optional: true }))
+    designationId?: string,
   ) {
     if (
       actor &&
@@ -897,6 +901,8 @@ export class AttendanceController {
       limit,
       search,
       status,
+      departmentId,
+      designationId,
     );
   }
 

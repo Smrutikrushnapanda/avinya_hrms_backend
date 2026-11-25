@@ -71,12 +71,14 @@ export class ProjectController {
     @GetUser() user: JwtPayload,
     @Query('search') search?: string,
     @Query('designationId') designationId?: string,
+    @Query('departmentId') departmentId?: string,
     @Query('limit') limit?: string,
   ) {
     const parsedLimit = limit ? Number(limit) : undefined;
     return this.service.getAllOrgEmployees(user.organizationId, user.userId, {
       search,
       designationId,
+      departmentId,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
     });
   }

@@ -34,12 +34,14 @@ import {
 import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
 import { User } from '../auth-core/entities/user.entity';
+import { EmailActor, RequestEmailService } from '../request-email/request-email.service';
+import { RequestEmailKind } from '../request-email/entities/request-email-template.entity';
 
 @ApiTags('WFH')
 @Controller('wfh')
 @UseGuards(JwtAuthGuard)
 export class WfhController {
-  constructor(private readonly wfhService: WfhService) {}
+  constructor(private readonly wfhService: WfhService, private readonly requestEmails: RequestEmailService) {}
 
   @Post('apply/:userId')
   @ApiOperation({ summary: 'Apply for work from home' })
@@ -49,8 +51,11 @@ export class WfhController {
   async applyForWfh(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: ApplyWfhDto,
+    @GetUser() actor: EmailActor,
   ) {
-    return this.wfhService.applyForWfh(userId, dto);
+    const prepared = await this.requestEmails.prepare(actor, RequestEmailKind.WFH, userId, dto, dto.emailDraft);
+    const request = await this.wfhService.applyForWfh(userId, dto);
+    return { ...request, emailDelivery: await this.requestEmails.queueAfterSuccess(request.id, prepared) };
   }
 
   @Post('approve/:requestId/:approverId')

@@ -112,11 +112,13 @@ export class OfficeTripController {
     @Query('dateTo') dateTo?: string,
     @Query('status') status?: string,
     @Query('tripType') tripType?: string,
+    @Query('designationId') designationId?: string,
   ) {
     this.assertSameOrg(actor, organizationId);
     return this.officeTripService.getAllTrips(organizationId, {
       employeeId,
       departmentId,
+      designationId,
       dateFrom,
       dateTo,
       status,

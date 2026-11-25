@@ -42,6 +42,7 @@ import { extractWorkPoints } from '../assign-work/work-points.util';
 
 type OrgEmployeeFilters = {
   search?: string;
+  departmentId?: string;
   designationId?: string;
   limit?: number;
 };
@@ -613,7 +614,7 @@ export class ProjectService implements OnModuleInit {
                 { id: m.userId, organizationId: project.organizationId },
               ]
             : [{ userId: m.userId }, { id: m.userId }],
-          relations: ['manager', 'designation', 'user'],
+          relations: ['manager', 'designation', 'department', 'user'],
         });
         if (!emp || emp.status !== 'active' || emp.user?.isActive !== true)
           return null;
@@ -629,6 +630,9 @@ export class ProjectService implements OnModuleInit {
           email: emp?.user?.email ?? m.user?.email ?? '',
           workEmail: emp?.workEmail ?? '',
           designation: emp?.designation?.name ?? null,
+          designationId: emp?.designationId ?? null,
+          departmentId: emp?.departmentId ?? null,
+          department: emp?.department?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
           managerName: emp?.manager
             ? getFullName(
@@ -1301,6 +1305,7 @@ export class ProjectService implements OnModuleInit {
   ) {
     const search = filters.search?.trim().toLowerCase();
     const designationId = filters.designationId?.trim();
+    const departmentId = filters.departmentId?.trim();
     const limit = Math.min(Math.max(filters.limit ?? 200, 1), 500);
 
     const employees = await this.employeeRepo
@@ -1321,6 +1326,10 @@ export class ProjectService implements OnModuleInit {
       .andWhere(
         designationId ? 'emp.designationId = :designationId' : '1 = 1',
         designationId ? { designationId } : {},
+      )
+      .andWhere(
+        departmentId ? 'emp.departmentId = :departmentId' : '1 = 1',
+        departmentId ? { departmentId } : {},
       )
       .andWhere(
         search
@@ -1359,6 +1368,7 @@ export class ProjectService implements OnModuleInit {
       email: tm.user?.email ?? '',
       workEmail: tm.workEmail ?? '',
       department: tm.department?.name ?? null,
+      departmentId: tm.departmentId ?? null,
       designationId: tm.designationId ?? null,
       designation: tm.designation?.name ?? null,
     }));

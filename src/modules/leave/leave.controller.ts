@@ -35,6 +35,8 @@ import { JwtAuthGuard } from '../auth-core/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth-core/guards/roles.guard';
 import { Roles } from '../auth-core/decorators/roles.decorator';
 import { GetUser } from '../auth-core/decorators/get-user.decorator';
+import { RequestEmailService } from '../request-email/request-email.service';
+import { RequestEmailKind } from '../request-email/entities/request-email-template.entity';
 
 type AuthActor = {
   userId?: string;
@@ -46,7 +48,7 @@ type AuthActor = {
 @Controller('leave')
 @UseGuards(JwtAuthGuard)
 export class LeaveController {
-  constructor(private readonly leaveService: LeaveService) {}
+  constructor(private readonly leaveService: LeaveService, private readonly requestEmails: RequestEmailService) {}
 
   private actorId(actor: AuthActor): string {
     return actor?.userId || actor?.id || '';
@@ -203,14 +205,17 @@ export class LeaveController {
     @Body() dto: ApplyLeaveDto,
     @GetUser() actor: AuthActor,
   ) {
-    return this.leaveService.applyForLeave(
-      this.resolveTargetUser(actor, userId),
+    const targetUserId = this.resolveTargetUser(actor, userId);
+    const prepared = await this.requestEmails.prepare(actor, RequestEmailKind.LEAVE, targetUserId, dto, dto.emailDraft);
+    const request = await this.leaveService.applyForLeave(
+      targetUserId,
       dto.leaveTypeId,
       dto.startDate,
       dto.endDate,
       dto.reason,
       dto.duration,
     );
+    return { ...request, emailDelivery: await this.requestEmails.queueAfterSuccess(request.id, prepared) };
   }
 
   // ─── Leave Approval ───

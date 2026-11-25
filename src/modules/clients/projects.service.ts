@@ -525,7 +525,7 @@ export class ProjectsService implements OnModuleInit {
           where: project.organizationId
             ? [{ userId: m.userId, organizationId: project.organizationId }]
             : [{ userId: m.userId }],
-          relations: ['manager', 'designation', 'user'],
+          relations: ['manager', 'designation', 'department', 'user'],
         });
         if (!emp || emp.status !== 'active' || emp.user?.isActive !== true)
           return null;
@@ -541,6 +541,9 @@ export class ProjectsService implements OnModuleInit {
           email: m.user?.email ?? '',
           workEmail: emp?.workEmail ?? '',
           designation: emp?.designation?.name ?? null,
+          designationId: emp?.designationId ?? null,
+          departmentId: emp?.departmentId ?? null,
+          department: emp?.department?.name ?? null,
           reportingTo: emp?.reportingTo ?? null,
           managerName: emp?.manager
             ? getFullName(

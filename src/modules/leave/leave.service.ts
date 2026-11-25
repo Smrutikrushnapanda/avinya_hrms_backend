@@ -1,3 +1,4 @@
+import { requestBusinessDays } from '../../shared/request-duration.util';
 import {
   Injectable,
   NotFoundException,
@@ -955,12 +956,18 @@ export class LeaveService {
 
     const employees = await this.employeeRepo
       .createQueryBuilder('employee')
+      .leftJoinAndSelect('employee.department', 'department')
+      .leftJoinAndSelect('employee.designation', 'designation')
       .where('employee.userId IN (:...userIds)', { userIds })
       .select([
         'employee.userId',
         'employee.firstName',
         'employee.middleName',
         'employee.lastName',
+        'department.id',
+        'department.name',
+        'designation.id',
+        'designation.name',
       ])
       .getMany();
 
@@ -973,6 +980,12 @@ export class LeaveService {
             firstName: e.firstName,
             middleName: e.middleName,
             lastName: e.lastName,
+            department: e.department
+              ? { id: e.department.id, name: e.department.name }
+              : null,
+            designation: e.designation
+              ? { id: e.designation.id, name: e.designation.name }
+              : null,
           },
         ]),
     );
@@ -984,6 +997,10 @@ export class LeaveService {
         user.firstName = resolved.firstName;
         user.middleName = resolved.middleName;
         user.lastName = resolved.lastName;
+        Object.assign(user, {
+          department: resolved.department,
+          designation: resolved.designation,
+        });
       }
     }
   }
@@ -1174,20 +1191,7 @@ export class LeaveService {
     startDateStr: string,
     endDateStr: string,
   ): number {
-    const startDate = new Date(startDateStr);
-    const endDate = new Date(endDateStr);
-    let count = 0;
-
-    for (
-      let d = new Date(startDate);
-      d <= endDate;
-      d.setDate(d.getDate() + 1)
-    ) {
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      if (!isWeekend) count++;
-    }
-
-    return count;
+    return requestBusinessDays(startDateStr, endDateStr);
   }
 
   // ─── Employee Leave Limits (Optional Admin-Set Limits) ───

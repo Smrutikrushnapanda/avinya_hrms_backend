@@ -263,6 +263,8 @@ export class PayrollService {
     employeeId?: string;
     status?: PayrollStatus | 'all';
     search?: string;
+    departmentId?: string;
+    designationId?: string;
     month?: string;
     year?: string;
     from?: string;
@@ -275,6 +277,8 @@ export class PayrollService {
       employeeId,
       status,
       search,
+      departmentId,
+      designationId,
       month,
       year,
       from,
@@ -290,6 +294,10 @@ export class PayrollService {
 
     if (employeeId)
       qb.andWhere('payroll.employeeId = :employeeId', { employeeId });
+    if (departmentId)
+      qb.andWhere('employee.departmentId = :departmentId', { departmentId });
+    if (designationId)
+      qb.andWhere('employee.designationId = :designationId', { designationId });
     if (status && status !== 'all')
       qb.andWhere('payroll.status = :status', { status });
 

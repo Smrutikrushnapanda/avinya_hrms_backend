@@ -34,14 +34,14 @@ describe('AssignWorkService — 24h pending-work reminder', () => {
     const firebaseService = {
       sendToTokens: jest.fn().mockResolvedValue({ invalidTokens: [] }),
     };
+    const taskQb = buildQueryBuilder(taskRows);
+    const issueQb = buildQueryBuilder(issueRows);
     const taskRepo = {
-      createQueryBuilder: jest.fn().mockReturnValue(buildQueryBuilder(taskRows)),
+      createQueryBuilder: jest.fn().mockReturnValue(taskQb),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const issueRepo = {
-      createQueryBuilder: jest
-        .fn()
-        .mockReturnValue(buildQueryBuilder(issueRows)),
+      createQueryBuilder: jest.fn().mockReturnValue(issueQb),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const employeeRepo = {
@@ -71,6 +71,8 @@ describe('AssignWorkService — 24h pending-work reminder', () => {
       service,
       taskRepo,
       issueRepo,
+      taskQb,
+      issueQb,
       messageService,
       firebaseService,
     };
@@ -173,8 +175,8 @@ describe('AssignWorkService — 24h pending-work reminder', () => {
     expect(issueRepo.update).not.toHaveBeenCalled();
   });
 
-  it('skips rows without an assignee, assigner or organization (data safety)', async () => {
-    const { service, messageService } = createService({
+  it('skips rows without an id, assignee, assigner or organization (data safety)', async () => {
+    const { service, messageService, taskRepo, issueRepo } = createService({
       taskRows: [
         {
           id: 'task-orphan',
@@ -183,13 +185,66 @@ describe('AssignWorkService — 24h pending-work reminder', () => {
           assigned_to_user_id: null,
           organization_id: ORG_ID,
         },
+        {
+          id: undefined,
+          title: 'Missing id row',
+          assigned_by_user_id: ASSIGNER_ID,
+          assigned_to_user_id: ASSIGNEE_ID,
+          organization_id: ORG_ID,
+        },
       ],
-      issueRows: [],
+      issueRows: [
+        {
+          id: '',
+          issue_title: 'Missing issue id row',
+          created_by_user_id: ASSIGNER_ID,
+          assignee_user_id: ASSIGNEE_ID,
+          organization_id: ORG_ID,
+        },
+      ],
     });
 
     const count = await service.remindPendingWork(NOW);
 
     expect(count).toBe(0);
     expect(messageService.createMessage).not.toHaveBeenCalled();
+    expect(taskRepo.update).not.toHaveBeenCalled();
+    expect(issueRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('aliases raw select columns explicitly for TypeORM getRawMany compatibility', async () => {
+    const { service, taskRepo, issueRepo, taskQb, issueQb } = createService({
+      taskRows: [
+        {
+          task_id: 'task-prefixed',
+          task_title: 'Prefixed task',
+          assigned_by_user_id: ASSIGNER_ID,
+          assigned_to_user_id: ASSIGNEE_ID,
+          organization_id: ORG_ID,
+        },
+      ],
+      issueRows: [
+        {
+          issue_id: 'issue-prefixed',
+          issue_title: 'Prefixed issue',
+          created_by_user_id: ASSIGNER_ID,
+          assignee_user_id: ASSIGNEE_ID,
+          organization_id: ORG_ID,
+        },
+      ],
+    });
+
+    const count = await service.remindPendingWork(NOW);
+
+    expect(count).toBe(2);
+    expect(taskQb.select).toHaveBeenCalledWith('task.id', 'id');
+    expect(taskQb.addSelect).toHaveBeenCalledWith('task.title', 'title');
+    expect(taskRepo.update).toHaveBeenCalledWith('task-prefixed', {
+      statusReminderSentAt: NOW,
+    });
+    expect(issueQb.select).toHaveBeenCalledWith('issue.id', 'id');
+    expect(issueRepo.update).toHaveBeenCalledWith('issue-prefixed', {
+      statusReminderSentAt: NOW,
+    });
   });
 });

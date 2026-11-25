@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Department } from './entities/department.entity';
 import { Employee } from './entities/employee.entity';
+import { Designation } from './entities/designation.entity';
 
 // Export the interface so it can be used in controller
 export interface DepartmentStatistics {
@@ -31,7 +36,7 @@ export class DepartmentService {
 
   async create(data: {
     name: string;
-    code: string;
+    code?: string;
     organizationId: string;
   }): Promise<Department> {
     const department = this.departmentRepository.create(data);
@@ -41,19 +46,38 @@ export class DepartmentService {
   async update(
     id: string,
     data: { name?: string; code?: string },
+    organizationId: string,
   ): Promise<Department> {
-    await this.departmentRepository.update(id, data);
     const department = await this.departmentRepository.findOne({
-      where: { id },
+      where: { id, organizationId },
     });
     if (!department) {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }
-    return department;
+    Object.assign(department, {
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.code !== undefined ? { code: data.code } : {}),
+    });
+    return this.departmentRepository.save(department);
   }
 
-  async remove(id: string): Promise<void> {
-    await this.departmentRepository.delete(id);
+  async remove(id: string, organizationId: string): Promise<void> {
+    const department = await this.departmentRepository.findOne({
+      where: { id, organizationId },
+    });
+    if (!department) throw new NotFoundException('Department not found');
+    const [hasDesignations, hasEmployees] = await Promise.all([
+      this.departmentRepository.manager
+        .getRepository(Designation)
+        .existsBy({ departmentId: id }),
+      this.employeeRepository.existsBy({ departmentId: id }),
+    ]);
+    if (hasDesignations || hasEmployees) {
+      throw new ConflictException(
+        'Department has designations or employees and cannot be deleted',
+      );
+    }
+    await this.departmentRepository.delete({ id, organizationId });
   }
 
   async getStatistics(organizationId: string): Promise<DepartmentStatistics[]> {

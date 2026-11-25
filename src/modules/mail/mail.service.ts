@@ -88,11 +88,16 @@ export class MailService {
         'BREVO_SMTP_HOST',
         'smtp-relay.brevo.com',
       ),
-      port: this.configService.get<number>('BREVO_SMTP_PORT', 587),
+      port: Number(this.configService.get<number>('BREVO_SMTP_PORT', 587)),
       secure: false,
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
       auth: {
         user: this.configService.get<string>('BREVO_SMTP_USER'),
-        pass: this.configService.get<string>('BREVO_SMTP_PASSWORD'),
+        pass:
+          this.configService.get<string>('BREVO_SMTP_PASSWORD') ||
+          this.configService.get<string>('BREVO_SMTP_PASS'),
       },
     });
   }
@@ -765,5 +770,35 @@ export class MailService {
     this.logger.log(
       `Email sent to ${Array.isArray(options.to) ? options.to.join(', ') : options.to}`,
     );
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  async sendRequestApplicationEmail(
+    recipients: string[],
+    subject: string,
+    body: string,
+    deliveryId: string,
+    replyTo?: string,
+  ): Promise<void> {
+    const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.6;color:#111827;white-space:pre-wrap;">${this.escapeHtml(body)}</div>`;
+    await this.send({
+      from: this.fromAddress,
+      to: recipients,
+      subject,
+      text: body,
+      html,
+      ...(replyTo ? { replyTo } : {}),
+      messageId: `<${deliveryId}@notifications.avinyahrms>`,
+      disableFileAccess: true,
+      disableUrlAccess: true,
+    });
   }
 }

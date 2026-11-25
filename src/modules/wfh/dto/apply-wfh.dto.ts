@@ -1,6 +1,7 @@
 import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { ApplicationEmailDto } from '../../request-email/dto/request-email.dto';
 
-export class ApplyWfhDto {
+export class ApplyWfhDto extends ApplicationEmailDto {
   @IsDateString()
   date: string;
 

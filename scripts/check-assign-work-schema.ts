@@ -18,13 +18,19 @@ async function main(): Promise<void> {
       `Assign Work schema target: database=${target[0].database} schema=${schema}`,
     );
     const missing: string[] = [];
-    for (const name of ['project_tasks', 'project_issues']) {
+    for (const name of [
+      'project_tasks',
+      'project_issues',
+      'users',
+      'client_projects',
+      'projects',
+    ]) {
       const table = await runner.getTable(`${schema}.${name}`);
       const metadata = dataSource.entityMetadatas.find(
         (entry) => entry.tableName === name,
       );
       if (!table || !metadata)
-        throw new Error('Required assignment table not found');
+        throw new Error(`Required assignment table not found: ${name}`);
       for (const column of metadata.columns) {
         const actual = table.findColumnByName(column.databaseName);
         if (!actual) missing.push(`${name}.${column.databaseName}`);
@@ -44,7 +50,7 @@ async function main(): Promise<void> {
     if (missing.length)
       throw new Error(`Missing columns: ${missing.join(', ')}`);
     console.log(
-      'Assign Work schema verified: both assignment entities and checklist columns match.',
+      'Assign Work schema verified: assignment entities, checklist columns and joined user/project tables match.',
     );
   } finally {
     await runner.release();

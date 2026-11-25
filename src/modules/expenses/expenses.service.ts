@@ -57,12 +57,20 @@ export class ExpensesService {
 
     const employees = await this.employeeRepo
       .createQueryBuilder('employee')
+      .leftJoinAndSelect('employee.department', 'department')
+      .leftJoinAndSelect('employee.designation', 'designation')
       .where('employee.userId IN (:...userIds)', { userIds })
       .select([
         'employee.userId',
         'employee.firstName',
         'employee.middleName',
         'employee.lastName',
+        'employee.departmentId',
+        'employee.designationId',
+        'department.id',
+        'department.name',
+        'designation.id',
+        'designation.name',
       ])
       .getMany();
 
@@ -75,6 +83,12 @@ export class ExpensesService {
             firstName: e.firstName,
             middleName: e.middleName,
             lastName: e.lastName,
+            department: e.department
+              ? { id: e.department.id, name: e.department.name }
+              : null,
+            designation: e.designation
+              ? { id: e.designation.id, name: e.designation.name }
+              : null,
           },
         ]),
     );
@@ -86,6 +100,10 @@ export class ExpensesService {
         user.firstName = resolved.firstName;
         user.middleName = resolved.middleName;
         user.lastName = resolved.lastName;
+        Object.assign(user, {
+          department: resolved.department,
+          designation: resolved.designation,
+        });
       }
     }
   }

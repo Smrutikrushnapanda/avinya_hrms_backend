@@ -1242,6 +1242,8 @@ export class AttendanceService {
     limit = 20,
     search?: string,
     status?: Attendance['status'] | 'all' | string,
+    departmentId?: string,
+    designationId?: string,
   ) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeLimit = Math.min(200, Math.max(1, Number(limit) || 20));
@@ -1262,6 +1264,11 @@ export class AttendanceService {
       ) // join employees table
       .where('att.organization_id = :organizationId', { organizationId })
       .andWhere('att.attendanceDate = :date', { date: normalizedDate });
+
+    if (departmentId)
+      query.andWhere('emp.department_id = :departmentId', { departmentId });
+    if (designationId)
+      query.andWhere('emp.designation_id = :designationId', { designationId });
 
     if (normalizedStatus && normalizedStatus !== 'all') {
       query.andWhere('att.status = :status', { status: normalizedStatus });

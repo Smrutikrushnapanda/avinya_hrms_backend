@@ -7,8 +7,9 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { ApplicationEmailDto } from '../../request-email/dto/request-email.dto';
 
-export class ApplyLeaveDto {
+export class ApplyLeaveDto extends ApplicationEmailDto {
   @IsNotEmpty()
   @IsString()
   leaveTypeId: string;

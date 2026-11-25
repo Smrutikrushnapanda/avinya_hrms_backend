@@ -19,6 +19,7 @@ import {
 export interface OfficeTripFilters {
   employeeId?: string;
   departmentId?: string;
+  designationId?: string;
   dateFrom?: string;
   dateTo?: string;
   status?: string;
@@ -159,9 +160,17 @@ export class OfficeTripService {
       });
     }
 
-    if (filters.departmentId) {
+    if (filters.departmentId || filters.designationId) {
       const employees = await this.employeeRepo.find({
-        where: { organizationId, departmentId: filters.departmentId },
+        where: {
+          organizationId,
+          ...(filters.departmentId
+            ? { departmentId: filters.departmentId }
+            : {}),
+          ...(filters.designationId
+            ? { designationId: filters.designationId }
+            : {}),
+        },
         select: ['userId'],
       });
       const userIds = employees.map((e) => e.userId);

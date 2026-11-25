@@ -226,6 +226,55 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
     }
   });
 
+  it('repairs missing external columns idempotently and restores personal lists without changing work', async () => {
+    const logs = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const before = await db.query<Record<string, unknown>[]>(
+      `SELECT * FROM "${schema}".project_tasks ORDER BY id`,
+    );
+    try {
+      await db.query(
+        `ALTER TABLE "${schema}".project_tasks DROP COLUMN external_assigner_name, DROP COLUMN assignment_date, DROP COLUMN assignment_remarks`,
+      );
+      const routes = [
+        'my',
+        'assigned-by-me',
+        'my?month=10&year=2026',
+        'assigned-by-me?month=10&year=2026',
+      ];
+      for (const route of routes) await get(route).expect(500);
+      for (let run = 0; run < 2; run++) {
+        const result = spawnSync('npm', ['run', 'repair:assign-work-schema'], {
+          cwd: path.resolve(__dirname, '../../..'),
+          env: {
+            ...process.env,
+            DATABASE_URL: databaseUrl,
+            DB_SCHEMA: schema,
+            DB_SSL: 'false',
+            NODE_ENV: 'production',
+            DB_SYNCHRONIZE: 'false',
+          },
+          encoding: 'utf8',
+          timeout: 45000,
+        });
+        expect({ status: result.status, stderr: result.stderr }).toEqual(
+          expect.objectContaining({ status: 0 }),
+        );
+        expect(result.stdout).toContain(
+          'Assign Work external assignment columns verified.',
+        );
+        if (run === 1) expect(result.stdout).not.toContain('Added ');
+      }
+      expect(
+        await db.query(`SELECT * FROM "${schema}".project_tasks ORDER BY id`),
+      ).toEqual(before);
+      for (const route of routes) await get(route).expect(200);
+    } finally {
+      logs.mockRestore();
+    }
+  }, 120000);
+
   it('creates paragraph and checklist work for both entity sources and multiple assignees', async () => {
     for (const source of ['client', 'internal']) {
       for (const description of ['Paragraph work', '- First\n- Second']) {

@@ -3,7 +3,9 @@
 /node_modules
 /build
 /docs
-/scripts
+/scripts/*
+!/scripts/check-assign-work-schema.ts
+!/scripts/repair-assign-work-schema.ts
 
 # Logs
 logs
