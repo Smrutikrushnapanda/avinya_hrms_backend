@@ -1,9 +1,11 @@
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
@@ -20,7 +22,8 @@ export class ApplyLeaveDto extends ApplicationEmailDto {
   @IsDateString()
   endDate: string;
 
-  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Matches(/\S/, { message: 'Leave reason is required.' })
   reason: string;
 
   @IsOptional()

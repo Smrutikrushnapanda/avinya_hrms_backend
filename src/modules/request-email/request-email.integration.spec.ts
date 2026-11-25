@@ -24,6 +24,8 @@ import { RequestEmailDelivery } from './entities/request-email-delivery.entity';
 import { SaveRequestEmailTemplateDto } from './dto/request-email.dto';
 import { Organization } from '../auth-core/entities/organization.entity';
 import { User } from '../auth-core/entities/user.entity';
+import { Role } from '../auth-core/entities/role.entity';
+import { UserRole } from '../auth-core/entities/user-role.entity';
 import { Employee } from '../employee/entities/employee.entity';
 import { Department } from '../employee/entities/department.entity';
 import { Designation } from '../employee/entities/designation.entity';
@@ -69,6 +71,7 @@ integration(
     const actor: EmailActor = { ...admin, roles: [{ roleName: 'EMPLOYEE' }] };
     const mail = {
       sendRequestApplicationEmail: jest.fn().mockResolvedValue(undefined),
+      sendLeaveStatus: jest.fn().mockResolvedValue(undefined),
     };
     const gateway = { emitToUser: jest.fn() };
     let leaveTypeId: string, foreignTypeId: string;
@@ -495,6 +498,17 @@ integration(
         .send({ ...leaveFields(), endDate: '2026-11-01' })
         .expect(400);
     });
+    it.each([undefined, '', ' \t\n ', 123])(
+      'rejects an invalid leave application reason %j before creating a request',
+      async (reason) => {
+        const before = await db.getRepository(LeaveRequest).count();
+        const result = await http('post', `/leave/apply/${userId}`, 'EMPLOYEE')
+          .send({ ...leaveFields(), reason })
+          .expect(400);
+        expect(result.body.message).toContain('Leave reason is required.');
+        expect(await db.getRepository(LeaveRequest).count()).toBe(before);
+      },
+    );
     it('rejects stale preview before creating a leave request', async () => {
       const preview = await service.preview(
         actor,
@@ -741,8 +755,9 @@ integration(
         .expect(200);
       expect((preview.body as { configured: boolean }).configured).toBe(false);
       const applied = await http('post', `/leave/apply/${userId}`, 'EMPLOYEE')
-        .send(leaveFields())
+        .send({ ...leaveFields(), reason: '  Personal appointment  ' })
         .expect(201);
+      expect(applied.body.reason).toBe('Personal appointment');
       expect(
         (
           applied.body as {
@@ -761,6 +776,50 @@ integration(
           ).id,
         }),
       ).toBeNull();
+    });
+    it('requires and saves a trimmed reason for an admin rejection', async () => {
+      const requests = db.getRepository(LeaveRequest);
+      const approvals = db.getRepository(LeaveApproval);
+      const { startDate, endDate, reason } = leaveFields();
+      const request = await requests.save({
+        user: { id: userId },
+        leaveType: { id: leaveTypeId },
+        startDate,
+        endDate,
+        reason,
+        numberOfDays: 3,
+      });
+      const approval = await approvals.save({
+        leaveRequest: request,
+        approver: { id: managerId },
+        level: 1,
+        status: 'PENDING',
+      });
+      const role = await db.getRepository(Role).save({ roleName: 'ADMIN' });
+      await db.getRepository(UserRole).save({ user: { id: managerId }, role });
+
+      const route = `/leave/approve/${request.id}/${managerId}`;
+      for (const remarks of [undefined, '', ' \t\n ']) {
+        const result = await http('post', route, 'ADMIN', org, managerId)
+          .send({ approve: false, remarks })
+          .expect(400);
+        expect(result.body.message).toContain('Rejection reason is required.');
+      }
+      expect(await requests.findOneByOrFail({ id: request.id })).toMatchObject({
+        status: 'PENDING',
+      });
+      await http('post', route, 'ADMIN', org, managerId)
+        .send({ approve: false, remarks: '  Coverage is unavailable.  ' })
+        .expect(201);
+      expect(await requests.findOneByOrFail({ id: request.id })).toMatchObject({
+        status: 'REJECTED',
+      });
+      expect(
+        await approvals.findOneByOrFail({ id: approval.id }),
+      ).toMatchObject({
+        status: 'REJECTED',
+        remarks: 'Coverage is unavailable.',
+      });
     });
     it('versions edits, invalidates previews and handles deleted selected templates', async () => {
       const preview = await service.preview(
