@@ -226,16 +226,23 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
     }
   });
 
-  it('repairs missing external columns idempotently and restores personal lists without changing work', async () => {
+  it('repairs missing columns and legacy project and checklist constraints without changing work', async () => {
     const logs = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
     const before = await db.query<Record<string, unknown>[]>(
       `SELECT * FROM "${schema}".project_tasks ORDER BY id`,
     );
+    const projectId = randomUUID();
     try {
+      await db.query(`UPDATE "${schema}".project_issues SET project_id = $1`, [
+        projectId,
+      ]);
       await db.query(
-        `ALTER TABLE "${schema}".project_tasks DROP COLUMN external_assigner_name, DROP COLUMN assignment_date, DROP COLUMN assignment_remarks`,
+        `ALTER TABLE "${schema}".project_issues ALTER COLUMN project_id SET NOT NULL`,
+      );
+      await db.query(
+        `ALTER TABLE "${schema}".project_tasks DROP COLUMN external_assigner_name, DROP COLUMN assignment_date, DROP COLUMN assignment_remarks, ALTER COLUMN completed_point_indexes SET DEFAULT '[]'::jsonb`,
       );
       const routes = [
         'my',
@@ -262,15 +269,43 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
           expect.objectContaining({ status: 0 }),
         );
         expect(result.stdout).toContain(
-          'Assign Work external assignment columns verified.',
+          'Assign Work external assignment, project and checklist columns verified.',
         );
-        if (run === 1) expect(result.stdout).not.toContain('Added ');
+        if (run === 0) {
+          expect(result.stdout).toContain(
+            'Repaired project_tasks.completed_point_indexes',
+          );
+          expect(result.stdout).toContain('Repaired project_issues.project_id');
+        } else {
+          expect(result.stdout).not.toMatch(/Added |Repaired /);
+        }
       }
+      const [checklistColumn] = await db.query<
+        { column_default: string | null }[]
+      >(
+        `SELECT column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'project_tasks' AND column_name = 'completed_point_indexes'`,
+        [schema],
+      );
+      expect(checklistColumn.column_default).toBeNull();
+      expect(
+        await db.query(
+          `SELECT DISTINCT project_id FROM "${schema}".project_issues`,
+        ),
+      ).toEqual([{ project_id: projectId }]);
       expect(
         await db.query(`SELECT * FROM "${schema}".project_tasks ORDER BY id`),
       ).toEqual(before);
       for (const route of routes) await get(route).expect(200);
+      const [projectColumn] = await db.query<{ is_nullable: string }[]>(
+        `SELECT is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'project_issues' AND column_name = 'project_id'`,
+        [schema],
+      );
+      expect(projectColumn.is_nullable).toBe('YES');
     } finally {
+      await db.query(
+        `ALTER TABLE "${schema}".project_issues ALTER COLUMN project_id DROP NOT NULL`,
+      );
+      await db.query(`UPDATE "${schema}".project_issues SET project_id = NULL`);
       logs.mockRestore();
     }
   }, 120000);
@@ -434,7 +469,10 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
     }
   });
   it('checks entity schema without applying changes or creating schema history', async () => {
-    const check = () =>
+    const [{ database }] = await db.query<{ database: string }[]>(
+      'SELECT current_database() AS database',
+    );
+    const check = (overrides: NodeJS.ProcessEnv = {}) =>
       spawnSync('npm', ['run', 'check:assign-work-schema'], {
         cwd: path.resolve(__dirname, '../../..'),
         env: {
@@ -444,6 +482,9 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
           DB_SSL: 'false',
           NODE_ENV: 'production',
           DB_SYNCHRONIZE: 'false',
+          HRMS_EXPECTED_DATABASE: database,
+          HRMS_EXPECTED_SCHEMA: schema,
+          ...overrides,
         },
         encoding: 'utf8',
         timeout: 45000,
@@ -454,7 +495,67 @@ integration('Assign Work PostgreSQL + JWT HTTP regression', () => {
         expect.objectContaining({ status: 0 }),
       );
       expect(result.stdout).toContain('Assign Work schema verified');
-      expect(result.stdout).toContain(`schema=${schema}`);
+      expect(result.stdout).toContain(`database=${database} schema=${schema}`);
+    }
+    await db.query(`CREATE DOMAIN "${schema}".uuid AS pg_catalog.uuid`);
+    try {
+      const result = check({
+        PGOPTIONS: `-c search_path=${schema},pg_catalog,public`,
+      });
+      expect({ status: result.status, stderr: result.stderr }).toEqual(
+        expect.objectContaining({ status: 0 }),
+      );
+      expect(result.stdout).toContain(`session_schema=${schema}`);
+    } finally {
+      await db.query(`DROP DOMAIN "${schema}".uuid`);
+    }
+    for (const overrides of [
+      { HRMS_EXPECTED_DATABASE: `${database}_other` },
+      { HRMS_EXPECTED_SCHEMA: `${schema}_other` },
+    ]) {
+      const result = check(overrides);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Unexpected schema target:');
+    }
+    for (const [table, column, change, restore, expected, found] of [
+      [
+        'project_tasks',
+        'external_assigner_name',
+        'TYPE varchar(100)',
+        'TYPE varchar(200)',
+        'expected type=character varying(200)',
+        'found type=character varying(100)',
+      ],
+      [
+        'client_projects',
+        'project_cost',
+        'TYPE numeric(13,2)',
+        'TYPE numeric(12,2)',
+        'expected type=numeric(12,2)',
+        'found type=numeric(13,2)',
+      ],
+      [
+        'project_issues',
+        'project_id',
+        'SET DEFAULT gen_random_uuid()',
+        'DROP DEFAULT',
+        'expected type=uuid, nullable=true, default=none',
+        'found type=uuid, nullable=true, default=set',
+      ],
+    ]) {
+      const alter = `ALTER TABLE "${schema}"."${table}" ALTER COLUMN "${column}"`;
+      await db.query(`${alter} ${change}`);
+      try {
+        const result = check();
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          `Unexpected column definition: ${table}.${column}`,
+        );
+        expect(result.stderr).toContain(expected);
+        expect(result.stderr).toContain(found);
+      } finally {
+        await db.query(`${alter} ${restore}`);
+      }
     }
     await db.query(
       `ALTER TABLE "${schema}".project_tasks DROP COLUMN external_assigner_name`,

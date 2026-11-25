@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "check:assign-work-schema": "ts-node --transpile-only -r tsconfig-paths/register scripts/check-assign-work-schema.ts",
     "repair:assign-work-schema": "ts-node --transpile-only -r tsconfig-paths/register scripts/repair-assign-work-schema.ts",
+    "repair:request-email-schema": "ts-node --transpile-only -r tsconfig-paths/register scripts/repair-request-email-schema.ts",
     "seed": "ts-node seed.ts",
     "seed:demo": "node scripts/seed-demo-data.js",
     "seed:attendance": "ts-node scripts/seed-today-attendance.ts",

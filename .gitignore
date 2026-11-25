@@ -6,6 +6,8 @@
 /scripts/*
 !/scripts/check-assign-work-schema.ts
 !/scripts/repair-assign-work-schema.ts
+!/scripts/repair-request-email-schema.ts
+!/scripts/verify-schema-target.ts
 
 # Logs
 logs

@@ -10,7 +10,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { readFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import * as path from 'path';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
@@ -121,6 +121,36 @@ integration(
       await db.initialize();
       await db.query(`CREATE SCHEMA "${schema}"`);
       await db.synchronize();
+      await db.query(
+        `DROP TABLE "${schema}".request_email_deliveries, "${schema}".request_email_templates`,
+      );
+      await db.query(`
+        ALTER TABLE "${schema}".employees DROP COLUMN education_certificate_url,
+          DROP COLUMN experience_letter_url, DROP COLUMN bank_proof_url;
+        ALTER TABLE "${schema}".designations DROP COLUMN department_id;
+      `);
+      for (let run = 0; run < 2; run++) {
+        const result = spawnSync(
+          'npm',
+          ['run', 'repair:request-email-schema'],
+          {
+            cwd: path.resolve(__dirname, '../../..'),
+            env: {
+              ...process.env,
+              DATABASE_URL: url,
+              DB_SCHEMA: schema,
+              DB_SSL: 'false',
+              NODE_ENV: 'production',
+              DB_SYNCHRONIZE: 'false',
+            },
+            encoding: 'utf8',
+            timeout: 25000,
+          },
+        );
+        expect({ status: result.status, stderr: result.stderr }).toEqual(
+          expect.objectContaining({ status: 0 }),
+        );
+      }
       await db.getRepository(Organization).save([
         { id: org, organizationName: 'Acme Test' },
         { id: otherOrg, organizationName: 'Other Tenant' },
@@ -262,16 +292,7 @@ integration(
       mail.sendRequestApplicationEmail.mockReset().mockResolvedValue(undefined);
     });
 
-    it('runs manual production SQL twice against old schema, preserving existing requests', async () => {
-      await db.query(
-        `DROP TABLE "${schema}".request_email_deliveries, "${schema}".request_email_templates CASCADE`,
-      );
-      const sql = readFileSync(
-        path.resolve(__dirname, '../../../sql/request-email-configuration.sql'),
-        'utf8',
-      ).replaceAll('public.', `"${schema}".`);
-      await db.query(sql);
-      await db.query(sql);
+    it('installs both email tables and loads configuration for both request types', async () => {
       const runner = db.createQueryRunner();
       try {
         for (const name of [
@@ -291,6 +312,13 @@ integration(
         }
       } finally {
         await runner.release();
+      }
+      for (const kind of [RequestEmailKind.LEAVE, RequestEmailKind.WFH]) {
+        const response = await http(
+          'get',
+          `/${kind}/email-configuration`,
+        ).expect(200);
+        expect(response.body.templates).toEqual([]);
       }
     });
     it('requires authentication and management role for configuration', async () => {

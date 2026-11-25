@@ -1,6 +1,11 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
+ALTER TABLE public.employees
+  ADD COLUMN IF NOT EXISTS education_certificate_url TEXT NULL,
+  ADD COLUMN IF NOT EXISTS experience_letter_url TEXT NULL,
+  ADD COLUMN IF NOT EXISTS bank_proof_url TEXT NULL;
+
 CREATE TABLE IF NOT EXISTS public.request_email_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL,

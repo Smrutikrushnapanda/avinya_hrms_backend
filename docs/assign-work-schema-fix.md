@@ -4,7 +4,9 @@ Assignment entities are source of truth. Backend does not import or discover fil
 
 Existing development configuration uses TypeORM entity synchronization. Production synchronization remains controlled by existing environment configuration; this compilation fix does not enable it or modify database records.
 
-`npm run check:assign-work-schema` is optional and read-only. It compares assignment table columns against entity metadata, including types, array flags, nullability and checklist defaults. It neither changes schema nor creates schema history.
+`npm run check:assign-work-schema` reads the PostgreSQL catalog in a read-only transaction. It compares types, lengths, precision, array types, nullability, and the absence of defaults on the external assignment, checklist, and issue project ID columns. Mismatch errors show the expected and actual definitions.
+
+The deployment sets `HRMS_EXPECTED_DATABASE=avinya_db` and `HRMS_EXPECTED_SCHEMA=public` for the schema commands. They verify the connected database and configured schema and log the session schema and PostgreSQL version.
 
 ```bash
 npm run build
@@ -20,7 +22,7 @@ NODE_ENV=production DB_SYNCHRONIZE=false npm run repair:assign-work-schema
 NODE_ENV=production DB_SYNCHRONIZE=false npm run check:assign-work-schema
 ```
 
-Repair adds only missing `external_assigner_name`, `assignment_date` and `assignment_remarks` columns to configured schema's `project_tasks`, using entity types and nullability. Existing columns must match entity definitions. Changes run in one transaction with a five-second lock timeout. Repeated runs preserve existing columns and work records. Deployment runs this targeted repair before read-only verification and backend restart. Full schema synchronization stays disabled.
+Repair adds missing external assignment columns to `project_tasks` and missing `completed_point_indexes` columns to `project_tasks` and `project_issues` in the configured schema. Existing scalar JSONB checklist columns are made nullable with no default, preserving all stored values. Columns with incompatible types require inspection. Changes run in one transaction with a five-second lock timeout. Deployment runs the targeted repair before read-only verification and backend restart. Full schema synchronization stays disabled.
 
 Checker also validates user and project tables selected by assignment joins.
 
