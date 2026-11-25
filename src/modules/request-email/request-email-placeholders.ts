@@ -44,9 +44,11 @@ export function renderEmailTemplate(
   value: string,
   context: Record<string, string>,
 ) {
-  return value.replace(
-    placeholderPattern,
-    (_match: string, key: string) =>
-      context[normalized(key)] ?? 'Not specified',
-  );
+  return value.replace(placeholderPattern, (_match: string, key: string) => {
+    const name = normalized(key);
+    const value = context[name] ?? 'Not specified';
+    return ['start_date', 'end_date', 'application_date'].includes(name)
+      ? value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
+      : value;
+  });
 }

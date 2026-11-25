@@ -39,7 +39,7 @@ describe('Application email validation and rendering', () => {
         employee_name: 'Alex',
         start_date: '2026-12-01',
       }),
-    ).toBe('Alex: 2026-12-01');
+    ).toBe('Alex: 01/12/2026');
   });
   it.each([
     '{{unknown}}',

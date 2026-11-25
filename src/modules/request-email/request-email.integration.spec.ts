@@ -353,16 +353,57 @@ integration(
           isDefault: false,
         });
         expect(alternate.id).not.toBe(saved.id);
+        const updated = await http(
+          'put',
+          `/${kind}/email-configuration/${alternate.id}`,
+        )
+          .send({
+            ...template(kind),
+            name: 'Alternate',
+            isDefault: false,
+            version: alternate.version,
+            recipients: [' hr@example.com ', ' payroll@example.com '],
+          })
+          .expect(200);
         if (kind === RequestEmailKind.LEAVE) leaveTemplate = saved;
         else wfhTemplate = saved;
         const list = await http('get', `/${kind}/email-configuration`).expect(
           200,
         );
+        const listed = (list.body as { templates: RequestEmailTemplate[] })
+          .templates;
+        expect(listed).toHaveLength(2);
         expect(
-          (list.body as { templates: RequestEmailTemplate[] }).templates,
-        ).toHaveLength(2);
+          listed.find((entry) => entry.id === saved.id)?.recipients,
+        ).toEqual(saved.recipients);
+        expect(listed.find((entry) => entry.id === alternate.id)).toMatchObject(
+          {
+            recipients: ['hr@example.com', 'payroll@example.com'],
+            version: updated.body.version,
+          },
+        );
       }
     });
+    it.each([RequestEmailKind.LEAVE, RequestEmailKind.WFH])(
+      'formats %s test email dates as day/month/year',
+      async (kind) => {
+        await http('post', `/${kind}/email-configuration/test`)
+          .send({
+            ...(kind === RequestEmailKind.LEAVE ? { leaveTypeId } : {}),
+            recipients: ['hr@example.com'],
+            subjectTemplate: 'Applied {{application_date}}',
+            bodyTemplate: '{{start_date}} to {{end_date}}',
+          })
+          .expect(200);
+        expect(mail.sendRequestApplicationEmail).toHaveBeenCalledWith(
+          ['hr@example.com'],
+          '[Test] Applied 25/11/2026',
+          '25/11/2026 to 25/11/2026',
+          expect.any(String),
+          'alex@example.com',
+        );
+      },
+    );
     it.each([
       ['recipients', []],
       ['recipients', ['bad']],
@@ -429,7 +470,7 @@ integration(
         subject: 'Leave: Alex Employee',
       });
       expect(preview.body).toBe(
-        'Alex Employee | EMP-1 | alex@example.com | Engineering | Developer | Annual | 2026-12-01 | 2026-12-03 | 3 | 3 days | Personal <literal> {{employee_name}} | Acme Test | 2026-11-25 | Morgan Manager',
+        'Alex Employee | EMP-1 | alex@example.com | Engineering | Developer | Annual | 01/12/2026 | 03/12/2026 | 3 | 3 days | Personal <literal> {{employee_name}} | Acme Test | 25/11/2026 | Morgan Manager',
       );
       const half = await service.preview(
         actor,
@@ -483,6 +524,8 @@ integration(
         const fields =
           kind === RequestEmailKind.LEAVE ? leaveFields() : wfhFields();
         const preview = await service.preview(actor, kind, userId, fields);
+        expect(preview.body).toContain('01/12/2026 | 03/12/2026');
+        expect(preview.body).toContain('25/11/2026');
         const applied = await http(
           'post',
           `/${kind}/apply/${userId}`,
